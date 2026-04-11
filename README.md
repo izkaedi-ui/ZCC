@@ -42,6 +42,17 @@ SELECT rc=0 err=none
 
 All operations return rc=0. No segfaults. The B-tree allocator, LALR(1) parser, memory allocator, and page cache all function correctly under ZCC-compiled code. Bugs fixed to reach this milestone include a full System V AMD64 `va_list` implementation, global struct initializer emission, negative array initializer constants, struct-by-value ABI, octal escape sequences, and `sizeof` on string literal arrays.
 
+### Lua 5.4.6 Compilation (In Progress)
+
+ZCC compiles Lua 5.4.6 (30,000 lines) to zero errors.
+The VM boots and loads the runtime. Current crash site:
+luaL_openlibs → luaL_requiref → lua_getfield → nil table.
+
+Fixes applied to reach this point:
+- Preprocessing script strips GCC #line directives, computed goto tables, _Float128 types
+- Multidimensional array stride corrected (ARRAY-001)
+- va_arg register ordering corrected (ABI-003)
+
 ### Metacompiler Chain
 
 ZCC can compile a working C compiler (`zcc-level4/tools/tinycc.c`) which itself emits correct x86-64 assembly:
@@ -277,6 +288,8 @@ ZCC's development produced a compiler bug corpus with ground-truth fixes, CWE cl
 | ABI-002 | Struct-by-value parameter passing (Token ABI) | CWE-704 | Critical |
 | CODEGEN-001 | cltq sign-extending pointer arithmetic results (8 sites) | CWE-704 | Critical |
 | CODEGEN-002 | Global struct initializer emitting 1-byte fields for all types | CWE-787 | Critical |
+| ARRAY-001 | Multidimensional array [N][M] parsed as [M][N], wrong stride — 22KB buffer overrun in Lua strcache | CWE-131 | Critical |
+| ABI-003 | va_arg register order inverted — addq should be subq for ZCC's downward register spill layout | CWE-704 | Critical |
 
 ## Source Statistics
 
