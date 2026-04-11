@@ -1,0 +1,5 @@
+c = open("compiler_passes.c").read()
+c = c.replace('fprintf(stderr, "[DIAG_INC] node->inc=%p kind=%d\\n", (void*)node->inc, node->inc ? node->inc->kind : -1);\n    ', '')
+c = c.replace('fprintf(stderr, "[DIAG_ASSIGN] lhs=%p rhs=%p\\n", (void*)node->lhs, (void*)node->rhs);\n    ', '')
+open("compiler_passes.c", "w").write(c)
+print("Diagnostics removed")

@@ -1,0 +1,224 @@
+[Phase 1] Lexical Array Bootstrap... OK
+[Phase 2] AST Topological Generation... OK
+[Phase 3] Native AST Constant Folding... OK
+[Phase 4] SystemV ABI X86-64 Codegen... OK
+; ZCC IR module  funcs=2
+
+; func callback -> ptr
+  const       i32     %t0  -  -  -  imm=0  ; line 69
+  store       i32     %stack_-40  %t0  -  -  ; line 69
+  label       -       -  -  -  .L120  ; line 69
+  load        i32     %t1  %stack_-40  -  -  ; line 69
+  addr        ptr     %t2  %stack_-16  -  -  ; line 69
+  load        i32     %t3  %stack_-16  -  -  ; line 69
+  lt          i32     %t4  %t1  %t3  -  ; line 69
+  br_if       -       -  %t4  -  .L121  ; line 69
+  addr        ptr     %t5  %stack_-24  -  -  ; line 70
+  load        ptr     %t6  %stack_-24  -  -  ; line 70
+  load        i32     %t7  %stack_-40  -  -  ; line 70
+  mul         i64     %t8  %t7  8  -  ; line 70
+  add         ptr     %t9  %t6  %t8  -  ; line 70
+  addr        ptr     %t10  %stack_-24  -  -  ; line 70
+  load        ptr     %t11  %stack_-24  -  -  ; line 70
+  load        i32     %t12  %stack_-40  -  -  ; line 70
+  mul         i64     %t13  %t12  8  -  ; line 70
+  add         ptr     %t14  %t11  %t13  -  ; line 70
+  const       ptr     %t15  -  -  -  imm=0  ; line 70
+  const_str   ptr     %t15  .L101  -  -  ; line 70
+  cast        ptr     %t16  %t15  -  -  ; line 70
+  addr        ptr     %t17  %stack_-32  -  -  ; line 70
+  load        ptr     %t18  %stack_-32  -  -  ; line 70
+  load        i32     %t19  %stack_-40  -  -  ; line 70
+  mul         i64     %t20  %t19  8  -  ; line 70
+  add         ptr     %t21  %t18  %t20  -  ; line 70
+  const       ptr     %t22  -  -  -  imm=0  ; line 70
+  const_str   ptr     %t22  .L100  -  -  ; line 70
+  arg         ptr     -  %t22  -  -  ; line 70
+  arg         ptr     -  %t21  -  -  ; line 70
+  arg         ptr     -  %t16  -  -  ; line 70
+  call        i32     %t23  -  -  printf  ; line 70
+  label       -       -  -  -  .L122  ; line 69
+  br          -       -  -  -  .L120  ; line 69
+  label       -       -  -  -  .L121  ; line 69
+  const       ptr     %t24  -  -  -  imm=0  ; line 72
+  const_str   ptr     %t24  .L102  -  -  ; line 72
+  arg         ptr     -  %t24  -  -  ; line 72
+  call        i32     %t25  -  -  printf  ; line 72
+  const       i32     %t26  -  -  -  imm=0  ; line 73
+  ret         i32     -  %t26  -  -  ; line 73
+; end callback  nodes=41
+
+; func main -> ptr
+  const       i32     %t0  -  -  -  imm=0  ; line 78
+  addr        ptr     %t1  %stack_-16  -  -  ; line 78
+  store       ptr     %t1  %t0  -  -  ; line 78
+  call        ptr     %t2  -  -  sqlite3_libversion  ; line 80
+  const       ptr     %t3  -  -  -  imm=0  ; line 80
+  const_str   ptr     %t3  .L103  -  -  ; line 80
+  arg         ptr     -  %t3  -  -  ; line 80
+  arg         ptr     -  %t2  -  -  ; line 80
+  call        i32     %t4  -  -  printf  ; line 80
+  addr        ptr     %t5  %stack_-8  -  -  ; line 82
+  const       ptr     %t6  -  -  -  imm=0  ; line 82
+  const_str   ptr     %t6  .L104  -  -  ; line 82
+  arg         ptr     -  %t6  -  -  ; line 82
+  arg         ptr     -  %t5  -  -  ; line 82
+  call        i32     %t7  -  -  sqlite3_open  ; line 82
+  store       i32     %stack_-24  %t7  -  -  ; line 82
+  load        i32     %t8  %stack_-24  -  -  ; line 83
+  const       ptr     %t9  -  -  -  imm=0  ; line 83
+  const_str   ptr     %t9  .L105  -  -  ; line 83
+  arg         ptr     -  %t9  -  -  ; line 83
+  arg         i32     -  %t8  -  -  ; line 83
+  call        i32     %t10  -  -  printf  ; line 83
+  load        i32     %t11  %stack_-24  -  -  ; line 84
+  br_if       -       -  %t11  -  .L126  ; line 84
+  addr        ptr     %t12  %stack_-8  -  -  ; line 84
+  load        ptr     %t13  %stack_-8  -  -  ; line 84
+  arg         ptr     -  %t13  -  -  ; line 84
+  call        ptr     %t14  -  -  sqlite3_errmsg  ; line 84
+  const       ptr     %t15  -  -  -  imm=0  ; line 84
+  const_str   ptr     %t15  .L106  -  -  ; line 84
+  arg         ptr     -  %t15  -  -  ; line 84
+  arg         ptr     -  %t14  -  -  ; line 84
+  call        i32     %t16  -  -  printf  ; line 84
+  const       i32     %t17  -  -  -  imm=1  ; line 84
+  ret         i32     -  %t17  -  -  ; line 84
+  label       -       -  -  -  .L126  ; line 84
+  addr        ptr     %t18  %stack_-16  -  -  ; line 86
+  const       i32     %t19  -  -  -  imm=0  ; line 86
+  addr        ptr     %t20  %callback  -  -  ; line 86
+  load        ptr     %t21  %callback  -  -  ; line 86
+  const       ptr     %t22  -  -  -  imm=0  ; line 86
+  const_str   ptr     %t22  .L107  -  -  ; line 86
+  addr        ptr     %t23  %stack_-8  -  -  ; line 86
+  load        ptr     %t24  %stack_-8  -  -  ; line 86
+  arg         ptr     -  %t24  -  -  ; line 86
+  arg         ptr     -  %t22  -  -  ; line 86
+  arg         ptr     -  %t21  -  -  ; line 86
+  arg         i32     -  %t19  -  -  ; line 86
+  arg         ptr     -  %t18  -  -  ; line 86
+  call        i32     %t25  -  -  sqlite3_exec  ; line 86
+  store       i32     %stack_-24  %t25  -  -  ; line 86
+  addr        ptr     %t26  %stack_-16  -  -  ; line 87
+  load        ptr     %t27  %stack_-16  -  -  ; line 87
+  addr        ptr     %t28  %stack_-16  -  -  ; line 87
+  load        ptr     %t29  %stack_-16  -  -  ; line 87
+  const       ptr     %t30  -  -  -  imm=0  ; line 87
+  const_str   ptr     %t30  .L109  -  -  ; line 87
+  cast        ptr     %t31  %t30  -  -  ; line 87
+  load        i32     %t32  %stack_-24  -  -  ; line 87
+  const       ptr     %t33  -  -  -  imm=0  ; line 87
+  const_str   ptr     %t33  .L108  -  -  ; line 87
+  arg         ptr     -  %t33  -  -  ; line 87
+  arg         i32     -  %t32  -  -  ; line 87
+  arg         ptr     -  %t31  -  -  ; line 87
+  call        i32     %t34  -  -  printf  ; line 87
+  addr        ptr     %t35  %stack_-16  -  -  ; line 89
+  const       i32     %t36  -  -  -  imm=0  ; line 89
+  addr        ptr     %t37  %callback  -  -  ; line 89
+  load        ptr     %t38  %callback  -  -  ; line 89
+  const       ptr     %t39  -  -  -  imm=0  ; line 89
+  const_str   ptr     %t39  .L110  -  -  ; line 89
+  addr        ptr     %t40  %stack_-8  -  -  ; line 89
+  load        ptr     %t41  %stack_-8  -  -  ; line 89
+  arg         ptr     -  %t41  -  -  ; line 89
+  arg         ptr     -  %t39  -  -  ; line 89
+  arg         ptr     -  %t38  -  -  ; line 89
+  arg         i32     -  %t36  -  -  ; line 89
+  arg         ptr     -  %t35  -  -  ; line 89
+  call        i32     %t42  -  -  sqlite3_exec  ; line 89
+  store       i32     %stack_-24  %t42  -  -  ; line 89
+  addr        ptr     %t43  %stack_-16  -  -  ; line 90
+  load        ptr     %t44  %stack_-16  -  -  ; line 90
+  addr        ptr     %t45  %stack_-16  -  -  ; line 90
+  load        ptr     %t46  %stack_-16  -  -  ; line 90
+  const       ptr     %t47  -  -  -  imm=0  ; line 90
+  const_str   ptr     %t47  .L112  -  -  ; line 90
+  cast        ptr     %t48  %t47  -  -  ; line 90
+  load        i32     %t49  %stack_-24  -  -  ; line 90
+  const       ptr     %t50  -  -  -  imm=0  ; line 90
+  const_str   ptr     %t50  .L111  -  -  ; line 90
+  arg         ptr     -  %t50  -  -  ; line 90
+  arg         i32     -  %t49  -  -  ; line 90
+  arg         ptr     -  %t48  -  -  ; line 90
+  call        i32     %t51  -  -  printf  ; line 90
+  addr        ptr     %t52  %stack_-16  -  -  ; line 92
+  const       i32     %t53  -  -  -  imm=0  ; line 92
+  addr        ptr     %t54  %callback  -  -  ; line 92
+  load        ptr     %t55  %callback  -  -  ; line 92
+  const       ptr     %t56  -  -  -  imm=0  ; line 92
+  const_str   ptr     %t56  .L113  -  -  ; line 92
+  addr        ptr     %t57  %stack_-8  -  -  ; line 92
+  load        ptr     %t58  %stack_-8  -  -  ; line 92
+  arg         ptr     -  %t58  -  -  ; line 92
+  arg         ptr     -  %t56  -  -  ; line 92
+  arg         ptr     -  %t55  -  -  ; line 92
+  arg         i32     -  %t53  -  -  ; line 92
+  arg         ptr     -  %t52  -  -  ; line 92
+  call        i32     %t59  -  -  sqlite3_exec  ; line 92
+  store       i32     %stack_-24  %t59  -  -  ; line 92
+  addr        ptr     %t60  %stack_-16  -  -  ; line 93
+  load        ptr     %t61  %stack_-16  -  -  ; line 93
+  addr        ptr     %t62  %stack_-16  -  -  ; line 93
+  load        ptr     %t63  %stack_-16  -  -  ; line 93
+  const       ptr     %t64  -  -  -  imm=0  ; line 93
+  const_str   ptr     %t64  .L115  -  -  ; line 93
+  cast        ptr     %t65  %t64  -  -  ; line 93
+  load        i32     %t66  %stack_-24  -  -  ; line 93
+  const       ptr     %t67  -  -  -  imm=0  ; line 93
+  const_str   ptr     %t67  .L114  -  -  ; line 93
+  arg         ptr     -  %t67  -  -  ; line 93
+  arg         i32     -  %t66  -  -  ; line 93
+  arg         ptr     -  %t65  -  -  ; line 93
+  call        i32     %t68  -  -  printf  ; line 93
+  addr        ptr     %t69  %stack_-16  -  -  ; line 95
+  const       i32     %t70  -  -  -  imm=0  ; line 95
+  addr        ptr     %t71  %callback  -  -  ; line 95
+  load        ptr     %t72  %callback  -  -  ; line 95
+  const       ptr     %t73  -  -  -  imm=0  ; line 95
+  const_str   ptr     %t73  .L116  -  -  ; line 95
+  addr        ptr     %t74  %stack_-8  -  -  ; line 95
+  load        ptr     %t75  %stack_-8  -  -  ; line 95
+  arg         ptr     -  %t75  -  -  ; line 95
+  arg         ptr     -  %t73  -  -  ; line 95
+  arg         ptr     -  %t72  -  -  ; line 95
+  arg         i32     -  %t70  -  -  ; line 95
+  arg         ptr     -  %t69  -  -  ; line 95
+  call        i32     %t76  -  -  sqlite3_exec  ; line 95
+  store       i32     %stack_-24  %t76  -  -  ; line 95
+  addr        ptr     %t77  %stack_-16  -  -  ; line 96
+  load        ptr     %t78  %stack_-16  -  -  ; line 96
+  addr        ptr     %t79  %stack_-16  -  -  ; line 96
+  load        ptr     %t80  %stack_-16  -  -  ; line 96
+  const       ptr     %t81  -  -  -  imm=0  ; line 96
+  const_str   ptr     %t81  .L118  -  -  ; line 96
+  cast        ptr     %t82  %t81  -  -  ; line 96
+  load        i32     %t83  %stack_-24  -  -  ; line 96
+  const       ptr     %t84  -  -  -  imm=0  ; line 96
+  const_str   ptr     %t84  .L117  -  -  ; line 96
+  arg         ptr     -  %t84  -  -  ; line 96
+  arg         i32     -  %t83  -  -  ; line 96
+  arg         ptr     -  %t/usr/bin/ld: /tmp/ccIpgie7.o: in function `main':
+(.text+0x126): undefined reference to `sqlite3_libversion'
+/usr/bin/ld: (.text+0x158): undefined reference to `sqlite3_open'
+/usr/bin/ld: (.text+0x19b): undefined reference to `sqlite3_errmsg'
+/usr/bin/ld: (.text+0x1f5): undefined reference to `sqlite3_exec'
+/usr/bin/ld: (.text+0x26e): undefined reference to `sqlite3_exec'
+/usr/bin/ld: (.text+0x2e7): undefined reference to `sqlite3_exec'
+/usr/bin/ld: (.text+0x360): undefined reference to `sqlite3_exec'
+/usr/bin/ld: (.text+0x3b7): undefined reference to `sqlite3_close'
+collect2: error: ld returned 1 exit status
+82  -  -  ; line 96
+  call        i32     %t85  -  -  printf  ; line 96
+  addr        ptr     %t86  %stack_-8  -  -  ; line 98
+  load        ptr     %t87  %stack_-8  -  -  ; line 98
+  arg         ptr     -  %t87  -  -  ; line 98
+  call        i32     %t88  -  -  sqlite3_close  ; line 98
+  const       i32     %t89  -  -  -  imm=0  ; line 99
+  ret         i32     -  %t89  -  -  ; line 99
+; end main  nodes=158
+
+[Phase 5] Native C Peephole Optimization... OK (35 elided)
+[Phase 6] GCC Assembly/Linker Binding... FAILED
+zcc: assembly/linking failed

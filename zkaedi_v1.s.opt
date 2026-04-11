@@ -1,0 +1,794 @@
+# ZCC asm begin
+    .section .note.GNU-stack,"",@progbits
+    .text
+    .globl evm_classifier_infer
+evm_classifier_infer:
+    pushq %rbp
+    movq %rsp, %rbp
+    subq $1936, %rsp
+    movq %rdi, -8(%rbp)
+# ZCC:AST codegen_stmt kind=31 line=19
+# ZCC:AST codegen_stmt kind=56 line=20
+# ZCC:AST codegen_stmt kind=56 line=21
+# ZCC:AST codegen_stmt kind=56 line=22
+# ZCC:AST codegen_stmt kind=56 line=23
+# ZCC:AST codegen_stmt kind=34 line=26
+# ZCC:AST codegen_stmt kind=5 line=26
+# ZCC:AST codegen_expr kind=5 line=26
+# ZCC:AST codegen_expr kind=1 line=26
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1880(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L101:
+# ZCC:AST codegen_expr kind=13 line=26
+# ZCC:AST codegen_expr kind=4 line=26
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=26
+    movq $128, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L102
+# ZCC:AST codegen_stmt kind=31 line=26
+# ZCC:AST codegen_stmt kind=5 line=27
+# ZCC:AST codegen_expr kind=5 line=27
+# ZCC:AST codegen_expr kind=8 line=27
+# ZCC:AST codegen_expr kind=28 line=27
+# ZCC:AST codegen_expr kind=6 line=27
+# ZCC:AST codegen_expr kind=4 line=27
+    leaq B1(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=27
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=27
+    movq $65536, %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    leaq -1896(%rbp), %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=34 line=28
+# ZCC:AST codegen_stmt kind=5 line=28
+# ZCC:AST codegen_expr kind=5 line=28
+# ZCC:AST codegen_expr kind=1 line=28
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1888(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L104:
+# ZCC:AST codegen_expr kind=13 line=28
+# ZCC:AST codegen_expr kind=4 line=28
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=28
+    movq $23, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L105
+# ZCC:AST codegen_stmt kind=31 line=28
+# ZCC:AST codegen_stmt kind=54 line=29
+# ZCC:AST codegen_expr kind=54 line=29
+    leaq -1896(%rbp), %rax
+    pushq %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=8 line=29
+# ZCC:AST codegen_expr kind=28 line=29
+# ZCC:AST codegen_expr kind=6 line=29
+# ZCC:AST codegen_expr kind=4 line=29
+    leaq -184(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=29
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=28 line=29
+# ZCC:AST codegen_expr kind=6 line=29
+# ZCC:AST codegen_expr kind=4 line=29
+    leaq W1(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=29
+# ZCC:AST codegen_expr kind=8 line=29
+# ZCC:AST codegen_expr kind=4 line=29
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=29
+    movq $23, %rax
+    popq %r11
+    imulq %r11, %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=29
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+.L106:
+# ZCC:AST codegen_expr kind=48 line=28
+    leaq -1888(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L104
+.L105:
+# ZCC:AST codegen_stmt kind=5 line=31
+# ZCC:AST codegen_expr kind=5 line=31
+# ZCC:AST codegen_expr kind=50 line=31
+# ZCC:AST codegen_expr kind=15 line=31
+# ZCC:AST codegen_expr kind=9 line=31
+# ZCC:AST codegen_expr kind=4 line=31
+    leaq -1896(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=31
+    movq $65536, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=31
+    movq $0, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setg %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L107
+# ZCC:AST codegen_expr kind=9 line=31
+# ZCC:AST codegen_expr kind=4 line=31
+    leaq -1896(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=31
+    movq $65536, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    jmp .L108
+.L107:
+# ZCC:AST codegen_expr kind=1 line=31
+    movq $0, %rax
+.L108:
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=31
+# ZCC:AST codegen_expr kind=4 line=31
+    leaq -1208(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=31
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    popq %r11
+    movq %r11, (%rax)
+    movq %r11, %rax
+.L103:
+# ZCC:AST codegen_expr kind=48 line=26
+    leaq -1880(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L101
+.L102:
+# ZCC:AST codegen_stmt kind=34 line=35
+# ZCC:AST codegen_stmt kind=5 line=35
+# ZCC:AST codegen_expr kind=5 line=35
+# ZCC:AST codegen_expr kind=1 line=35
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1880(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L109:
+# ZCC:AST codegen_expr kind=13 line=35
+# ZCC:AST codegen_expr kind=4 line=35
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=35
+    movq $64, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L110
+# ZCC:AST codegen_stmt kind=31 line=35
+# ZCC:AST codegen_stmt kind=5 line=36
+# ZCC:AST codegen_expr kind=5 line=36
+# ZCC:AST codegen_expr kind=8 line=36
+# ZCC:AST codegen_expr kind=28 line=36
+# ZCC:AST codegen_expr kind=6 line=36
+# ZCC:AST codegen_expr kind=4 line=36
+    leaq B2(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=36
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=36
+    movq $65536, %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    leaq -1904(%rbp), %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=34 line=37
+# ZCC:AST codegen_stmt kind=5 line=37
+# ZCC:AST codegen_expr kind=5 line=37
+# ZCC:AST codegen_expr kind=1 line=37
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1888(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L112:
+# ZCC:AST codegen_expr kind=13 line=37
+# ZCC:AST codegen_expr kind=4 line=37
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=37
+    movq $128, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L113
+# ZCC:AST codegen_stmt kind=31 line=37
+# ZCC:AST codegen_stmt kind=54 line=38
+# ZCC:AST codegen_expr kind=54 line=38
+    leaq -1904(%rbp), %rax
+    pushq %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=8 line=38
+# ZCC:AST codegen_expr kind=28 line=38
+# ZCC:AST codegen_expr kind=6 line=38
+# ZCC:AST codegen_expr kind=4 line=38
+    leaq -1208(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=38
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=28 line=38
+# ZCC:AST codegen_expr kind=6 line=38
+# ZCC:AST codegen_expr kind=4 line=38
+    leaq W2(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=38
+# ZCC:AST codegen_expr kind=8 line=38
+# ZCC:AST codegen_expr kind=4 line=38
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=38
+    movq $128, %rax
+    popq %r11
+    imulq %r11, %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=38
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+.L114:
+# ZCC:AST codegen_expr kind=48 line=37
+    leaq -1888(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L112
+.L113:
+# ZCC:AST codegen_stmt kind=5 line=40
+# ZCC:AST codegen_expr kind=5 line=40
+# ZCC:AST codegen_expr kind=50 line=40
+# ZCC:AST codegen_expr kind=15 line=40
+# ZCC:AST codegen_expr kind=9 line=40
+# ZCC:AST codegen_expr kind=4 line=40
+    leaq -1904(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=40
+    movq $65536, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=40
+    movq $0, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setg %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L115
+# ZCC:AST codegen_expr kind=9 line=40
+# ZCC:AST codegen_expr kind=4 line=40
+    leaq -1904(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=40
+    movq $65536, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    jmp .L116
+.L115:
+# ZCC:AST codegen_expr kind=1 line=40
+    movq $0, %rax
+.L116:
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=40
+# ZCC:AST codegen_expr kind=4 line=40
+    leaq -1720(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=40
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    popq %r11
+    movq %r11, (%rax)
+    movq %r11, %rax
+.L111:
+# ZCC:AST codegen_expr kind=48 line=35
+    leaq -1880(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L109
+.L110:
+# ZCC:AST codegen_stmt kind=5 line=44
+# ZCC:AST codegen_expr kind=5 line=44
+# ZCC:AST codegen_expr kind=26 line=44
+# ZCC:AST codegen_expr kind=1 line=44
+    movq $999999999, %rax
+    negq %rax
+    movq %rax, %r11
+    leaq -1912(%rbp), %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=5 line=45
+# ZCC:AST codegen_expr kind=5 line=45
+# ZCC:AST codegen_expr kind=1 line=45
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1920(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=34 line=47
+# ZCC:AST codegen_stmt kind=5 line=47
+# ZCC:AST codegen_expr kind=5 line=47
+# ZCC:AST codegen_expr kind=1 line=47
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1880(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L117:
+# ZCC:AST codegen_expr kind=13 line=47
+# ZCC:AST codegen_expr kind=4 line=47
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=47
+    movq $19, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L118
+# ZCC:AST codegen_stmt kind=31 line=47
+# ZCC:AST codegen_stmt kind=5 line=48
+# ZCC:AST codegen_expr kind=5 line=48
+# ZCC:AST codegen_expr kind=8 line=48
+# ZCC:AST codegen_expr kind=28 line=48
+# ZCC:AST codegen_expr kind=6 line=48
+# ZCC:AST codegen_expr kind=4 line=48
+    leaq B3(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=48
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=48
+    movq $65536, %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    leaq -1928(%rbp), %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=34 line=49
+# ZCC:AST codegen_stmt kind=5 line=49
+# ZCC:AST codegen_expr kind=5 line=49
+# ZCC:AST codegen_expr kind=1 line=49
+    movq $0, %rax
+    movq %rax, %r11
+    leaq -1888(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L120:
+# ZCC:AST codegen_expr kind=13 line=49
+# ZCC:AST codegen_expr kind=4 line=49
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=49
+    movq $64, %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setl %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L121
+# ZCC:AST codegen_stmt kind=31 line=49
+# ZCC:AST codegen_stmt kind=54 line=50
+# ZCC:AST codegen_expr kind=54 line=50
+    leaq -1928(%rbp), %rax
+    pushq %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=8 line=50
+# ZCC:AST codegen_expr kind=28 line=50
+# ZCC:AST codegen_expr kind=6 line=50
+# ZCC:AST codegen_expr kind=4 line=50
+    leaq -1720(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=50
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=28 line=50
+# ZCC:AST codegen_expr kind=6 line=50
+# ZCC:AST codegen_expr kind=4 line=50
+    leaq W3(%rip), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=50
+# ZCC:AST codegen_expr kind=8 line=50
+# ZCC:AST codegen_expr kind=4 line=50
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=50
+    movq $64, %rax
+    popq %r11
+    imulq %r11, %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=50
+    leaq -1888(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    popq %r11
+    imulq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+.L122:
+# ZCC:AST codegen_expr kind=48 line=49
+    leaq -1888(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L120
+.L121:
+# ZCC:AST codegen_stmt kind=5 line=52
+# ZCC:AST codegen_expr kind=5 line=52
+# ZCC:AST codegen_expr kind=9 line=52
+# ZCC:AST codegen_expr kind=4 line=52
+    leaq -1928(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=52
+    movq $65536, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    pushq %rax
+# ZCC:AST codegen_expr kind=6 line=52
+# ZCC:AST codegen_expr kind=4 line=52
+    leaq -1872(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=52
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    popq %r11
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=32 line=53
+# ZCC:AST codegen_expr kind=15 line=53
+# ZCC:AST codegen_expr kind=28 line=53
+# ZCC:AST codegen_expr kind=6 line=53
+# ZCC:AST codegen_expr kind=4 line=53
+    leaq -1872(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=53
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=53
+    leaq -1912(%rbp), %rax
+    movq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    cmpq %r11, %rax
+    setg %al
+    movzbl %al, %eax
+    cmpq $0, %rax
+    je .L123
+# ZCC:AST codegen_stmt kind=31 line=53
+# ZCC:AST codegen_stmt kind=5 line=54
+# ZCC:AST codegen_expr kind=5 line=54
+# ZCC:AST codegen_expr kind=28 line=54
+# ZCC:AST codegen_expr kind=6 line=54
+# ZCC:AST codegen_expr kind=4 line=54
+    leaq -1872(%rbp), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=54
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    imulq $8, %r11
+    addq %r11, %rax
+    movq (%rax), %rax
+    movq %rax, %r11
+    leaq -1912(%rbp), %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=5 line=55
+# ZCC:AST codegen_expr kind=5 line=55
+# ZCC:AST codegen_expr kind=4 line=55
+    leaq -1880(%rbp), %rax
+    movslq (%rax), %rax
+    movq %rax, %r11
+    leaq -1920(%rbp), %rax
+    movl %r11d, (%rax)
+    movq %r11, %rax
+.L123:
+.L119:
+# ZCC:AST codegen_expr kind=48 line=47
+    leaq -1880(%rbp), %rax
+    pushq %rax
+    movslq (%rax), %rax
+    pushq %rax
+    addq $1, %rax
+    movq %rax, %r11
+    popq %rdx
+    popq %rax
+    movl %r11d, (%rax)
+    movq %rdx, %rax
+    jmp .L117
+.L118:
+# ZCC:AST codegen_stmt kind=30 line=60
+# ZCC:AST codegen_expr kind=4 line=60
+    leaq -1920(%rbp), %rax
+    movslq (%rax), %rax
+    jmp .Lfunc_end_100
+.Lfunc_end_100:
+    movq %rbp, %rsp
+    popq %rbp
+    ret
+    .text
+    .globl zkaedi_mev_scorer_fixed_init
+zkaedi_mev_scorer_fixed_init:
+    pushq %rbp
+    movq %rsp, %rbp
+    subq $256, %rsp
+    movq %rdi, -8(%rbp)
+# ZCC:AST codegen_stmt kind=31 line=82
+# ZCC:AST codegen_stmt kind=5 line=83
+# ZCC:AST codegen_expr kind=5 line=83
+# ZCC:AST codegen_expr kind=1 line=83
+    movq $0, %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=83
+    leaq -8(%rbp), %rax
+    movq (%rax), %rax
+    addq $80, %rax
+    popq %r11
+    movq %r11, (%rax)
+    movq %r11, %rax
+.Lfunc_end_124:
+    movq %rbp, %rsp
+    popq %rbp
+    ret
+    .text
+    .globl zkaedi_mev_score_tx_fixed
+zkaedi_mev_score_tx_fixed:
+    pushq %rbp
+    movq %rsp, %rbp
+    subq $256, %rsp
+    movq %rdi, -8(%rbp)
+    movq %rsi, -16(%rbp)
+    movq %rdx, -24(%rbp)
+# ZCC:AST codegen_stmt kind=31 line=86
+# ZCC:AST codegen_stmt kind=54 line=87
+# ZCC:AST codegen_expr kind=54 line=87
+# ZCC:AST codegen_expr kind=4 line=87
+    leaq -8(%rbp), %rax
+    movq (%rax), %rax
+    addq $80, %rax
+    pushq %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=87
+    movq $1, %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    movq %rax, %r11
+    popq %rax
+    movq %r11, (%rax)
+    movq %r11, %rax
+# ZCC:AST codegen_stmt kind=30 line=90
+# ZCC:AST codegen_expr kind=9 line=90
+# ZCC:AST codegen_expr kind=6 line=90
+# ZCC:AST codegen_expr kind=4 line=90
+    leaq -16(%rbp), %rax
+    movq (%rax), %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=4 line=90
+    leaq -24(%rbp), %rax
+    movq (%rax), %rax
+    movq %rax, %r11
+    popq %rax
+    addq %r11, %rax
+    pushq %rax
+# ZCC:AST codegen_expr kind=1 line=90
+    movq $1000, %rax
+    movq %rax, %r11
+    popq %rax
+    cqo
+    idivq %r11
+    jmp .Lfunc_end_125
+.Lfunc_end_125:
+    movq %rbp, %rsp
+    popq %rbp
+    ret

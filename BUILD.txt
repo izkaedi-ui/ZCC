@@ -1,0 +1,11 @@
+﻿# Build zcc on Linux
+
+Minimal (bootstrap compiler only):
+  gcc -O0 -w -fno-asynchronous-unwind-tables -o zcc zcc.c
+
+Full (with IR passes / ZCC_IR_BRIDGE):
+  gcc -O0 -w -fno-asynchronous-unwind-tables -o zcc zcc.c compiler_passes.c -lm
+
+Then compile a C file:
+  ./zcc yourfile.c -o yourfile.s
+  gcc -o yourfile yourfile.s -lm

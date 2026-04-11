@@ -1,0 +1,79 @@
+[Phase 1] Lexical Array Bootstrap... OK
+[Phase 2] AST Topological Generation... FIELD: pParse
+FIELD: xExprCallback
+FIELD: xSelectCallback
+FIELD: xSelectCallback2
+FIELD: walkerDepth
+FIELD: eCode
+FIELD: mWFlags
+FIELD: u
+DEBUG: Parsed Walker with 8 fields (Type=0x643a28542970, fields=0x643a28ac14c0)
+FIELD: stateno
+FIELD: major
+FIELD: minor
+DEBUG: Parsed yyStackEntry with 3 fields (Type=0x643b696257b0, fields=0x643b69625888)
+FIELD: yytos
+FIELD: pParse
+FIELD: yystack
+FIELD: yystackEnd
+DEBUG: Parsed yyParser with 4 fields (Type=0x643b69625b90, fields=0x643b69625d40)
+DEBUG: scope_add('yyParser') with type kind=16 tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b69626ce8, sym->type=0x643b69626c10, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b696270c0, sym->type=0x643b69626fe8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'pParser'. sym=0x643b6d624e20, sym->type=0x643b6c627490, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'pParser'. sym=0x643b6d624e20, sym->type=0x643b6c627490, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'pParser'. sym=0x643b6d626548, sym->type=0x643b6d626470, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'pParser'. sym=0x643b6d626548, sym->type=0x643b6d626470, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'pParser'. sym=0x643b6d626548, sym->type=0x643b6d626470, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e626310, sym->type=0x643b6e626238, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e626310, sym->type=0x643b6e626238, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e626310, sym->type=0x643b6e626238, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e626310, sym->type=0x643b6e626238, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e626310, sym->type=0x643b6e626238, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b6e6274a8, sym->type=0x643b6e6273d0, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b70625318, sym->type=0x643b70625240, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b70625318, sym->type=0x643b70625240, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d625828, sym->type=0x643b7d625750, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d625828, sym->type=0x643b7d625750, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d734038, sym->type=0x643b7d733f60, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d734038, sym->type=0x643b7d733f60, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_primary lookup 'yypParser'. sym=0x643b7d7978a0, sym->type=0x643b7d7977c8, base=0x643b69625b90, base_tag='yyParser'
+DEBUG: parse_type lookup 'yyParser'. sym=0x643b69626228, sym->type=0x643b69625b90, tag='yyParser', kind=16
+OK
+[Phase 3] Native AST Constant Folding... OK
+[Phase 4] SystemV ABI X86-64 Codegen... OK

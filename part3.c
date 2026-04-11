@@ -1156,6 +1156,119 @@ Node *parse_unary(Compiler *cc) {
             cast_type = parse_type(cc);
             cast_type = parse_declarator(cc, cast_type, dummy);
             expect(cc, TK_RPAREN);
+            if (cc->tk == TK_LBRACE) {
+                Symbol *sym;
+                char tmp_name[32];
+                sprintf(tmp_name, ".L_comp_%d", cc->label_count++);
+                sym = scope_add_local(cc, tmp_name, cast_type);
+
+                Node *var_n_final = node_new(cc, ND_VAR, line);
+                strncpy(var_n_final->name, tmp_name, MAX_IDENT - 1);
+                var_n_final->sym = sym;
+                var_n_final->type = cast_type;
+
+                Node *expr = 0;
+                next_token(cc); /* skip { */
+
+                if (cast_type->kind == TY_STRUCT) {
+                    StructField *sf = cast_type->fields;
+                    while (cc->tk != TK_RBRACE && cc->tk != TK_EOF && sf) {
+                        Node *var_n = node_new(cc, ND_VAR, line);
+                        strncpy(var_n->name, tmp_name, MAX_IDENT - 1);
+                        var_n->sym = sym;
+                        var_n->type = cast_type;
+
+                        Node *mem_n = node_new(cc, ND_MEMBER, line);
+                        mem_n->lhs = var_n;
+                        strncpy(mem_n->member_name, sf->name, MAX_IDENT - 1);
+                        mem_n->member_offset = sf->offset;
+                        mem_n->type = sf->type;
+                        mem_n->member_size = type_size(sf->type);
+
+                        Node *asgn_v = parse_assign(cc);
+                        Node *asgn_n = node_new(cc, ND_ASSIGN, line);
+                        asgn_n->lhs = mem_n;
+                        asgn_n->rhs = asgn_v;
+                        asgn_n->type = mem_n->type;
+
+                        if (expr) {
+                            Node *cma = node_new(cc, ND_COMMA_EXPR, line);
+                            cma->lhs = expr;
+                            cma->rhs = asgn_n;
+                            cma->type = asgn_n->type;
+                            expr = cma;
+                        } else {
+                            expr = asgn_n;
+                        }
+
+                        sf = sf->next;
+                        if (cc->tk == TK_COMMA) next_token(cc);
+                    }
+                } else if (cast_type->kind == TY_ARRAY) {
+                    int idx = 0;
+                    while (cc->tk != TK_RBRACE && cc->tk != TK_EOF) {
+                        Node *var_n = node_new(cc, ND_VAR, line);
+                        strncpy(var_n->name, tmp_name, MAX_IDENT - 1);
+                        var_n->sym = sym;
+                        var_n->type = cast_type;
+
+                        Node *add_n = node_new(cc, ND_ADD, line);
+                        add_n->lhs = var_n;
+                        add_n->rhs = node_num(cc, (long long)idx, line);
+                        add_n->type = cast_type;
+
+                        Node *deref_n = node_new(cc, ND_DEREF, line);
+                        deref_n->lhs = add_n;
+                        deref_n->type = cast_type->base;
+
+                        Node *asgn_v = parse_assign(cc);
+                        Node *asgn_n = node_new(cc, ND_ASSIGN, line);
+                        asgn_n->lhs = deref_n;
+                        asgn_n->rhs = asgn_v;
+                        asgn_n->type = cast_type->base;
+
+                        if (expr) {
+                            Node *cma = node_new(cc, ND_COMMA_EXPR, line);
+                            cma->lhs = expr;
+                            cma->rhs = asgn_n;
+                            cma->type = asgn_n->type;
+                            expr = cma;
+                        } else {
+                            expr = asgn_n;
+                        }
+
+                        idx++;
+                        if (cc->tk == TK_COMMA) next_token(cc);
+                    }
+                } else {
+                    Node *var_n = node_new(cc, ND_VAR, line);
+                    strncpy(var_n->name, tmp_name, MAX_IDENT - 1);
+                    var_n->sym = sym;
+                    var_n->type = cast_type;
+
+                    Node *asgn_v = parse_assign(cc);
+                    Node *asgn_n = node_new(cc, ND_ASSIGN, line);
+                    asgn_n->lhs = var_n;
+                    asgn_n->rhs = asgn_v;
+                    asgn_n->type = cast_type;
+                    expr = asgn_n;
+                    if (cc->tk == TK_COMMA) next_token(cc);
+                }
+
+                while (cc->tk != TK_RBRACE && cc->tk != TK_EOF) next_token(cc);
+                expect(cc, TK_RBRACE);
+
+                if (!expr) expr = var_n_final;
+                else {
+                    Node *cma = node_new(cc, ND_COMMA_EXPR, line);
+                    cma->lhs = expr;
+                    cma->rhs = var_n_final;
+                    cma->type = cast_type;
+                    expr = cma;
+                }
+                return expr;
+            }
+
             n = node_new(cc, ND_CAST, line);
             n->lhs = parse_unary(cc);
             n->type = cast_type;

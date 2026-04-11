@@ -1,0 +1,25 @@
+#include <stdio.h>
+unsigned int checksum = 0;
+void update(int v) { checksum = checksum * 1000003 ^ (unsigned int)v; }
+void f0(void) {
+    int v0 = -11;
+    int v1 = 0;
+    v1 = ~v1;
+    v0 = ~v0;
+    v0 = v1 >> 3;
+    v0 = (v0 <= v1);
+    v0 = v0 - v1;
+    v1 = (v0 <= v1);
+    v0 = v1 >> 1;
+    v1 = (v0 <= v0);
+    v0 = ~v0;
+    v1 = ~v0;
+    v0 = v0 ^ v1;
+    update(v0);
+    update(v1);
+}
+int main(void) {
+    f0();
+    printf("CHECKSUM=%u\n", checksum);
+    return 0;
+}

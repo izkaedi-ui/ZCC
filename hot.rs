@@ -1,0 +1,1 @@
+def critical_loop(): pass

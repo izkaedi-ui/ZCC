@@ -1,0 +1,25 @@
+{
+  "generated_by": "ZKAEDI PRIME Checkpoint Inspector v2",
+  "timestamp": "2026-03-29T10:22:52Z",
+  "checkpoints": [
+    {
+      "path": "B_CATALYZE_seed0.pt",
+      "size_mb": 269.480773,
+      "sha256_short": "7b87887f3dd4b16c",
+      "top_level_keys": [
+        "model",
+        "optimizer",
+        "scheduler",
+        "log"
+      ],
+      "total_params": 11229752,
+      "total_layers": 122,
+      "fusion_method": "unknown",
+      "fusion_sources": 0,
+      "training_meta": {
+        "optimizer": "{'state': {0: {'noise_buf': tensor([[[[ 0.0126, -0.4483,  0.",
+        "log.seed": 0.0
+      }
+    }
+  ]
+}

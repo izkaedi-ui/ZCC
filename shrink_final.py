@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+import re
+path = "/mnt/h/__DOWNLOADS/selforglinux/part4.c"
+src = open(path).read()
+src = re.sub(
+    r'static const char \*blacklist\[\] = \{[^}]+\};',
+    'static const char *blacklist[] = {\n'
+    '        NULL};',
+    src)
+open(path, 'w').write(src)
+print("OK: blacklist EMPTY — all functions go through IR")

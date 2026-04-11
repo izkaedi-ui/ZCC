@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hf-mcp-server": {
+      "url": "https://zkaedi-zkaedi-prime-mcp.hf.space/gradio_api/mcp/",
+      "headers": {}
+    }
+  }
+}

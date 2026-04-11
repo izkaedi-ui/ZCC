@@ -1,0 +1,291 @@
+
+<style>
+*{margin:0;box-sizing:border-box}
+.w{padding:1rem 0;font-family:var(--font-sans)}
+canvas{width:100%;display:block;border-radius:var(--border-radius-lg)}
+.row{display:flex;gap:12px;margin-top:10px;flex-wrap:wrap}
+.card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 14px;flex:1;min-width:120px}
+.card .lb{font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em}
+.card .vl{font-size:18px;font-weight:500;color:var(--color-text-primary);margin-top:2px}
+.card .vl.bad{color:#FF0080}
+.card .vl.ok{color:#00E5FF}
+.card .vl.warn{color:#39FF14}
+.info{margin-top:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 16px;font-size:13px;color:var(--color-text-secondary);line-height:1.7;min-height:50px}
+.info strong{color:var(--color-text-primary);font-weight:500}
+.ctrl{display:flex;gap:14px;margin-top:10px;align-items:center;flex-wrap:wrap}
+.ctrl label{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:5px}
+.ctrl span{font-size:12px;font-weight:500;min-width:24px;color:var(--color-text-primary)}
+</style>
+<div class="w">
+<canvas id="cv" height="520"></canvas>
+<div class="ctrl">
+<label>η <input type="range" id="rEta" min="5" max="95" value="58" step="1"><span id="oEta">0.58</span></label>
+<label>γ <input type="range" id="rGam" min="5" max="95" value="50" step="1"><span id="oGam">0.50</span></label>
+<label>Stage <input type="range" id="rStg" min="0" max="3" value="0" step="1"><span id="oStg">0</span></label>
+<label><input type="checkbox" id="autoC" checked> Cascade</label>
+</div>
+<div class="row">
+<div class="card"><div class="lb">H₀ severity</div><div class="vl bad" id="mH0">0.92</div></div>
+<div class="card"><div class="lb">Cascade η</div><div class="vl bad" id="mCasc">1.50×</div></div>
+<div class="card"><div class="lb">Stage</div><div class="vl warn" id="mStg">IR emit</div></div>
+<div class="card"><div class="lb">Shift corruption</div><div class="vl bad" id="mShift">—</div></div>
+<div class="card"><div class="lb">Phase</div><div class="vl" id="mPh">CHAOTIC</div></div>
+</div>
+<div class="info" id="nfo">The energy field traces the log2_of kill chain — from PHI wiring fault through DCE to garbage shift emission. Watch the cascade amplify through self-compilation stages.</div>
+</div>
+<script>
+const cv=document.getElementById('cv');
+const cx=cv.getContext('2d');
+const W=cv.width=cv.offsetWidth;
+const H=cv.height=520;
+const dk=matchMedia('(prefers-color-scheme:dark)').matches;
+
+const nodes=[
+{id:'phi',label:'PHI wiring',x:.1,y:.15,r:24,stage:0,status:'fault',
+ desc:'Loop header PHI for n has TWO incoming edges: n=0 from entry, n+1 from back-edge. If the back-edge copy is dropped, n+1 becomes an orphan.'},
+{id:'n_inc',label:'n = n + 1',x:.25,y:.32,r:20,stage:0,status:'fault',
+ desc:'The increment ADD instruction writes to a vreg that should feed back into the PHI. With no PHI consumer, DCE sees zero uses.'},
+{id:'dce',label:'DCE pass',x:.42,y:.18,r:28,stage:1,status:'kill',
+ desc:'DCE correctly identifies n+1 as having 0 downstream consumers. Eliminates the ADD. The n slot now holds uninitialized stack memory.'},
+{id:'ret_n',label:'return n',x:.38,y:.45,r:20,stage:1,status:'corrupt',
+ desc:'RET loads from n\'s stack slot. Without the increment, this reads whatever garbage the prologue left: 1023536544, -2510040, etc.'},
+{id:'log2',label:'log2_of()',x:.58,y:.3,r:30,stage:2,status:'corrupt',
+ desc:'log2_of(8) returns 1023536544 instead of 3. log2_of(2) returns -2510040 instead of 1. Every call returns stack garbage.'},
+{id:'strength',label:'Strength\nreduction',x:.72,y:.15,r:26,stage:2,status:'cascade',
+ desc:'ZCC\'s peephole sees x*8 and calls log2_of(8) to emit shlq $3. Gets $1023536544 instead. Emits shlq $1023536544, %rax.'},
+{id:'zcc2',label:'zcc2 (IR)',x:.55,y:.6,r:26,stage:2,status:'cascade',
+ desc:'zcc2 compiled with IR-lowered log2_of. Every strength-reduced multiply is corrupted. The compiler itself is semantically broken.'},
+{id:'zcc3',label:'zcc3.s',x:.78,y:.45,r:28,stage:3,status:'catastrophe',
+ desc:'zcc3.s contains shlq $1023536544 where shlq $3 should be. The diff catches 20+ divergent lines. SELF-HOST MISMATCH.'},
+{id:'diff',label:'MISMATCH',x:.88,y:.7,r:22,stage:3,status:'catastrophe',
+ desc:'zcc2.s ≠ zcc3.s. The bootstrap gate catches the cascade. Peephole drops 4306→4303 (3 fewer opts from insane shift amounts).'},
+{id:'val_shr',label:'val >>= 1',x:.12,y:.48,r:18,stage:0,status:'ok',
+ desc:'val >>= 1 survives DCE because it feeds the loop condition (val > 1). Only n is killed — the asymmetry is the trap.'},
+{id:'loop_cond',label:'val > 1',x:.22,y:.62,r:18,stage:0,status:'ok',
+ desc:'Loop condition is live — it controls the BR. val\'s entire chain (load, shift, compare) is preserved. n\'s chain is severed at the PHI.'},
+];
+
+const edges=[
+['phi','n_inc','PHI orphans n+1'],
+['n_inc','dce','0 consumers → dead'],
+['dce','ret_n','slot uninitialized'],
+['ret_n','log2','returns garbage'],
+['log2','strength','log2(8) = 10²³??'],
+['strength','zcc2','emits shlq $garbage'],
+['zcc2','zcc3','compiles with corruption'],
+['zcc3','diff','bootstrap catches it'],
+['phi','val_shr','back-edge OK for val'],
+['val_shr','loop_cond','feeds condition'],
+['loop_cond','phi','loop iterates'],
+];
+
+let eta=0.58,gamma=0.50,beta=0.15,sigma=0.08;
+let t=0,stage=0;
+let particles=[];
+let hoverNode=null;
+
+for(let i=0;i<600;i++){
+particles.push({
+x:Math.random()*W,y:Math.random()*H,
+vx:(Math.random()-.5)*0.4,vy:(Math.random()-.5)*0.4,
+energy:Math.random(),life:1
+});
+}
+
+const garbageVals=['1023536544','1023539424','1023531392','-2510040','1023534544','1023537680'];
+let garbageIdx=0;
+
+function nodeColor(n,alpha){
+if(n.status==='ok') return `rgba(0,229,255,${alpha})`;
+if(n.status==='fault') return `rgba(154,0,255,${alpha})`;
+if(n.status==='kill') return `rgba(255,0,128,${alpha})`;
+if(n.status==='corrupt') return `rgba(255,140,0,${alpha})`;
+if(n.status==='cascade') return `rgba(255,60,60,${alpha})`;
+if(n.status==='catastrophe') return `rgba(255,0,128,${alpha})`;
+return `rgba(100,100,100,${alpha})`;
+}
+
+function edgeActive(e){return nodes.find(n=>n.id===e[0]).stage<=stage&&nodes.find(n=>n.id===e[1]).stage<=stage;}
+
+function tick(){
+let cascadeMult=1+stage*0.5;
+for(let p of particles){
+let fx=0,fy=0;
+for(let n of nodes){
+if(n.stage>stage)continue;
+let nx=n.x*W,ny=n.y*H;
+let dx=p.x-nx,dy=p.y-ny;
+let d2=dx*dx+dy*dy+1;
+let d=Math.sqrt(d2);
+let str=(n.status==='ok'?-1:1)*n.r*80/d2;
+if(n.status==='catastrophe'&&stage>=3)str*=3*cascadeMult;
+if(n.status==='kill')str*=2;
+fx+=str*dx/d;
+fy+=str*dy/d;
+}
+let sig=1/(1+Math.exp(-gamma*p.energy));
+let noise=(Math.random()-.5)*sigma*(1+beta*Math.abs(p.energy));
+p.energy=p.energy*0.95+eta*p.energy*sig*0.05+noise*0.1;
+p.vx=(p.vx+fx*0.003)*0.97;
+p.vy=(p.vy+fy*0.003)*0.97;
+p.x+=p.vx;p.y+=p.vy;
+if(p.x<0){p.x=0;p.vx*=-.5;}
+if(p.x>W){p.x=W;p.vx*=-.5;}
+if(p.y<0){p.y=0;p.vy*=-.5;}
+if(p.y>H){p.y=H;p.vy*=-.5;}
+}}
+
+function render(){
+cx.clearRect(0,0,W,H);
+cx.fillStyle=dk?'rgba(8,12,28,0.95)':'rgba(6,8,18,0.92)';
+cx.fillRect(0,0,W,H);
+
+for(let p of particles){
+let en=Math.abs(p.energy);
+let r,g,b;
+if(stage<2){r=en*80;g=200-en*100;b=255-en*40;}
+else{r=150+en*105;g=Math.max(0,80-en*80);b=128-en*60;}
+let a=0.3+en*0.4;
+cx.beginPath();cx.arc(p.x,p.y,1.5+en*1.5,0,Math.PI*2);
+cx.fillStyle=`rgba(${r|0},${g|0},${b|0},${a})`;cx.fill();
+}
+
+for(let e of edges){
+if(!edgeActive(e))continue;
+let a=nodes.find(n=>n.id===e[0]);
+let b=nodes.find(n=>n.id===e[1]);
+let ax=a.x*W,ay=a.y*H,bx=b.x*W,by=b.y*H;
+let isCascade=a.status!=='ok'&&b.status!=='ok';
+cx.beginPath();cx.moveTo(ax,ay);
+let mx=(ax+bx)/2+(Math.sin(t*0.02+ax)*8);
+let my=(ay+by)/2+(Math.cos(t*0.03+ay)*8);
+cx.quadraticCurveTo(mx,my,bx,by);
+cx.strokeStyle=isCascade?`rgba(255,0,128,${0.15+Math.sin(t*0.05)*0.1})`:'rgba(0,229,255,0.12)';
+cx.lineWidth=isCascade?1.5:0.8;
+cx.stroke();
+
+if(isCascade&&t%3===0){
+let prog=(t%60)/60;
+let px=ax*(1-prog)*(1-prog)+2*mx*prog*(1-prog)+bx*prog*prog;
+let py=ay*(1-prog)*(1-prog)+2*my*prog*(1-prog)+by*prog*prog;
+cx.beginPath();cx.arc(px,py,2.5,0,Math.PI*2);
+cx.fillStyle='rgba(255,0,128,0.8)';cx.fill();
+}
+}
+
+for(let n of nodes){
+let vis=n.stage<=stage;
+let nx=n.x*W,ny=n.y*H;
+let isHov=hoverNode===n;
+let alpha=vis?(isHov?1:0.85):0.15;
+let r=n.r*(isHov?1.25:1);
+let pulse=vis?1+Math.sin(t*0.06+n.x*10)*0.08:1;
+
+if(vis&&n.status!=='ok'){
+cx.beginPath();cx.arc(nx,ny,r*2*pulse,0,Math.PI*2);
+let grd=cx.createRadialGradient(nx,ny,r*0.5,nx,ny,r*2*pulse);
+grd.addColorStop(0,nodeColor(n,0.12));
+grd.addColorStop(1,'rgba(0,0,0,0)');
+cx.fillStyle=grd;cx.fill();
+}
+
+cx.beginPath();cx.arc(nx,ny,r*pulse,0,Math.PI*2);
+cx.fillStyle=nodeColor(n,vis?0.15:0.05);cx.fill();
+cx.strokeStyle=nodeColor(n,alpha);
+cx.lineWidth=isHov?2.5:1.2;cx.stroke();
+
+if(vis&&n.status==='catastrophe'){
+for(let s=0;s<3;s++){
+let sa=t*0.04+s*2.1;
+let sr=r*1.5+Math.sin(t*0.08+s)*10;
+cx.beginPath();cx.arc(nx+Math.cos(sa)*sr,ny+Math.sin(sa)*sr,2,0,Math.PI*2);
+cx.fillStyle='rgba(255,0,128,0.6)';cx.fill();
+}}
+
+cx.font=(isHov?'500 ':'')+'11px system-ui,sans-serif';
+cx.textAlign='center';cx.textBaseline='middle';
+cx.fillStyle=`rgba(255,255,255,${alpha})`;
+let lines=n.label.split('\n');
+if(lines.length>1){
+cx.fillText(lines[0],nx,ny-6);
+cx.fillText(lines[1],nx,ny+7);
+}else cx.fillText(n.label,nx,ny);
+
+if(vis){
+cx.font='500 9px system-ui,sans-serif';
+cx.fillStyle=nodeColor(n,0.9);
+let tag=n.status==='ok'?'LIVE':n.status==='fault'?'FAULT':n.status==='kill'?'KILLED':n.status==='corrupt'?'CORRUPT':n.status==='cascade'?'CASCADE':'CATASTROPHE';
+cx.fillText(tag,nx,ny+r+11);
+}
+}
+
+if(stage>=3){
+cx.font='500 13px monospace';
+cx.fillStyle=`rgba(255,0,128,${0.5+Math.sin(t*0.1)*0.3})`;
+let gv=garbageVals[Math.floor(t/40)%garbageVals.length];
+cx.fillText('shlq $'+gv+', %rax',W*0.78,H*0.58+Math.sin(t*0.05)*4);
+cx.font='12px monospace';
+cx.fillStyle='rgba(0,229,255,0.4)';
+cx.fillText('expected: shlq $3, %rax',W*0.78,H*0.58+18);
+}
+
+if(stage>=1){
+cx.font='10px monospace';
+cx.fillStyle=`rgba(255,0,128,${0.3+Math.sin(t*0.07)*0.15})`;
+cx.fillText('ADD %n, $1 → %n\'   [0 USES → DEAD]',W*0.42,H*0.08);
+}
+}
+
+function updateStats(){
+let stgNames=['IR emit','DCE fires','Compile-time call','Bootstrap diff'];
+let shiftVal=stage>=3?garbageVals[Math.floor(t/40)%garbageVals.length]:'—';
+document.getElementById('mStg').textContent=stgNames[stage];
+document.getElementById('mShift').textContent=stage>=3?'$'+shiftVal:'—';
+let cascE=(1+stage*0.5).toFixed(2);
+document.getElementById('mCasc').textContent=cascE+'×';
+let phase=stage>=3?'CATASTROPHE':stage>=2?'CASCADE':stage>=1?'BIFURCATION':'FAULT INJECT';
+document.getElementById('mPh').textContent=phase;
+document.getElementById('mPh').className='vl'+(stage>=2?' bad':stage>=1?' warn':' ok');
+document.getElementById('mH0').textContent=(0.92*(1+stage*0.15)).toFixed(2);
+}
+
+cv.addEventListener('mousemove',e=>{
+let rect=cv.getBoundingClientRect();
+let mx=(e.clientX-rect.left)*(W/rect.width);
+let my=(e.clientY-rect.top)*(H/rect.height);
+hoverNode=null;
+for(let n of nodes){
+if(n.stage>stage)continue;
+let dx=mx-n.x*W,dy=my-n.y*H;
+if(Math.sqrt(dx*dx+dy*dy)<n.r*1.5){hoverNode=n;break;}
+}
+if(hoverNode){
+let n=hoverNode;
+document.getElementById('nfo').innerHTML='<strong>'+n.label.replace('\n',' ')+'</strong> [Stage '+n.stage+' — '+n.status.toUpperCase()+']<br>'+n.desc;
+}else{
+document.getElementById('nfo').innerHTML='Hover nodes to trace the kill chain. Use the Stage slider to walk through the cascade. The field particles are repelled by fault nodes and attracted to healthy ones.';}
+});
+
+document.getElementById('rEta').oninput=e=>{eta=e.target.value/100;document.getElementById('oEta').textContent=eta.toFixed(2);};
+document.getElementById('rGam').oninput=e=>{gamma=e.target.value/100;document.getElementById('oGam').textContent=gamma.toFixed(2);};
+document.getElementById('rStg').oninput=e=>{stage=+e.target.value;document.getElementById('oStg').textContent=stage;};
+
+let autoEl=document.getElementById('autoC');
+let stageTimer=0;
+
+function loop(){
+requestAnimationFrame(loop);
+tick();render();updateStats();
+t++;
+if(autoEl.checked){
+stageTimer++;
+if(stageTimer>90&&stage<3){
+stage++;
+stageTimer=0;
+document.getElementById('rStg').value=stage;
+document.getElementById('oStg').textContent=stage;
+}
+}
+}
+loop();
+</script>

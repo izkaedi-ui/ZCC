@@ -1,0 +1,174 @@
+# ============================================================
+# ZKAEDI BRIDGE DEVELOPMENT RULES
+# Applies to: zcc.c, compiler_passes.c, zcc_ast_bridge.h, part1.c
+# ============================================================
+
+# ── RULE 1: ALWAYS SHOW THE DIFF FIRST ──────────────────────
+# Before applying any change, output the exact unified diff.
+# Format:
+#   --- a/filename.c
+#   +++ b/filename.c
+#   @@ -LINE,COUNT +LINE,COUNT @@
+#   -old line
+#   +new line
+#
+# Do NOT proceed to build or validate until the diff is shown.
+# If the diff is empty or touches the wrong function, STOP and explain why.
+
+# ── RULE 2: SPECIFY EXACT REPLACEMENT, NOT INTENT ───────────
+# Bad prompt pattern:  "Fix licm_is_invariant to check operand defs"
+# Good prompt pattern: "Replace lines 594-640 in compiler_passes.c with exactly:"
+#
+# Every code change must include:
+#   - The exact file name
+#   - The exact function name
+#   - The exact old string being replaced (minimum 3 lines of context)
+#   - The exact new string replacing it
+#
+# Never describe what a function should do. Show what it should contain.
+
+# ── RULE 3: FIXTURE BEFORE PIPELINE ─────────────────────────
+# When adding a new IR feature (new opcode, new pass, new node kind):
+#   1. Build and validate the standalone fixture first
+#   2. Verify DCE/LICM output on the fixture is correct
+#   3. Only then wire into the real ZCC pipeline
+#
+# Fixture construction checklist (MANDATORY for every new block):
+#   [ ] Instructions added to block
+#   [ ] succ[] array populated for all successors
+#   [ ] pred[] array populated for all predecessors
+#   [ ] condbr targets are BLOCK IDs, not RegIDs
+#   [ ] branch_prob fields sum to 1.0 on every condbr block
+#   [ ] ir_validate() passes before running passes
+
+# ── RULE 4: LOCK EXPECTED OUTPUT AFTER EACH CLEAN STATE ─────
+# When the pipeline output is known-good, write it to expected.txt:
+#
+#   ./passes 2>&1 | grep -E 'BUG|hoisted|DCE removed|Phase B|Blocks:' > expected.txt
+#
+# Every subsequent change must pass:
+#
+#   ./passes 2>&1 | grep -E 'BUG|hoisted|DCE removed|Phase B|Blocks:' > actual.txt
+#   diff expected.txt actual.txt && echo PASS || echo FAIL
+#
+# Do not move to the next task if diff shows regression.
+# Commit expected.txt alongside code changes.
+
+# ── RULE 5: MANDATORY VALIDATION SEQUENCE ───────────────────
+# Run these in order after EVERY change. Do not skip steps.
+#
+#   STEP 1 — Verify the diff landed:
+#     git diff compiler_passes.c | head -80
+#     (If empty or wrong function: STOP. Do not proceed.)
+#
+#   STEP 2 — Standalone build, no warnings from compiler_passes.c:
+#     gcc -O2 -std=c17 -Wall -Wextra -DZCC_BRIDGE_STANDALONE \
+#         compiler_passes.c -o passes -lm 2>&1
+#
+#   STEP 3 — Regression gate:
+#     ./passes 2>&1 | grep -E 'BUG|hoisted|DCE removed|Phase B|Blocks:' \
+#         > actual.txt && diff expected.txt actual.txt
+#
+#   STEP 4 — Integrated build, zero warnings from compiler_passes.c:
+#     gcc -O2 -std=c17 -Wall -Wextra \
+#         zcc.c compiler_passes.c -o zcc_full -lm 2>&1 \
+#         | grep 'compiler_passes'
+#     (Must be empty.)
+#
+#   STEP 5 — Smoke test on real input:
+#     ./zcc_full tmp_if_baseline.c -o /tmp/out.s 2>&1 \
+#         | grep -E 'ZCC-IR|unsupported'
+#
+# If any step fails, fix it before proceeding to the next task.
+
+# ── RULE 6: NO SILENT PARAMETER ADDITIONS ───────────────────
+# If a function signature changes, the change MUST be reflected in:
+#   - All call sites
+#   - The header declaration (zcc_ast_bridge.h)
+#   - The standalone stub (if under ZCC_BRIDGE_STANDALONE)
+#
+# An unused parameter warning after a "fix" means the fix was not applied.
+# Treat unused parameter warnings on modified functions as build failures.
+
+# ── RULE 7: ENUM SYNC IS MANDATORY ──────────────────────────
+# Any new ZCC_ND_* constant in zcc_ast_bridge.h MUST have:
+#   [ ] _Static_assert in zcc.c
+#   [ ] _Static_assert in part1.c
+#   [ ] Entry in nd_to_znd() switch
+#   [ ] Entry in zcc_node_from_expr() or zcc_node_from_stmt()
+#   [ ] Entry in zcc_lower_expr() or zcc_lower_stmt()
+#   [ ] Entry in zcc_node_free() if it has children
+#
+# Missing any item = incomplete implementation. Do not mark done.
+
+# ── RULE 8: DCE/LICM BUG LINES ARE BLOCKING ─────────────────
+# Any output line matching 'DCE/LICM BUG' is a P0 blocker.
+# Do not proceed to new features while BUG lines exist.
+# BUG lines indicate invalid IR — wrong code generation will follow
+# once the bridge becomes fully load-bearing.
+
+# ── RULE 9: #ifdef GUARDS ARE PERMANENT ─────────────────────
+# These four functions must always remain under #ifdef ZCC_BRIDGE_STANDALONE:
+#   - build_test_function()
+#   - build_phase_b_ast()
+#   - build_zcc_phase_b_ast()
+#   - print_pass_results()
+#   - build_nested_while_if_fixture()
+#   - ir_dump()
+#
+# Never remove these guards. Never move standalone-only code outside them.
+# The zcc_full build must produce zero warnings from compiler_passes.c.
+
+# ── RULE 10: COMPILER ALLOCATION IS sizeof(Compiler) ────────
+# The calloc in zcc.c now uses sizeof(Compiler) directly.
+# No literal to maintain. If Compiler struct changes, the
+# allocation automatically picks up the new size.
+# Self-host zcc2 must be rebuilt from gcc after any struct change.
+
+# ── BRIDGE STATUS TRACKING ───────────────────────────────────
+# Bridge 1: ZCC AST → IR          ✅ DONE
+# Bridge 2: IR → codegen (PGO)    ⚠️  REVERTED
+#   PGO block reordering required post-pass .s rewriter to be effective.
+#   Stream-switching covered <10% of blocks in real functions.
+#   DCE/LICM results are real and kept. PGO reorder shelved.
+# Bridge 3: Standalone ↔ integrated ✅ DONE
+# Bridge 4: Fixture validation    ✅ DONE (DCE condbr + def_of fixes)
+# Bridge 5: ZCC self-host         ✅ DONE (79/79 functions, no crashes)
+#
+# ── KNOWN LIMITS AND HAZARDS ────────────────────────────────
+# MAX_INSTRS = 32768: hard ceiling for RegIDs in any single function.
+#   next_token is the current HWM at 190 blocks. Any function larger will
+#   silently corrupt live[] or def_of[] before hitting a bounds check.
+#   Long-term fix: growable def table. For now, assert r < MAX_INSTRS at
+#   every worklist push rather than at the array access.
+#   Add runtime check: if (r >= MAX_INSTRS) { fprintf(stderr, "[FATAL] RegID %u >= MAX_INSTRS\n", r); abort(); }
+#
+# DCE frees instructions in place. Any pass calling licm_build_def_block
+#   after a destructive pass must call it again before use — def_of[]
+#   entries for freed instructions are stale/dangling otherwise.
+#   licm_build_def_block now clears def_of[] with memset(0) before rebuild.
+#   If a third destructive pass is added, same pattern applies.
+#
+# Unsupported IR kinds (bridge coverage gaps as of Bridge 5):
+#   kind  8 = ND_MUL     (multiply)
+#   kind 19 = ND_LNOT    (logical not)
+#   kind 20 = ND_BAND    (bitwise and)
+#   kind 27 = ND_ADDR    (address-of)
+#   kind 28 = ND_DEREF   (pointer deref)
+#   kind 34 = ND_FOR     (for loop — entire stmt kind)
+#   kind 48 = unknown stmt (likely ND_COMPOUND_ASSIGN or ND_SWITCH)
+#   These produce NULL children that are skipped; affected functions
+#   still reach zcc_ast_to_ir but produce incomplete IR.
+#
+# Build commands (Bridge 5 architecture):
+#   gcc-only (bridge active):  gcc -O2 -w zcc_bridge_impl.c compiler_passes.c -o zcc_full -lm
+#   ZCC self-host:             ./zcc_full zcc.c -o /tmp/zcc3.s
+#   (ZCC parses zcc.c only; zcc_bridge_impl.c is gcc-only, never seen by ZCC)
+#
+# Bootstrap closure test (gcc → zcc_full → zcc3 → test):
+#   ./zcc_full zcc.c -o /tmp/zcc3.s 2>/dev/null
+#   gcc -c bootstrap_runtime.c -o /tmp/bootstrap_runtime.o
+#   gcc /tmp/zcc3.s /tmp/bootstrap_runtime.o -o /tmp/zcc3 -lm
+#   /tmp/zcc3 /tmp/t.c -o /tmp/t.s && gcc /tmp/t.s -o /tmp/t && /tmp/t  # expect exit 42
+#   ZCC-generated zcc3.s references zcc_bridge_codegen_func, Compiler, offsetof; bootstrap_runtime.c
+#   provides them. Bootstrap closed: zcc3 runs and compiles (e.g. int main(){return 42;} -> exit 42).

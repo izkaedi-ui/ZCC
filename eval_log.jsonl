@@ -1,0 +1,1020 @@
+{
+  "timestamp": "2026-03-29T12:22:42.607614+00:00",
+  "model_path": "ZKAEDI_ULTIMA_FUSED.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T12:53:26.613819+00:00",
+  "model_path": "A_AdamW_seed0.pt",
+  "track_a_acc": 92.35,
+  "track_b_acc": 91.35,
+  "track_b_delta": 5.85,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:53:56.507871+00:00",
+  "model_path": "A_AdamW_seed1.pt",
+  "track_a_acc": 92.74,
+  "track_b_acc": 93.5,
+  "track_b_delta": 8.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:54:28.545027+00:00",
+  "model_path": "A_AdamW_seed10.pt",
+  "track_a_acc": 92.49,
+  "track_b_acc": 92.8,
+  "track_b_delta": 7.3,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:54:59.867168+00:00",
+  "model_path": "A_AdamW_seed11.pt",
+  "track_a_acc": 92.66,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:55:32.500409+00:00",
+  "model_path": "A_AdamW_seed12.pt",
+  "track_a_acc": 92.33,
+  "track_b_acc": 92.2,
+  "track_b_delta": 6.7,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:56:04.555578+00:00",
+  "model_path": "A_AdamW_seed13.pt",
+  "track_a_acc": 92.53,
+  "track_b_acc": 92.0,
+  "track_b_delta": 6.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:56:35.596650+00:00",
+  "model_path": "A_AdamW_seed14.pt",
+  "track_a_acc": 92.69,
+  "track_b_acc": 92.7,
+  "track_b_delta": 7.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:57:06.328960+00:00",
+  "model_path": "A_AdamW_seed15.pt",
+  "track_a_acc": 92.58,
+  "track_b_acc": 92.5,
+  "track_b_delta": 7.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:57:36.171613+00:00",
+  "model_path": "A_AdamW_seed16.pt",
+  "track_a_acc": 92.51,
+  "track_b_acc": 92.9,
+  "track_b_delta": 7.4,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:58:06.175370+00:00",
+  "model_path": "A_AdamW_seed17.pt",
+  "track_a_acc": 92.87,
+  "track_b_acc": 93.1,
+  "track_b_delta": 7.6,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:58:35.968117+00:00",
+  "model_path": "A_AdamW_seed18.pt",
+  "track_a_acc": 92.62,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:59:06.966202+00:00",
+  "model_path": "A_AdamW_seed19.pt",
+  "track_a_acc": 92.47,
+  "track_b_acc": 92.7,
+  "track_b_delta": 7.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T12:59:38.385328+00:00",
+  "model_path": "A_AdamW_seed2.pt",
+  "track_a_acc": 92.8,
+  "track_b_acc": 92.7,
+  "track_b_delta": 7.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:00:08.919738+00:00",
+  "model_path": "A_AdamW_seed3.pt",
+  "track_a_acc": 92.79,
+  "track_b_acc": 92.75,
+  "track_b_delta": 7.25,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:00:39.884797+00:00",
+  "model_path": "A_AdamW_seed4.pt",
+  "track_a_acc": 92.65,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:01:11.154888+00:00",
+  "model_path": "A_AdamW_seed5.pt",
+  "track_a_acc": 92.48,
+  "track_b_acc": 92.2,
+  "track_b_delta": 6.7,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:01:42.634693+00:00",
+  "model_path": "A_AdamW_seed6.pt",
+  "track_a_acc": 92.82,
+  "track_b_acc": 92.5,
+  "track_b_delta": 7.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:02:12.518830+00:00",
+  "model_path": "A_AdamW_seed7.pt",
+  "track_a_acc": 92.28,
+  "track_b_acc": 92.7,
+  "track_b_delta": 7.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:02:40.864155+00:00",
+  "model_path": "A_AdamW_seed8.pt",
+  "track_a_acc": 92.84,
+  "track_b_acc": 92.9,
+  "track_b_delta": 7.4,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:03:12.153166+00:00",
+  "model_path": "A_AdamW_seed9.pt",
+  "track_a_acc": 92.38,
+  "track_b_acc": 92.2,
+  "track_b_delta": 6.7,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:03:43.111388+00:00",
+  "model_path": "A_CATALYZE_seed0.pt",
+  "track_a_acc": 92.48,
+  "track_b_acc": 92.25,
+  "track_b_delta": 6.75,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:04:14.685412+00:00",
+  "model_path": "A_CATALYZE_seed1.pt",
+  "track_a_acc": 92.95,
+  "track_b_acc": 93.15,
+  "track_b_delta": 7.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:04:45.070541+00:00",
+  "model_path": "A_CATALYZE_seed10.pt",
+  "track_a_acc": 92.48,
+  "track_b_acc": 92.15,
+  "track_b_delta": 6.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:05:16.341927+00:00",
+  "model_path": "A_CATALYZE_seed11.pt",
+  "track_a_acc": 92.73,
+  "track_b_acc": 92.6,
+  "track_b_delta": 7.1,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:05:48.456220+00:00",
+  "model_path": "A_CATALYZE_seed12.pt",
+  "track_a_acc": 92.56,
+  "track_b_acc": 92.65,
+  "track_b_delta": 7.15,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:06:21.292277+00:00",
+  "model_path": "A_CATALYZE_seed13.pt",
+  "track_a_acc": 92.64,
+  "track_b_acc": 92.35,
+  "track_b_delta": 6.85,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:06:51.732098+00:00",
+  "model_path": "A_CATALYZE_seed14.pt",
+  "track_a_acc": 92.7,
+  "track_b_acc": 92.5,
+  "track_b_delta": 7.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:07:22.061441+00:00",
+  "model_path": "A_CATALYZE_seed15.pt",
+  "track_a_acc": 92.63,
+  "track_b_acc": 92.3,
+  "track_b_delta": 6.8,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:07:51.743987+00:00",
+  "model_path": "A_CATALYZE_seed16.pt",
+  "track_a_acc": 92.82,
+  "track_b_acc": 92.5,
+  "track_b_delta": 7.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:08:22.497115+00:00",
+  "model_path": "A_CATALYZE_seed17.pt",
+  "track_a_acc": 92.76,
+  "track_b_acc": 92.95,
+  "track_b_delta": 7.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:08:53.236942+00:00",
+  "model_path": "A_CATALYZE_seed18.pt",
+  "track_a_acc": 92.47,
+  "track_b_acc": 92.45,
+  "track_b_delta": 6.95,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:09:23.920245+00:00",
+  "model_path": "A_CATALYZE_seed19.pt",
+  "track_a_acc": 92.74,
+  "track_b_acc": 93.05,
+  "track_b_delta": 7.55,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:09:55.278183+00:00",
+  "model_path": "A_CATALYZE_seed2.pt",
+  "track_a_acc": 92.66,
+  "track_b_acc": 92.95,
+  "track_b_delta": 7.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:10:25.074515+00:00",
+  "model_path": "A_CATALYZE_seed3.pt",
+  "track_a_acc": 92.9,
+  "track_b_acc": 93.3,
+  "track_b_delta": 7.8,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:10:55.753907+00:00",
+  "model_path": "A_CATALYZE_seed4.pt",
+  "track_a_acc": 92.73,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:11:27.537246+00:00",
+  "model_path": "A_CATALYZE_seed5.pt",
+  "track_a_acc": 92.37,
+  "track_b_acc": 92.25,
+  "track_b_delta": 6.75,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:11:59.583244+00:00",
+  "model_path": "A_CATALYZE_seed7.pt",
+  "track_a_acc": 92.56,
+  "track_b_acc": 92.95,
+  "track_b_delta": 7.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:12:29.909640+00:00",
+  "model_path": "A_CATALYZE_seed8.pt",
+  "track_a_acc": 92.72,
+  "track_b_acc": 92.65,
+  "track_b_delta": 7.15,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:13:00.821823+00:00",
+  "model_path": "A_CATALYZE_seed9.pt",
+  "track_a_acc": 92.6,
+  "track_b_acc": 91.95,
+  "track_b_delta": 6.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:13:31.889846+00:00",
+  "model_path": "A_SGD_seed0.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.05,
+  "track_b_delta": 7.55,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:14:01.902131+00:00",
+  "model_path": "A_SGD_seed1.pt",
+  "track_a_acc": 93.28,
+  "track_b_acc": 93.15,
+  "track_b_delta": 7.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:14:32.359758+00:00",
+  "model_path": "A_SGD_seed10.pt",
+  "track_a_acc": 93.29,
+  "track_b_acc": 93.15,
+  "track_b_delta": 7.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:15:04.761743+00:00",
+  "model_path": "A_SGD_seed11.pt",
+  "track_a_acc": 86.14,
+  "track_b_acc": 86.35,
+  "track_b_delta": 0.85,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:15:36.094077+00:00",
+  "model_path": "A_SGD_seed12.pt",
+  "track_a_acc": 93.26,
+  "track_b_acc": 93.25,
+  "track_b_delta": 7.75,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:16:06.718615+00:00",
+  "model_path": "A_SGD_seed13.pt",
+  "track_a_acc": 93.58,
+  "track_b_acc": 93.7,
+  "track_b_delta": 8.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:16:37.611624+00:00",
+  "model_path": "A_SGD_seed14.pt",
+  "track_a_acc": 93.34,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:17:09.045980+00:00",
+  "model_path": "A_SGD_seed15.pt",
+  "track_a_acc": 93.22,
+  "track_b_acc": 93.5,
+  "track_b_delta": 8.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:17:40.232136+00:00",
+  "model_path": "A_SGD_seed16.pt",
+  "track_a_acc": 93.7,
+  "track_b_acc": 93.5,
+  "track_b_delta": 8.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:18:11.722622+00:00",
+  "model_path": "A_SGD_seed17.pt",
+  "track_a_acc": 93.34,
+  "track_b_acc": 93.1,
+  "track_b_delta": 7.6,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:18:42.896644+00:00",
+  "model_path": "A_SGD_seed18.pt",
+  "track_a_acc": 93.32,
+  "track_b_acc": 93.4,
+  "track_b_delta": 7.9,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:19:14.206429+00:00",
+  "model_path": "A_SGD_seed19.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.2,
+  "track_b_delta": 7.7,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:19:46.472726+00:00",
+  "model_path": "A_SGD_seed2.pt",
+  "track_a_acc": 93.2,
+  "track_b_acc": 92.95,
+  "track_b_delta": 7.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:20:18.515521+00:00",
+  "model_path": "A_SGD_seed3.pt",
+  "track_a_acc": 93.73,
+  "track_b_acc": 93.65,
+  "track_b_delta": 8.15,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:20:48.531189+00:00",
+  "model_path": "A_SGD_seed4.pt",
+  "track_a_acc": 93.4,
+  "track_b_acc": 93.95,
+  "track_b_delta": 8.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:21:20.280321+00:00",
+  "model_path": "A_SGD_seed5.pt",
+  "track_a_acc": 93.41,
+  "track_b_acc": 93.75,
+  "track_b_delta": 8.25,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:21:51.760358+00:00",
+  "model_path": "A_SGD_seed6.pt",
+  "track_a_acc": 93.6,
+  "track_b_acc": 93.8,
+  "track_b_delta": 8.3,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:22:23.322833+00:00",
+  "model_path": "A_SGD_seed7.pt",
+  "track_a_acc": 93.01,
+  "track_b_acc": 92.85,
+  "track_b_delta": 7.35,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:22:54.976020+00:00",
+  "model_path": "A_SGD_seed8.pt",
+  "track_a_acc": 93.32,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:23:27.007623+00:00",
+  "model_path": "A_SGD_seed9.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.7,
+  "track_b_delta": 8.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:24:17.087047+00:00",
+  "model_path": "ZKAEDI_MASTER_FUSED.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:24:47.744905+00:00",
+  "model_path": "ZKAEDI_OMEGA_FUSED.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:25:16.629538+00:00",
+  "model_path": "ZKAEDI_ULTIMA_FUSED.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:33:01.598433+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed0.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.05,
+  "track_b_delta": 7.55,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:33:31.023160+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed1.pt",
+  "track_a_acc": 93.28,
+  "track_b_acc": 93.15,
+  "track_b_delta": 7.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:34:00.801888+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed10.pt",
+  "track_a_acc": 93.29,
+  "track_b_acc": 93.15,
+  "track_b_delta": 7.65,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:34:31.315758+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed11.pt",
+  "track_a_acc": 86.14,
+  "track_b_acc": 86.35,
+  "track_b_delta": 0.85,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:35:01.143375+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed12.pt",
+  "track_a_acc": 93.26,
+  "track_b_acc": 93.25,
+  "track_b_delta": 7.75,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:35:30.708635+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed13.pt",
+  "track_a_acc": 93.58,
+  "track_b_acc": 93.7,
+  "track_b_delta": 8.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:36:01.289659+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed14.pt",
+  "track_a_acc": 93.34,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:36:30.877531+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed15.pt",
+  "track_a_acc": 93.22,
+  "track_b_acc": 93.5,
+  "track_b_delta": 8.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:37:02.804710+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed16.pt",
+  "track_a_acc": 93.7,
+  "track_b_acc": 93.5,
+  "track_b_delta": 8.0,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:37:33.482728+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed17.pt",
+  "track_a_acc": 93.34,
+  "track_b_acc": 93.1,
+  "track_b_delta": 7.6,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:38:03.757282+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed18.pt",
+  "track_a_acc": 93.32,
+  "track_b_acc": 93.4,
+  "track_b_delta": 7.9,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:38:33.472366+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed19.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.2,
+  "track_b_delta": 7.7,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:39:03.970756+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed2.pt",
+  "track_a_acc": 93.2,
+  "track_b_acc": 92.95,
+  "track_b_delta": 7.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:39:33.995399+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed3.pt",
+  "track_a_acc": 93.73,
+  "track_b_acc": 93.65,
+  "track_b_delta": 8.15,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:40:04.085236+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed4.pt",
+  "track_a_acc": 93.4,
+  "track_b_acc": 93.95,
+  "track_b_delta": 8.45,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:40:33.921094+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed5.pt",
+  "track_a_acc": 93.41,
+  "track_b_acc": 93.75,
+  "track_b_delta": 8.25,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:41:03.948374+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed6.pt",
+  "track_a_acc": 93.6,
+  "track_b_acc": 93.8,
+  "track_b_delta": 8.3,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:41:33.957620+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed7.pt",
+  "track_a_acc": 93.01,
+  "track_b_acc": 92.85,
+  "track_b_delta": 7.35,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:42:04.244874+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed8.pt",
+  "track_a_acc": 93.32,
+  "track_b_acc": 93.0,
+  "track_b_delta": 7.5,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:42:36.276009+00:00",
+  "model_path": "H:\\__DOWNLOADS\\selforglinux\\A_SGD_seed9.pt",
+  "track_a_acc": 93.35,
+  "track_b_acc": 93.7,
+  "track_b_delta": 8.2,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": true,
+  "rejection_reason": null
+}
+{
+  "timestamp": "2026-03-29T13:43:09.575542+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_1574.pt",
+  "track_a_acc": 11.05,
+  "track_b_acc": 11.05,
+  "track_b_delta": -74.44,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 11.1% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:43:38.510648+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_3748.pt",
+  "track_a_acc": 12.82,
+  "track_b_acc": 12.6,
+  "track_b_delta": -72.89,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 12.8% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:44:08.328567+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_7848.pt",
+  "track_a_acc": 10.97,
+  "track_b_acc": 11.1,
+  "track_b_delta": -74.39,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 11.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:44:38.664944+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_7018.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:45:08.521503+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_6872.pt",
+  "track_a_acc": 10.12,
+  "track_b_acc": 10.05,
+  "track_b_delta": -75.44,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.1% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:45:38.594524+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_1991.pt",
+  "track_a_acc": 10.59,
+  "track_b_acc": 10.8,
+  "track_b_delta": -74.69,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.6% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:46:08.374120+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_9214.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:46:38.150087+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_5282.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:47:10.157829+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_2309.pt",
+  "track_a_acc": 10.23,
+  "track_b_acc": 10.3,
+  "track_b_delta": -75.19,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.2% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:47:40.867724+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_7020.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:48:09.602271+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_9879.pt",
+  "track_a_acc": 10.02,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:48:39.407149+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_3516.pt",
+  "track_a_acc": 10.06,
+  "track_b_acc": 10.05,
+  "track_b_delta": -75.44,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.1% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:49:10.840804+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_5127.pt",
+  "track_a_acc": 10.01,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:49:40.068775+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_6139.pt",
+  "track_a_acc": 10.07,
+  "track_b_acc": 11.0,
+  "track_b_delta": -74.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.1% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:50:10.259944+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_4023.pt",
+  "track_a_acc": 10.13,
+  "track_b_acc": 10.2,
+  "track_b_delta": -75.29,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.1% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:50:40.809496+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_8932.pt",
+  "track_a_acc": 9.99,
+  "track_b_acc": 10.1,
+  "track_b_delta": -75.39,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:51:09.670635+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_8691.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:51:39.718779+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_8413.pt",
+  "track_a_acc": 10.0,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}
+{
+  "timestamp": "2026-03-29T13:52:11.537863+00:00",
+  "model_path": "TEMP_GREEDY_MERGE_2906.pt",
+  "track_a_acc": 10.03,
+  "track_b_acc": 10.0,
+  "track_b_delta": -75.49,
+  "canonical_hash": "2cb195309f975dc83a784ab1ca756636ddf009c54374826112b3c834211c4d40",
+  "passed": false,
+  "rejection_reason": "Track A below baseline: 10.0% < 85.5%"
+}

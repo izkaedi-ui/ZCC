@@ -1,0 +1,37 @@
+{
+  "algorithm_info": {
+    "id": "QAlgo-Dream-G6",
+    "name": "Codegen Mutation G6: zero_mov_to_xor",
+    "domain": "compiler_optimization",
+    "discovered_by": "ZCC Oneirogenesis",
+    "lineage_hash": "ed8479004b7b788b"
+  },
+  "mutations": [
+    {
+      "name": "zero_mov_to_xor",
+      "category": "PEEPHOLE",
+      "description": "Replace movq $0 with xorq %rax,%rax",
+      "original_asm": "movq $0, %rax",
+      "mutated_asm": "    xorq %rax, %rax",
+      "energy_delta": -0.5,
+      "fingerprint": "f7a40b1ec1df676b"
+    },
+    {
+      "name": "schedule_swap",
+      "category": "SCHEDULE",
+      "description": "Swap independent instructions to reduce pipeline stall",
+      "original_asm": "popq %r11\nmovl %r11d, (%rax)",
+      "mutated_asm": "    movl %r11d, (%rax)\n    popq %r11",
+      "energy_delta": -0.3,
+      "fingerprint": "576b6cff448ecb66"
+    }
+  ],
+  "fitness_improvement": {
+    "asm_size_delta": 2,
+    "inst_count_delta": 0,
+    "score_delta": -10.938074999954551,
+    "composite_score": 2426906.694323
+  },
+  "timestamp": "2026-04-10T21:19:01.991119+00:00",
+  "generation": 6
+}

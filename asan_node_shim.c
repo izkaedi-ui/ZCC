@@ -1,0 +1,1 @@
+int node_ptr_elem_size(void *n) { return 0; } void* zcc_node_from_expr(void *n) { return 0; } int node_is_func(void *n){return 0;} int node_lhs_ptr_size(void *n){return 0;} int node_rhs_ptr_size(void *n){return 0;} int node_is_array(void *n) {return 0;}

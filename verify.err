@@ -1,0 +1,13 @@
+zcc_pp.c:6315:14: error: conflicting types for ‘zcc_node_from’; have ‘void *(void *)’
+ 6315 | extern void *zcc_node_from(void *ast);
+      |              ^~~~~~~~~~~~~
+In file included from zcc_pp.c:277:
+zcc_ast_bridge.h:163:10: note: previous declaration of ‘zcc_node_from’ with type ‘ZCCNode *(struct Node *)’
+  163 | ZCCNode *zcc_node_from(struct Node *n);
+      |          ^~~~~~~~~~~~~
+zcc_pp.c:6316:12: error: conflicting types for ‘zcc_run_passes_emit_body_pgo’; have ‘int(void *, const char *, const char *, void *, int,  int,  int,  int)’
+ 6316 | extern int zcc_run_passes_emit_body_pgo(void *body, const char *profile, const char *name, void *out, int stack_size, int num_params, int end_label1, int end_label2);
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+zcc_ast_bridge.h:198:5: note: previous declaration of ‘zcc_run_passes_emit_body_pgo’ with type ‘int(ZCCNode *, const char *, const char *, void *, int,  int,  int,  int)’
+  198 | int zcc_run_passes_emit_body_pgo(ZCCNode *body_ast, const char *profile_path, const char *func_name,
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~

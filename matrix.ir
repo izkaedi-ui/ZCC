@@ -1,0 +1,179 @@
+[Phase 1] Lexical Array Bootstrap... OK
+[Phase 2] AST Topological Generation... OK
+[Phase 3] Native AST Constant Folding... OK
+[Phase 4] SystemV ABI X86-64 Codegen... OK
+; ZCC IR module  funcs=1
+
+; func transform_vertex_4x4 -> ptr
+  ADDR        ptr     %t0  %stack_-8  -  -  ; line 2
+  LOAD        ptr     %t1  %stack_-8  -  -  ; line 2
+  CONST       i32     %t2  -  -  -  imm=0  ; line 2
+  MUL         i64     %t3  %t2  4  -  ; line 2
+  ADD         ptr     %t4  %t1  %t3  -  ; line 2
+  ADDR        ptr     %t5  %stack_-16  -  -  ; line 2
+  LOAD        i32     %t6  %stack_-16  -  -  ; line 2
+  MUL         i32     %t7  %t4  %t6  -  ; line 2
+  ADDR        ptr     %t8  %stack_-8  -  -  ; line 2
+  LOAD        ptr     %t9  %stack_-8  -  -  ; line 2
+  CONST       i32     %t10  -  -  -  imm=1  ; line 2
+  MUL         i64     %t11  %t10  4  -  ; line 2
+  ADD         ptr     %t12  %t9  %t11  -  ; line 2
+  ADDR        ptr     %t13  %stack_-24  -  -  ; line 2
+  LOAD        i32     %t14  %stack_-24  -  -  ; line 2
+  MUL         i32     %t15  %t12  %t14  -  ; line 2
+  ADD         i32     %t16  %t7  %t15  -  ; line 2
+  ADDR        ptr     %t17  %stack_-8  -  -  ; line 2
+  LOAD        ptr     %t18  %stack_-8  -  -  ; line 2
+  CONST       i32     %t19  -  -  -  imm=2  ; line 2
+  MUL         i64     %t20  %t19  4  -  ; line 2
+  ADD         ptr     %t21  %t18  %t20  -  ; line 2
+  ADDR        ptr     %t22  %stack_-32  -  -  ; line 2
+  LOAD        i32     %t23  %stack_-32  -  -  ; line 2
+  MUL         i32     %t24  %t21  %t23  -  ; line 2
+  ADD         i32     %t25  %t16  %t24  -  ; line 2
+  ADDR        ptr     %t26  %stack_-8  -  -  ; line 2
+  LOAD        ptr     %t27  %stack_-8  -  -  ; line 2
+  CONST       i32     %t28  -  -  -  imm=3  ; line 2
+  MUL         i64     %t29  %t28  4  -  ; line 2
+  ADD         ptr     %t30  %t27  %t29  -  ; line 2
+  ADDR        ptr     %t31  %stack_-40  -  -  ; line 2
+  LOAD        i32     %t32  %stack_-40  -  -  ; line 2
+  MUL         i32     %t33  %t30  %t32  -  ; line 2
+  ADD         i32     %t34  %t25  %t33  -  ; line 2
+  ADDR        ptr     %t35  %stack_-48  -  -  ; line 2
+  LOAD        ptr     %t36  %stack_-48  -  -  ; line 2
+  CONST       i32     %t37  -  -  -  imm=0  ; line 2
+  MUL         i64     %t38  %t37  4  -  ; line 2
+  ADD         ptr     %t39  %t36  %t38  -  ; line 2
+  STORE       i32     %t39  %t34  -  -  ; line 2
+  ADDR        ptr     %t40  %stack_-8  -  -  ; line 3
+  LOAD        ptr     %t41  %stack_-8  -  -  ; line 3
+  CONST       i32     %t42  -  -  -  imm=4  ; line 3
+  MUL         i64     %t43  %t42  4  -  ; line 3
+  ADD         ptr     %t44  %t41  %t43  -  ; line 3
+  ADDR        ptr     %t45  %stack_-16  -  -  ; line 3
+  LOAD        i32     %t46  %stack_-16  -  -  ; line 3
+  MUL         i32     %t47  %t44  %t46  -  ; line 3
+  ADDR        ptr     %t48  %stack_-8  -  -  ; line 3
+  LOAD        ptr     %t49  %stack_-8  -  -  ; line 3
+  CONST       i32     %t50  -  -  -  imm=5  ; line 3
+  MUL         i64     %t51  %t50  4  -  ; line 3
+  ADD         ptr     %t52  %t49  %t51  -  ; line 3
+  ADDR        ptr     %t53  %stack_-24  -  -  ; line 3
+  LOAD        i32     %t54  %stack_-24  -  -  ; line 3
+  MUL         i32     %t55  %t52  %t54  -  ; line 3
+  ADD         i32     %t56  %t47  %t55  -  ; line 3
+  ADDR        ptr     %t57  %stack_-8  -  -  ; line 3
+  LOAD        ptr     %t58  %stack_-8  -  -  ; line 3
+  CONST       i32     %t59  -  -  -  imm=6  ; line 3
+  MUL         i64     %t60  %t59  4  -  ; line 3
+  ADD         ptr     %t61  %t58  %t60  -  ; line 3
+  ADDR        ptr     %t62  %stack_-32  -  -  ; line 3
+  LOAD        i32     %t63  %stack_-32  -  -  ; line 3
+  MUL         i32     %t64  %t61  %t63  -  ; line 3
+  ADD         i32     %t65  %t56  %t64  -  ; line 3
+  ADDR        ptr     %t66  %stack_-8  -  -  ; line 3
+  LOAD        ptr     %t67  %stack_-8  -  -  ; line 3
+  CONST       i32     %t68  -  -  -  imm=7  ; line 3
+  MUL         i64     %t69  %t68  4  -  ; line 3
+  ADD         ptr     %t70  %t67  %t69  -  ; line 3
+  ADDR        ptr     %t71  %stack_-40  -  -  ; line 3
+  LOAD        i32     %t72  %stack_-40  -  -  ; line 3
+  MUL         i32     %t73  %t70  %t72  -  ; line 3
+  ADD         i32     %t74  %t65  %t73  -  ; line 3
+  ADDR        ptr     %t75  %stack_-48  -  -  ; line 3
+  LOAD        ptr     %t76  %stack_-48  -  -  ; line 3
+  CONST       i32     %t77  -  -  -  imm=1  ; line 3
+  MUL         i64     %t78  %t77  4  -  ; line 3
+  ADD         ptr     %t79  %t76  %t78  -  ; line 3
+  STORE       i32     %t79  %t74  -  -  ; line 3
+  ADDR        ptr     %t80  %stack_-8  -  -  ; line 4
+  LOAD        ptr     %t81  %stack_-8  -  -  ; line 4
+  CONST       i32     %t82  -  -  -  imm=8  ; line 4
+  MUL         i64     %t83  %t82  4  -  ; line 4
+  ADD         ptr     %t84  %t81  %t83  -  ; line 4
+  ADDR        ptr     %t85  %stack_-16  -  -  ; line 4
+  LOAD        i32     %t86  %stack_-16  -  -  ; line 4
+  MUL         i32     %t87  %t84  %t86  -  ; line 4
+  ADDR        ptr     %t88  %stack_-8  -  -  ; line 4
+  LOAD        ptr     %t89  %stack_-8  -  -  ; line 4
+  CONST       i32     %t90  -  -  -  imm=9  ; line 4
+  MUL         i64     %t91  %t90  4  -  ; line 4
+  ADD         ptr     %t92  %t89  %t91  -  ; line 4
+  ADDR        ptr     %t93  %stack_-24  -  -  ; line 4
+  LOAD        i32     %t94  %stack_-24  -  -  ; line 4
+  MUL         i32     %t95  %t92  %t94  -  ; line 4
+  ADD         i32     %t96  %t87  %t95  -  ; line 4
+  ADDR        ptr     %t97  %stack_-8  -  -  ; line 4
+  LOAD        ptr     %t98  %stack_-8  -  -  ; line 4
+  CONST       i32     %t99  -  -  -  imm=10  ; line 4
+  MUL         i64     %t100  %t99  4  -  ; line 4
+  ADD         ptr     %t101  %t98  %t100  -  ; line 4
+  ADDR        ptr     %t102  %stack_-32  -  -  ; line 4
+  LOAD        i32     %t103  %stack_-32  -  -  ; line 4
+  MUL         i32     %t104  %t101  %t103  -  ; line 4
+  ADD         i32     %t105  %t96  %t104  -  ; line 4
+  ADDR        ptr     %t106  %stack_-8  -  -  ; line 4
+  LOAD        ptr     %t107  %stack_-8  -  -  ; line 4
+  CONST       i32     %t108  -  -  -  imm=11  ; line 4
+  MUL         i64     %t109  %t108  4  -  ; line 4
+  ADD         ptr     %t110  %t107  %t109  -  ; line 4
+  ADDR        ptr     %t111  %stack_-40  -  -  ; line 4
+  LOAD        i32     %t112  %stack_-40  -  -  ; line 4
+  MUL         i32     %t113  %t110  %t112  -  ; line 4
+  ADD         i32     %t114  %t105  %t113  -  ; line 4
+  ADDR        ptr     %t115  %stack_-48  -  -  ; line 4
+  LOAD        ptr     %t116  %stack_-48  -  -  ; line 4
+  CONST       i32     %t117  -  -  -  imm=2  ; line 4
+  MUL         i64     %t118  %t117  4  -  ; line 4
+  ADD         ptr     %t119  %t116  %t118  -  ; line 4
+  STORE       i32     %t119  %t114  -  -  ; line 4
+  ADDR        ptr     %t120  %stack_-8  -  -  ; line 5
+  LOAD        ptr     %t121  %stack_-8  -  -  ; line 5
+  CONST       i32     %t122  -  -  -  imm=12  ; line 5
+  MUL         i64     %t123  %t122  4  -  ; line 5
+  ADD         ptr     %t124  %t121  %t123  -  ; line 5
+  ADDR        ptr     %t125  %stack_-16  -  -  ; line 5
+  LOAD        i32     %t126  %stack_-16  -  -  ; line 5
+  MUL         i32     %t127  %t124  %t126  -  ; line 5
+  ADDR        ptr     %t128  %stack_-8  -  -  ; line 5
+  LOAD        ptr     %t129  %stack_-8  -  -  ; line 5
+  CONST       i32     %t130  -  -  -  imm=13  ; line 5
+  MUL         i64     %t131  %t130  4  -  ; line 5
+  ADD         ptr     %t132  %t129  %t131  -  ; line 5
+  ADDR        ptr     %t133  %stack_-24  -  -  ; line 5
+  LOAD        i32     %t134  %stack_-24  -  -  ; line 5
+  MUL         i32     %t135  %t132  %t134  -  ; line 5
+  ADD         i32     %t136  %t127  %t135  -  ; line 5
+  ADDR        ptr     %t137  %stack_-8  -  -  ; line 5
+  LOAD        ptr     %t138  %stack_-8  -  -  ; line 5
+  CONST       i32     %t139  -  -  -  imm=14  ; line 5
+  MUL         i64     %t140  %t139  4  -  ; line 5
+  ADD         ptr     %t141  %t138  %t140  -  ; line 5
+  ADDR        ptr     %t142  %stack_-32  -  -  ; line 5
+  LOAD        i32     %t143  %stack_-32  -  -  ; line 5
+  MUL         i32     %t144  %t141  %t143  -  ; line 5
+  ADD         i32     %t145  %t136  %t144  -  ; line 5
+  ADDR        ptr     %t146  %stack_-8  -  -  ; line 5
+  LOAD        ptr     %t147  %stack_-8  -  -  ; line 5
+  CONST       i32     %t148  -  -  -  imm=15  ; line 5
+  MUL         i64     %t149  %t148  4  -  ; line 5
+  ADD         ptr     %t150  %t147  %t149  -  ; line 5
+  ADDR        ptr     %t151  %stack_-40  -  -  ; line 5
+  LOAD        i32     %t152  %stack_-40  -  -  ; line 5
+  MUL         i32     %t153  %t150  %t152  -  ; line 5
+  ADD         i32     %t154  %t145  %t153  -  ; line 5
+  ADDR        ptr     %t155  %stack_-48 /usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/Scrt1.o: in function `_start':
+(.text+0x1b): undefined reference to `main'
+collect2: error: ld returned 1 exit status
+ -  -  ; line 5
+  LOAD        ptr     %t156  %stack_-48  -  -  ; line 5
+  CONST       i32     %t157  -  -  -  imm=3  ; line 5
+  MUL         i64     %t158  %t157  4  -  ; line 5
+  ADD         ptr     %t159  %t156  %t158  -  ; line 5
+  STORE       i32     %t159  %t154  -  -  ; line 5
+; end transform_vertex_4x4  nodes=164
+
+[Phase 5] Native C Peephole Optimization... OK (0 elided)
+[Phase 6] GCC Assembly/Linker Binding... FAILED
+zcc: assembly/linking failed

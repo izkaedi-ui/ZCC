@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@solidity-parser/parser": "^0.20.2",
+    "@types/node": "^25.5.0",
+    "dotenv": "^17.3.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  }
+}

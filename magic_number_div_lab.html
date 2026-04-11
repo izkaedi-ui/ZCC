@@ -1,0 +1,221 @@
+
+<style>
+*{box-sizing:border-box}
+.lab{padding:1.25rem 0}
+.fl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:.9rem 0}
+.mc{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:.7rem .9rem}
+.ml{font-size:11px;color:var(--color-text-secondary);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em}
+.mv{font-family:var(--font-mono);font-size:13px;font-weight:500;word-break:break-all;color:var(--color-text-primary)}
+.mv.hi{color:var(--color-text-info)}.mv.wa{color:var(--color-text-warning)}.mv.ok{color:var(--color-text-success)}
+.qb{background:none;border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:3px 9px;font-size:12px;font-family:var(--font-mono);cursor:pointer;color:var(--color-text-secondary)}
+.qb:hover,.qb.a{background:var(--color-background-secondary);color:var(--color-text-primary)}
+.tabs{display:flex;border-bottom:.5px solid var(--color-border-tertiary);margin:1rem 0 .9rem;gap:0}
+.tab{padding:5px 12px;font-size:13px;cursor:pointer;color:var(--color-text-secondary);border:none;background:none;border-bottom:2px solid transparent;margin-bottom:-.5px}
+.tab.a{color:var(--color-text-primary);border-bottom:2px solid var(--color-text-primary);font-weight:500}
+.tab:hover{color:var(--color-text-primary)}
+.panel{display:none}.panel.a{display:block}
+pre{background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.9rem;overflow-x:auto;font-family:var(--font-mono);font-size:12px;line-height:1.8;margin:0}
+.note{border-left:2px solid var(--color-border-info);padding:.55rem .9rem;font-size:12.5px;color:var(--color-text-secondary);margin-top:.7rem;line-height:1.6}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{padding:5px 8px;border-bottom:.5px solid var(--color-border-primary);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-secondary);font-weight:500;text-align:left;font-family:var(--font-mono)}
+td{padding:4px 8px;border-bottom:.5px solid var(--color-border-tertiary);font-family:var(--font-mono)}
+.p{color:var(--color-text-success)}.f{color:var(--color-text-danger)}
+.bnr{padding:.55rem .9rem;border-radius:var(--border-radius-md);font-size:12.5px;margin:.8rem 0;font-family:var(--font-mono)}
+.bi{background:var(--color-background-info);color:var(--color-text-info)}
+.bw{background:var(--color-background-warning);color:var(--color-text-warning)}
+.dg{display:grid;overflow-x:auto}
+.dr{display:contents}
+.dc{padding:3px 12px 3px 0;font-family:var(--font-mono);font-size:12px;border-bottom:.5px solid var(--color-border-tertiary);white-space:nowrap}
+.dh{color:var(--color-text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:4px 12px 4px 0;border-bottom:.5px solid var(--color-border-primary)}
+.dl{color:var(--color-text-info)}.dq{color:var(--color-text-warning)}
+</style>
+<div class="lab">
+  <div class="fl">
+    <input type="number" id="dv" value="7" min="-9999" max="9999" style="width:76px;font-family:var(--font-mono);font-size:20px;font-weight:500" oninput="go()">
+    <span style="font-size:13px;color:var(--color-text-secondary)">64-bit signed divisor</span>
+  </div>
+  <div class="fl" style="gap:5px;margin-top:7px">
+    <button class="qb" onclick="set(3)">3</button>
+    <button class="qb" onclick="set(5)">5</button>
+    <button class="qb" onclick="set(6)">6</button>
+    <button class="qb a" onclick="set(7)">7</button>
+    <button class="qb" onclick="set(9)">9</button>
+    <button class="qb" onclick="set(10)">10</button>
+    <button class="qb" onclick="set(11)">11</button>
+    <button class="qb" onclick="set(12)">12</button>
+    <button class="qb" onclick="set(100)">100</button>
+    <button class="qb" onclick="set(-7)">−7</button>
+    <button class="qb" onclick="set(-3)">−3</button>
+  </div>
+  <div id="bnr"></div>
+  <div class="g3">
+    <div class="mc"><div class="ml">M — magic constant (hex)</div><div class="mv" id="mh">—</div></div>
+    <div class="mc"><div class="ml">M — signed decimal</div><div class="mv" id="md">—</div></div>
+    <div class="mc"><div class="ml">post-shift s</div><div class="mv" id="sv">—</div></div>
+    <div class="mc"><div class="ml">variant</div><div class="mv" id="vt">—</div></div>
+    <div class="mc"><div class="ml">convergence p</div><div class="mv" id="pv">—</div></div>
+    <div class="mc"><div class="ml">cycle savings</div><div class="mv" id="cy">—</div></div>
+  </div>
+  <div class="tabs">
+    <button class="tab a" onclick="sw('asm',this)">assembly</button>
+    <button class="tab" onclick="sw('prf',this)">proof</button>
+    <button class="tab" onclick="sw('drv',this)">derivation</button>
+    <button class="tab" onclick="sw('zcc',this)">zcc table</button>
+  </div>
+  <div class="panel a" id="p-asm"><pre id="ao">—</pre><div class="note" id="an">—</div></div>
+  <div class="panel" id="p-prf">
+    <div style="font-size:12.5px;color:var(--color-text-secondary);margin-bottom:.6rem">verifying <code style="font-family:var(--font-mono)">trunc(x/d) === magic(x, M, s)</code> across 18 test values</div>
+    <table><thead><tr><th>x</th><th>exact trunc(x/d)</th><th>magic result</th><th>match</th></tr></thead><tbody id="pt"></tbody></table>
+  </div>
+  <div class="panel" id="p-drv">
+    <div style="font-size:12.5px;color:var(--color-text-secondary);margin-bottom:.6rem">hacker's delight iterative doubling — stop when q1 ≥ δ and not (q1 == δ ∧ r1 == 0)</div>
+    <div id="dv2"></div>
+  </div>
+  <div class="panel" id="p-zcc">
+    <div style="font-size:12.5px;color:var(--color-text-secondary);margin-bottom:.6rem">struct entry for <code style="font-family:var(--font-mono)">zcc_magic[]</code> in part4.c — index by |d|</div>
+    <pre id="zt">—</pre>
+    <div class="note">ZCC lacks __int128, so magic constants must be pre-computed at build time and stored in a static table indexed by |d|. T4-D codegen_expr() looks up the entry and emits the 4–6 instruction sequence. Download the full zcc_magic.h (d = 3…256) from the companion artifact below.</div>
+  </div>
+</div>
+<script>
+const T63=1n<<63n,T64=1n<<64n;
+function cmp(d){
+  const ad=Math.abs(d);
+  if(!d)return{t:'err'};
+  if(ad===1)return{t:d>0?'id':'neg',d};
+  if(ad>1&&(ad&(ad-1))===0)return{t:'p2',k:Math.log2(ad),d};
+  const D=BigInt(ad),nc=((T63-1n)/D)*D;
+  let p=63n,q1=T63/nc,r1=T63%nc,q2=T63/D,r2=T63%D,dl,st=[];
+  do{
+    p++;
+    const rd1=2n*r1;if(rd1>=nc){q1=2n*q1+1n;r1=rd1-nc}else{q1=2n*q1;r1=rd1}
+    const rd2=2n*r2;if(rd2>=D){q2=2n*q2+1n;r2=rd2-D}else{q2=2n*q2;r2=rd2}
+    dl=D-r2;st.push({p:Number(p),q1,r1,q2,r2,dl});
+  }while(q1<dl||(q1===dl&&r1===0n));
+  const M=q2+1n,s=Number(p)-64,ac=M>=T63;
+  let Ms=ac?M-T64:M;if(d<0)Ms=-Ms;
+  return{t:ac?'ov':'std',M:Ms,s,ac,d,ad,p:Number(p),st,nc:nc.toString()};
+}
+function h64(M){const u=((M%T64)+T64)%T64;return'0x'+u.toString(16).toUpperCase().padStart(16,'0')}
+function sbn(n){const s=n.toString();return s.length>16?s.slice(0,7)+'…'+s.slice(-5):s}
+function mdiv(x,R){
+  if(R.t!=='std'&&R.t!=='ov')return null;
+  const xb=BigInt(x),prod=xb*R.M;
+  let hi=prod>>64n;
+  if(R.ac)hi+=xb;
+  if(R.s>0)hi=hi>>BigInt(R.s);
+  return hi>=0n?hi:hi+1n;
+}
+function genAsm(R){
+  if(!R)return'(invalid)';
+  const d=R.d,mx=R.M?h64(R.M):'';
+  if(R.t==='err')return'; division by zero';
+  if(R.t==='id')return`; d = ${d}: identity — x / 1 = x, result already in %rax`;
+  if(R.t==='neg')return`; d = ${d}: negate\n    negq    %rax                    ; x / −1 = −x`;
+  if(R.t==='p2'){const k=R.k;return[
+    `; d = ${d}: power-of-2 — T3-A handles this`,
+    `    movq    %rax, %rcx`,
+    `    sarq    $63,   %rcx             ; propagate sign bit`,
+    `    andq    $${d-1}, %rcx           ; bias = ${d-1} if x < 0, else 0`,
+    `    addq    %rcx,  %rax             ; biased numerator`,
+    `    sarq    $${k},  %rax            ; = trunc(x / ${d})  [T3-A]`,
+  ].join('\n');}
+  const ls=[
+    `; d = ${d}  M = ${mx}  s = ${R.s}  variant = ${R.t}`,
+    `; T4-D: idivq (~35-90 cy) → magic multiply (~8-10 cy)`,
+    ``,
+  ];
+  if(R.ac)ls.push(`    movq    %rax, %r10             ; save dividend x`);
+  ls.push(`    movabsq ${mx}, %rcx`);
+  ls.push(`    imulq   %rcx                   ; rdx:rax = x × M  (128-bit signed)`);
+  if(R.ac)ls.push(`    addq    %r10, %rdx             ; overflow correction (+x)`);
+  if(R.s>0)ls.push(`    sarq    $${R.s},   %rdx${' '.repeat(Math.max(1,20-String(R.s).length))}; post-shift by s=${R.s}`);
+  ls.push(`    movq    %rdx, %rax`);
+  ls.push(`    sarq    $63,   %rax             ; sign: 0 if ≥0, −1 if <0`);
+  ls.push(`    subq    %rax,  %rdx             ; rdx = trunc(x / ${Math.abs(d)})`);
+  ls.push(`    movq    %rdx,  %rax             ; result in %rax`);
+  if(d<0)ls.push(`    negq    %rax                   ; negate for negative divisor`);
+  return ls.join('\n');
+}
+function genZcc(R){
+  if(!R||R.t==='err')return'/* invalid */';
+  if(R.t==='id'||R.t==='neg')return`/* d=${R.d}: handled before table (identity/negate) */`;
+  if(R.t==='p2')return`/* d=${R.d}: power-of-2, handled by T3-A (sarq $${R.k}) — table entry unused */`;
+  const mx=h64(R.M);
+  return[
+    `/* |d| = ${R.ad} */`,
+    `[${R.ad}] = {`,
+    `    .M       = ${mx}LL,`,
+    `    .M_dec   = /* ${R.M} */`,
+    `    .s       = ${R.s},`,
+    `    .addCorr = ${R.ac?1:0},   /* ${R.ac?'overflow variant: emit addq %r10,%rdx':'standard: no addq needed'} */`,
+    `    .negResult = ${R.d<0?1:0} /* negate final result for negative divisors */`,
+    `},`,
+  ].join('\n');
+}
+const TXS=[-21n,-14n,-7n,-6n,-3n,-2n,-1n,0n,1n,2n,3n,5n,7n,13n,14n,21n,49n,100n];
+let CUR=cmp(7);
+function sw(id,btn){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('a'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('a'));
+  document.getElementById('p-'+id).classList.add('a');
+  btn.classList.add('a');
+}
+function set(v){document.getElementById('dv').value=v;document.querySelectorAll('.qb').forEach(b=>{const tv=parseInt(b.textContent.replace('−','-'),10);b.classList.toggle('a',tv===v)});go()}
+function go(){
+  const v=parseInt(document.getElementById('dv').value,10);
+  if(isNaN(v)||Math.abs(v)>9999)return;
+  CUR=cmp(v);render(CUR);
+}
+function render(R){
+  const bnr=document.getElementById('bnr');
+  if(R.t==='err'){bnr.innerHTML='<div class="bnr bw">division by zero</div>';clearStats();return}
+  if(R.t==='p2'){bnr.innerHTML=`<div class="bnr bi">d = ${R.d} is a power of 2 — T3-A already handles this with sarq $${R.k}. T4-D not needed.</div>`}
+  else if(R.t==='id'){bnr.innerHTML=`<div class="bnr bi">d = 1: identity — emit no code, result stays in %rax.</div>`}
+  else if(R.t==='neg'){bnr.innerHTML=`<div class="bnr bi">d = −1: emit negq — no magic constant needed.</div>`}
+  else{bnr.innerHTML=''}
+  if(R.t==='std'||R.t==='ov'){
+    document.getElementById('mh').textContent=h64(R.M);
+    document.getElementById('md').textContent=R.M.toString();
+    document.getElementById('sv').textContent=String(R.s);
+    const vte=document.getElementById('vt');vte.className='mv '+(R.ac?'wa':'hi');
+    vte.textContent=R.ac?'overflow  (+addq)':'standard';
+    document.getElementById('pv').textContent=String(R.p);
+    document.getElementById('cy').innerHTML='<span style="color:var(--color-text-danger)">idivq: ~35–90 cy</span>  →  <span class="p">magic: ~8–10 cy</span>';
+  }else{clearStats()}
+  document.getElementById('ao').textContent=genAsm(R);
+  document.getElementById('an').textContent=R.t==='ov'
+    ?'Overflow variant: M ≥ 2⁶³ wraps negative as a signed 64-bit constant. The imulq product undershoots by x × 2⁶⁴, so we save x in %r10 before the multiply and add it back to rdx afterward.'
+    :R.t==='std'
+    ?'Standard variant: M fits in signed 64-bit. Load constant, 128-bit multiply (rdx = high half), optional sarq $s, then branchless sign correction (sarq $63 extracts sign bit; subq adjusts +1 for negative results to match C99 truncation).'
+    :'See banner above for this special case.';
+  // Proof
+  const tb=document.getElementById('pt');tb.innerHTML='';
+  TXS.forEach(xb=>{
+    const x=Number(xb);
+    if(R.d===0){tb.innerHTML+=`<tr><td>${x}</td><td>—</td><td>—</td><td>—</td></tr>`;return}
+    const exact=xb/BigInt(R.d);
+    const got=mdiv(x,R);
+    const pass=got!==null&&got===exact;
+    tb.innerHTML+=`<tr><td>${x}</td><td>${exact}</td><td>${got!==null?got:'—'}</td><td class="${pass?'p':'f'}">${pass?'✓ pass':'✗ fail'}</td></tr>`;
+  });
+  // Derivation
+  const dv=document.getElementById('dv2');
+  if(R.st&&R.st.length>0){
+    let h=`<div style="font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);margin-bottom:.5rem">nc = ${sbn(BigInt(R.nc))} &nbsp;(largest multiple of ${R.ad} ≤ 2⁶³−1)</div>`;
+    h+=`<div style="overflow-x:auto"><table style="width:auto"><thead><tr><th>p</th><th>q1</th><th>r1</th><th>q2</th><th>r2</th><th>δ = D − r2</th><th></th></tr></thead><tbody>`;
+    R.st.forEach((st,i)=>{
+      const last=i===R.st.length-1;
+      const cls=last?'style="color:var(--color-text-primary)"':'';
+      h+=`<tr ${cls}><td>${st.p}</td><td style="${last?'color:var(--color-text-info)':''}">${sbn(st.q1)}</td><td>${sbn(st.r1)}</td><td style="${last?'color:var(--color-text-warning)':''}">${sbn(st.q2)}</td><td>${sbn(st.r2)}</td><td>${sbn(st.dl)}</td><td style="font-size:11px;color:var(--color-text-secondary)">${last?'← stop: q1 ≥ δ':''}</td></tr>`;
+    });
+    h+=`</tbody></table></div>`;
+    h+=`<div style="font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);margin-top:.6rem">M = q2 + 1 = ${R.M}&nbsp;&nbsp; s = p − 64 = ${R.s}</div>`;
+    dv.innerHTML=h;
+  }else{dv.innerHTML='<div style="color:var(--color-text-secondary);font-size:13px">no iteration needed for this divisor type</div>'}
+  document.getElementById('zt').textContent=genZcc(R);
+}
+function clearStats(){['mh','md','sv','vt','pv','cy'].forEach(id=>{document.getElementById(id).textContent='—';document.getElementById(id).className='mv'})}
+render(CUR);
+</script>
