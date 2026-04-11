@@ -273,12 +273,14 @@ static Type *parse_enum_def(Compiler *cc) {
 
 Type *parse_type(Compiler *cc) {
     int is_unsigned;
+    int is_signed;
     int is_typedef_kw;
     int is_static;
     int is_extern;
     Type *type;
 
     is_unsigned = 0;
+    is_signed = 0;
     is_typedef_kw = 0;
     is_static = 0;
     is_extern = 0;
@@ -298,7 +300,7 @@ Type *parse_type(Compiler *cc) {
     }
 
     if (cc->tk == TK_UNSIGNED) { is_unsigned = 1; next_token(cc); }
-    else if (cc->tk == TK_SIGNED) { next_token(cc); }
+    else if (cc->tk == TK_SIGNED) { is_signed = 1; next_token(cc); }
 
     if (cc->tk == TK_VOID) { type = cc->ty_void; next_token(cc); }
     else if (cc->tk == TK_CHAR) {
@@ -322,6 +324,7 @@ Type *parse_type(Compiler *cc) {
             if (is_unsigned) { type = cc->ty_ulonglong; } else { type = cc->ty_longlong; }
         } else {
             if (cc->tk == TK_INT) next_token(cc);
+            else if (cc->tk == TK_DOUBLE) next_token(cc); /* consume 'long double' */
             if (is_unsigned) { type = cc->ty_ulong; } else { type = cc->ty_long; }
         }
     }
@@ -364,6 +367,7 @@ Type *parse_type(Compiler *cc) {
             if (is_unsigned) {
                 type = cc->ty_uint;
             } else {
+                printf("DEBUG: parse_type fallback 1: tk=%d text='%s'\n", cc->tk, cc->tk_text);
                 error(cc, "expected type");
                 type = cc->ty_int;
             }
@@ -372,7 +376,10 @@ Type *parse_type(Compiler *cc) {
     else {
         if (is_unsigned) {
             type = cc->ty_uint;
+        } else if (is_signed) {
+            type = cc->ty_int;
         } else {
+            printf("DEBUG: parse_type fallback 2: tk=%d text='%s'\n", cc->tk, cc->tk_text);
             error(cc, "expected type");
             type = cc->ty_int;
         }
@@ -413,8 +420,16 @@ static int eval_const_expr(Node *n) {
     if (n->kind == ND_BOR) return eval_const_expr(n->lhs) | eval_const_expr(n->rhs);
     if (n->kind == ND_BXOR) return eval_const_expr(n->lhs) ^ eval_const_expr(n->rhs);
     if (n->kind == ND_CAST) return eval_const_expr(n->lhs);
+    /* Unary operators — critical for negative switch cases like case (-15): */
+    if (n->kind == ND_NEG)  return -eval_const_expr(n->lhs);
+    if (n->kind == ND_BNOT) return ~eval_const_expr(n->lhs);
+    if (n->kind == ND_LNOT) return !eval_const_expr(n->lhs);
+    /* Enum constants (global only — local vars are NOT constants) */
+    if (n->kind == ND_VAR && n->sym && n->sym->is_enum_const && !n->sym->is_local)
+        return n->sym->enum_val;
     return 0; /* Fallback for unsupported complex compile-time bounds */
 }
+
 
 
 Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
@@ -500,6 +515,7 @@ Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
                             if (cc->tk == TK_EOF) break;
                             ptype = parse_type(cc);
                             ptype = parse_declarator(cc, ptype, pname);
+                            if (ptype->kind == TY_ARRAY) ptype = type_ptr(cc, ptype->base);
                             if (ftype->num_params < MAX_PARAMS) {
                                 ftype->params[ftype->num_params] = ptype;
                                 ftype->num_params++;
@@ -573,6 +589,8 @@ Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
 
                     ptype = parse_type(cc);
                     ptype = parse_declarator(cc, ptype, pname);
+
+                    if (ptype->kind == TY_ARRAY) ptype = type_ptr(cc, ptype->base);
 
                     if (ftype->num_params < MAX_PARAMS) {
                         ftype->params[ftype->num_params] = ptype;
@@ -680,7 +698,11 @@ Node *parse_primary(Compiler *cc) {
             if (sym->asm_name[0]) {
                 strncpy(n->name, sym->asm_name, MAX_IDENT - 1);
             }
-            if (sym->is_enum_const) {
+            if (sym->is_enum_const && !sym->is_local) {
+                /* Only fold to ND_NUM if this is truly a global enum constant.
+                 * A local variable (is_local=1) with the same name as an outer
+                 * enum constant must NOT be constant-folded — it is a live
+                 * stack variable that must be loaded at runtime. */
                 n->kind = ND_NUM;
                 n->int_val = sym->enum_val;
                 n->type = cc->ty_int;
@@ -2018,7 +2040,17 @@ Node *parse_stmt(Compiler *cc) {
                                     sym->type->size = gvar->type->size;
                                 }
                             } else {
-                                gvar->initializer = parse_assign(cc);
+                                Node *init_node2 = parse_assign(cc);
+                                gvar->initializer = init_node2;
+                                /* Fix: if char[] initialized with string literal, update size */
+                                if (init_node2 && init_node2->kind == ND_STR &&
+                                    gvar->type->kind == TY_ARRAY && gvar->type->array_len == 0) {
+                                    int slen2 = cc->strings[init_node2->str_id].len + 1;
+                                    gvar->type->array_len = slen2;
+                                    gvar->type->size = type_size(gvar->type->base) * slen2;
+                                    sym->type->array_len = slen2;
+                                    sym->type->size = gvar->type->size;
+                                }
                             }
                         }
 
@@ -2135,16 +2167,154 @@ Node *parse_stmt(Compiler *cc) {
                                         cnt++;
                                     }
                                 }
+                            } else if (vtype->kind == TY_STRUCT || vtype->kind == TY_UNION) {
+                                /* Local struct/union initializer: {v0, v1, ...}
+                                 * Walk StructField list, assign each field in order. */
+                                int init_count_s;
+                                int init_cap_s;
+                                Node **inits_s;
+                                int skip_tk_s;
+                                int prev_pos_s;
+                                int no_progress_s;
+                                int depth_s;
+                                init_count_s = 0;
+                                init_cap_s = 32;
+                                inits_s = (Node **)cc_alloc(cc, sizeof(Node *) * init_cap_s);
+                                depth_s = 1;
+                                no_progress_s = 0;
+                                next_token(cc); /* skip { */
+                                while (depth_s > 0 && cc->tk != TK_EOF) {
+                                    prev_pos_s = cc->pos;
+                                    if (cc->tk == TK_LBRACE) {
+                                        depth_s++;
+                                        next_token(cc);
+                                    } else if (cc->tk == TK_RBRACE) {
+                                        depth_s--;
+                                        if (depth_s == 0) break;
+                                        next_token(cc);
+                                    } else if (cc->tk == TK_COMMA) {
+                                        next_token(cc);
+                                    } else {
+                                        skip_tk_s = cc->tk;
+                                        if (init_count_s < init_cap_s) {
+                                            inits_s[init_count_s++] = parse_assign(cc);
+                                        } else {
+                                            parse_assign(cc);
+                                        }
+                                        if (cc->tk == skip_tk_s) {
+                                            if (cc->tk != TK_EOF) next_token(cc);
+                                        }
+                                        if (cc->pos == prev_pos_s) {
+                                            no_progress_s++;
+                                            if (no_progress_s > 100) break;
+                                        } else {
+                                            no_progress_s = 0;
+                                        }
+                                    }
+                                }
+                                if (cc->tk == TK_RBRACE) next_token(cc);
+                                /* Now emit field assignments */
+                                {
+                                    StructField *sf;
+                                    int fi;
+                                    fi = 0;
+                                    sf = vtype->fields;
+                                    while (sf && fi < init_count_s) {
+                                        /* Build: var.sf_name = inits_s[fi] */
+                                        Node *var_n;
+                                        Node *mem_n;
+                                        Node *asgn_n;
+                                        int acc_off;
+                                        StructField *found_f;
+                                        var_n = node_new(cc, ND_VAR, line);
+                                        strncpy(var_n->name, vname, MAX_IDENT - 1);
+                                        var_n->sym = sym;
+                                        var_n->type = vtype;
+                                        acc_off = 0;
+                                        found_f = find_struct_member(vtype, sf->name, &acc_off);
+                                        mem_n = node_new(cc, ND_MEMBER, line);
+                                        mem_n->lhs = var_n;
+                                        strncpy(mem_n->member_name, sf->name, MAX_IDENT - 1);
+                                        if (found_f) {
+                                            mem_n->member_offset = acc_off;
+                                            mem_n->type = found_f->type;
+                                            mem_n->member_size = type_size(found_f->type);
+                                        } else {
+                                            mem_n->member_offset = sf->offset;
+                                            mem_n->type = sf->type;
+                                            mem_n->member_size = type_size(sf->type);
+                                        }
+                                        asgn_n = node_new(cc, ND_ASSIGN, line);
+                                        asgn_n->lhs = mem_n;
+                                        asgn_n->rhs = inits_s[fi];
+                                        asgn_n->type = mem_n->type;
+                                        /* Grow block if needed */
+                                        if (cnt >= cap) {
+                                            Node **new_stmts;
+                                            int ji;
+                                            new_stmts = (Node **)cc_alloc(cc, sizeof(Node *) * cap * 2);
+                                            for (ji = 0; ji < cnt; ji++) new_stmts[ji] = block->stmts[ji];
+                                            block->stmts = new_stmts;
+                                            cap = cap * 2;
+                                        }
+                                        block->stmts[cnt] = asgn_n;
+                                        cnt++;
+                                        sf = sf->next;
+                                        fi++;
+                                        /* Skip nested struct fields for now — treat as flat */
+                                    }
+                                    /* Zero-initialize remaining fields if fewer inits provided */
+                                    while (sf) {
+                                        Node *var_n;
+                                        Node *mem_n;
+                                        Node *asgn_n;
+                                        int acc_off;
+                                        StructField *found_f;
+                                        var_n = node_new(cc, ND_VAR, line);
+                                        strncpy(var_n->name, vname, MAX_IDENT - 1);
+                                        var_n->sym = sym;
+                                        var_n->type = vtype;
+                                        acc_off = 0;
+                                        found_f = find_struct_member(vtype, sf->name, &acc_off);
+                                        mem_n = node_new(cc, ND_MEMBER, line);
+                                        mem_n->lhs = var_n;
+                                        strncpy(mem_n->member_name, sf->name, MAX_IDENT - 1);
+                                        if (found_f) {
+                                            mem_n->member_offset = acc_off;
+                                            mem_n->type = found_f->type;
+                                            mem_n->member_size = type_size(found_f->type);
+                                        } else {
+                                            mem_n->member_offset = sf->offset;
+                                            mem_n->type = sf->type;
+                                            mem_n->member_size = type_size(sf->type);
+                                        }
+                                        asgn_n = node_new(cc, ND_ASSIGN, line);
+                                        asgn_n->lhs = mem_n;
+                                        asgn_n->rhs = node_num(cc, 0LL, line);
+                                        asgn_n->type = mem_n->type;
+                                        if (cnt >= cap) {
+                                            Node **new_stmts;
+                                            int ji;
+                                            new_stmts = (Node **)cc_alloc(cc, sizeof(Node *) * cap * 2);
+                                            for (ji = 0; ji < cnt; ji++) new_stmts[ji] = block->stmts[ji];
+                                            block->stmts = new_stmts;
+                                            cap = cap * 2;
+                                        }
+                                        block->stmts[cnt] = asgn_n;
+                                        cnt++;
+                                        sf = sf->next;
+                                    }
+                                }
                             } else {
-                                /* non-array: skip initializer list for now */
-                                int skip_depth;
-                                skip_depth = 1;
+                                /* Other non-array, non-struct types: skip initializer list */
+                                int skip_depth_x;
+                                skip_depth_x = 1;
                                 next_token(cc);
-                                while (skip_depth > 0) {
+                                while (skip_depth_x > 0) {
                                     if (cc->tk == TK_EOF) break;
-                                    if (cc->tk == TK_LBRACE) skip_depth = skip_depth + 1;
-                                    if (cc->tk == TK_RBRACE) skip_depth = skip_depth - 1;
-                                    if (skip_depth > 0) next_token(cc);
+                                    if (cc->tk == TK_LBRACE) skip_depth_x = skip_depth_x + 1;
+                                    if (cc->tk == TK_RBRACE) skip_depth_x = skip_depth_x - 1;
+                                    if (skip_depth_x > 0) next_token(cc);
                                 }
                                 next_token(cc);
                             }
@@ -2247,6 +2417,8 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
 
                 ptype = parse_type(cc);
                 ptype = parse_declarator(cc, ptype, pname);
+
+                if (ptype->kind == TY_ARRAY) ptype = type_ptr(cc, ptype->base);
 
                 if (func->num_params < MAX_PARAMS) {
                     func->param_types[func->num_params] = ptype;
@@ -2505,15 +2677,29 @@ Node *parse_program(Compiler *cc) {
 
             /* function definition or forward declaration: name followed by ( */
             if (cc->tk == TK_LPAREN) {
-                Node *func;
-                func = parse_func_def(cc, ptr_type, name, is_static);
-                /* only link into list if definition (has body); forward decl has body == 0 */
-                if (func->body) {
-                    func->next = 0;
-                    if (!head) { head = func; tail = func; }
-                    else { tail->next = func; tail = func; }
+                if (!is_typedef_kw) {
+                    Node *func;
+                    func = parse_func_def(cc, ptr_type, name, is_static);
+                    /* only link into list if definition (has body); forward decl has body == 0 */
+                    if (func->body) {
+                        func->next = 0;
+                        if (!head) { head = func; tail = func; }
+                        else { tail->next = func; tail = func; }
+                    }
+                    continue;
+                } else {
+                    /* it's a typedef to a function type: typedef int func_t(int, int); */
+                    int depth;
+                    dtype = type_func(cc, ptr_type);
+                    next_token(cc); /* consume ( */
+                    depth = 1;
+                    while (depth > 0 && cc->tk != TK_EOF) {
+                        if (cc->tk == TK_LPAREN) depth++;
+                        else if (cc->tk == TK_RPAREN) depth--;
+                        next_token(cc);
+                    }
+                    /* falls through to array dimensional parsing or typedef registration */
                 }
-                continue;
             }
 
             /* array dimensions after name */
@@ -2655,7 +2841,15 @@ Node *parse_program(Compiler *cc) {
                         }
                     }
                 } else {
-                    gvar->initializer = parse_assign(cc);
+                    Node *init_node = parse_assign(cc);
+                    gvar->initializer = init_node;
+                    /* Fix: if char[] initialized with string literal, update size */
+                    if (init_node && init_node->kind == ND_STR &&
+                        gvar->type->kind == TY_ARRAY && gvar->type->array_len == 0) {
+                        int slen = cc->strings[init_node->str_id].len + 1; /* +1 for null */
+                        gvar->type->array_len = slen;
+                        gvar->type->size = type_size(gvar->type->base) * slen;
+                    }
                 }
             }
 

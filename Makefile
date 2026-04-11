@@ -44,5 +44,37 @@ ir-verify: zcc2
 
 sqlite: zcc2
 	@echo "=== Compiling SQLite 160MB Amalgamation with ZCC ==="
-	./zcc2 sqlite3_zcc.c -o sqlite3
+	./zcc2 sqlite3_zcc.c -o sqlite3_zcc.s
+	@echo "=== Linking sqlite3_test ==="
+	gcc -no-pie -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables \
+		-o sqlite3_test sqlite3_zcc.s sqlite3_functest.c -ldl -lpthread -lm
 	@echo "=== Build Complete ==="
+
+# ─── ONEIROGENESIS v2: A Compiler That Dreams ────────────────────
+dream: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 — The Compiler Dreams ==="
+	python3 zcc_oneirogenesis.py --cycles 50
+
+dream-sweep: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 [SWEEP — apply all patterns] ==="
+	python3 zcc_oneirogenesis.py --sweep --cycles 5 --mutations 1
+
+dream-islands: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 [ISLAND MODEL — 3 lineages] ==="
+	python3 zcc_oneirogenesis.py --islands 3 --cycles 60 --mutations 4
+
+dream-aggressive: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 [AGGRESSIVE] ==="
+	python3 zcc_oneirogenesis.py --cycles 200 --aggressive --islands 3 --sweep
+
+dream-dry: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 [DRY RUN] ==="
+	python3 zcc_oneirogenesis.py --dry-run --cycles 10 --sweep
+
+dream-visualize: zcc2
+	@echo "=== ZCC ONEIROGENESIS v2 [GOD'S EYE TELEMETRY] ==="
+	python3 zcc_oneirogenesis.py --cycles 100 --visualize --islands 2
+
+dream-reset:
+	@echo "=== Resetting dream state ==="
+	python3 zcc_oneirogenesis.py --reset

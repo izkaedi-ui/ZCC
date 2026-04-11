@@ -497,7 +497,23 @@ static int read_escape(Compiler *cc) {
         case '\\': return '\\';
         case '\'': return '\'';
         case '"': return '"';
-        case '0': return '\0';
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7': {
+            int val = c - '0';
+            if (peek_char(cc) >= '0' && peek_char(cc) <= '7') {
+                val = val * 8 + (read_char(cc) - '0');
+                if (peek_char(cc) >= '0' && peek_char(cc) <= '7') {
+                    val = val * 8 + (read_char(cc) - '0');
+                }
+            }
+            return val;
+        }
         case 'a': return '\a';
         case 'b': return '\b';
         case 'f': return '\f';
@@ -938,6 +954,7 @@ static const char *token_name(int t) {
         "IF", "ELSE", "WHILE", "FOR", "DO", "RETURN", "BREAK", "CONTINUE", "GOTO",
         "SWITCH", "CASE", "DEFAULT", "STRUCT", "UNION", "ENUM", "TYPEDEF",
         "SIZEOF", "STATIC", "EXTERN", "CONST", "VOLATILE", "AUTO", "REGISTER", "INLINE",
+        "BUILTIN_VA_ARG",
         "PLUS", "MINUS", "STAR", "SLASH", "PERCENT", "AMP", "PIPE", "CARET", "TILDE", "BANG",
         "ASSIGN", "EQ", "NE", "LT", "GT", "LE", "GE", "LAND", "LOR", "SHL", "SHR",
         "INC", "DEC", "ARROW", "DOT", "QUESTION", "COLON",

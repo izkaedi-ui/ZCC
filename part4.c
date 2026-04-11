@@ -474,7 +474,7 @@ void codegen_expr(Compiler *cc, Node *node) {
   case ND_VAR:
     if (node->sym && node->sym->assigned_reg) {
       fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
-      if (node->type && !node_type_unsigned(node)) {
+      if (node->type && !node_type_unsigned(node) && !is_pointer(node->type)) {
           if (node->type->size == 4) fprintf(cc->out, "    cltq\n");
           else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -520,7 +520,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(rhs_ir);
     if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->sym &&
         node->lhs->sym->assigned_reg) {
-      if (node->lhs->type && !node_type_unsigned(node->lhs)) {
+      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
           if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -568,6 +568,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    popq %%rsi\n");
         fprintf(cc->out, "    movq %%r11, %%rax\n");
       } else {
+        /* If member type is pointer/func, always use movq regardless of member_size */
+        if (node->lhs->type && is_pointer(node->lhs->type)) {
+          fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+        } else {
         switch (node->lhs->member_size) {
         case 1:
           fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
@@ -581,6 +585,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         default:
           fprintf(cc->out, "    movq %%r11, (%%rax)\n");
           break;
+        }
         }
         fprintf(cc->out, "    movq %%r11, %%rax\n");
       }
@@ -664,7 +669,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       default:
         break;
       }
-      if (node->lhs->type && !node_type_unsigned(node->lhs)) {
+      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
           if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -799,7 +804,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
     }
     fprintf(cc->out, "    movq %%r11, %%rax\n");
-    if (node->lhs->type && !node_type_unsigned(node->lhs)) {
+    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
         if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -862,7 +867,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
     }
     fprintf(cc->out, "    addq %%r11, %%rax\n");
-    if (node->type && type_size(node->type) == 4) {
+    if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
         fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
@@ -926,7 +931,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
     }
     fprintf(cc->out, "    subq %%r11, %%rax\n");
-    if (node->type && type_size(node->type) == 4) {
+    if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
         fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
@@ -1007,7 +1012,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
     fprintf(cc->out, "    imulq %%r11, %%rax\n");
-    if (node->type && type_size(node->type) == 4) {
+    if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
         fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
@@ -1399,11 +1404,13 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    cmpl $48, %%edx\n");
     fprintf(cc->out, "    jae .L%d\n", lbl_overflow);
 
-    /* Fast path: fetch from reg_save_area */
+    /* Fast path: fetch from reg_save_area (accounting for reverse stack allocation layout) */
     fprintf(cc->out, "    movq 16(%%rcx), %%rsi\n");
-    fprintf(cc->out, "    movl %%edx, %%eax\n");
-    fprintf(cc->out, "    addq %%rsi, %%rax\n");
-    fprintf(cc->out, "    movq (%%rax), %%rax\n");
+    fprintf(cc->out, "    movslq %%edx, %%rax\n");
+    fprintf(cc->out, "    movq $40, %%r11\n");
+    fprintf(cc->out, "    subq %%rax, %%r11\n");
+    fprintf(cc->out, "    addq %%rsi, %%r11\n");
+    fprintf(cc->out, "    movq (%%r11), %%rax\n");
 
     /* Increment gp_offset by 8 */
     fprintf(cc->out, "    addl $8, %%edx\n");
@@ -1500,11 +1507,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       case 4:
         if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG)
             fprintf(cc->out, "    movl %%eax, %%eax\n");
-        else
+        else if (!is_pointer(node->lhs ? node->lhs->type : 0))
             fprintf(cc->out, "    cltq\n");
         break;
       case 8:
-        if (src_size == 4) {
+        if (src_size == 4 && !is_pointer(node->lhs ? node->lhs->type : 0)) {
             if (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type))
                 fprintf(cc->out, "    movl %%eax, %%eax\n");
             else
@@ -1868,6 +1875,9 @@ void codegen_expr(Compiler *cc, Node *node) {
       fprintf(cc->out, "    movq %%rax, 8(%%rdi)\n");
       fprintf(cc->out, "    leaq -48(%%rbp), %%rax\n");
       fprintf(cc->out, "    movq %%rax, 16(%%rdi)\n");
+    } else if (strcmp(node->func_name, "__builtin_va_end") == 0) {
+      /* va_end is a no-op on x86-64 SysV ABI */
+      fprintf(cc->out, "    # __builtin_va_end (no-op)\n");
     } else {
       fprintf(cc->out, "    call %s\n", node->func_name);
     }
@@ -2069,18 +2079,36 @@ void codegen_stmt(Compiler *cc, Node *node) {
   }
 
   case ND_DO_WHILE: {
+    /* do { body } while (cond)
+     * Layout:
+     *   lbl_body: (lbl1)
+     *       <body> — break→lbl2, continue→lbl_cond
+     *   lbl_cond: (lbl3 — new label for condition)
+     *       <cond>; jne lbl_body
+     *   lbl_break: (lbl2)
+     *
+     * CRITICAL: continue must jump to lbl_cond (the condition/increment),
+     * NOT back to lbl_body (which would skip the while-condition entirely,
+     * turning "do { if(!x) continue; } while(++i<n)" into an infinite loop
+     * because ++i is in the condition and never evaluated). */
+    int lbl3;   /* separate continue-target label = condition start */
     char cond_ir[32];
     char ir_lbl[32];
-    lbl1 = new_label(cc);
-    lbl2 = new_label(cc);
+    lbl1 = new_label(cc);  /* body start */
+    lbl2 = new_label(cc);  /* break/exit */
+    lbl3 = new_label(cc);  /* continue target = condition-start */
     old_break = cc->break_label;
     old_continue = cc->continue_label;
     cc->break_label = lbl2;
-    cc->continue_label = lbl1;
+    cc->continue_label = lbl3;   /* ← fix: continue skips to condition */
     emit_label_fmt(cc, lbl1, FMT_DEF);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_stmt(cc, node->body);
+    /* condition begins here — this is where continue targets */
+    emit_label_fmt(cc, lbl3, FMT_DEF);
+    sprintf(ir_lbl, ".L%d", lbl3);
+    ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
     fprintf(cc->out, "    cmpq $0, %%rax\n");
@@ -2486,14 +2514,30 @@ void codegen_func(Compiler *cc, Node *func) {
      the offsets directly. Params got sequential offsets from scope_add_local:
      param0: -8, param1: -16, param2: -24, etc. */
   /* Store params from registers to their stack locations... */
+  int param_offset = 0;
   for (i = 0; i < func->num_params; i++) {
-    int offset;
-    offset = -(i + 1) * 8;
-    if (i < 6) {
-      fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[i], offset);
+    int sz = type_size(func->param_types[i]);
+    if (sz < 8) sz = 8;
+    param_offset -= sz;
+    
+    if (func->param_types[i]->kind == TY_STRUCT || func->param_types[i]->kind == TY_UNION) {
+        if (i < 6) {
+          fprintf(cc->out, "    movq %%%s, %%r10\n", argregs[i]);
+        } else {
+          fprintf(cc->out, "    movq %d(%%rbp), %%r10\n", 16 + (i - 6) * 8);
+        }
+        int j;
+        for (j = 0; j < sz; j++) {
+            fprintf(cc->out, "    movb %d(%%r10), %%al\n", j);
+            fprintf(cc->out, "    movb %%al, %d(%%rbp)\n", param_offset + j);
+        }
     } else {
-      fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
-      fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", offset);
+        if (i < 6) {
+          fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[i], param_offset);
+        } else {
+          fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
+          fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
+        }
     }
   }
 
@@ -2557,7 +2601,28 @@ void codegen_func(Compiler *cc, Node *func) {
 /* Bug fix: .p2align 3 before every label (x86-64 ABI alignment)    */
 /* ================================================================ */
 
-static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, int num_args, int *arg_idx, int base_offset, int *emitted) {
+static long long eval_const_expr_p4(Node *elem, int *ok) {
+    if (!elem) { *ok = 0; return 0; }
+    printf("EVAL kind=%d\n", elem->kind);
+    if (elem->kind == 26 /* ND_CAST */) return eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_NUM) return elem->int_val;
+    if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_SUB) return eval_const_expr_p4(elem->lhs, ok) - eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_MUL) return eval_const_expr_p4(elem->lhs, ok) * eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_DIV) { long long r = eval_const_expr_p4(elem->rhs, ok); if(r) return eval_const_expr_p4(elem->lhs, ok) / r; return 0; }
+    if (elem->kind == ND_BOR) return eval_const_expr_p4(elem->lhs, ok) | eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_BAND) return eval_const_expr_p4(elem->lhs, ok) & eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_BXOR) return eval_const_expr_p4(elem->lhs, ok) ^ eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_SHL) return eval_const_expr_p4(elem->lhs, ok) << eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_SHR) return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_NEG) return -eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
+    *ok = 0;
+    return 0;
+}
+
+static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, int num_args, int *arg_idx, int arg_end, int base_offset, int *emitted) {
     StructField *f;
     for (f = fields; f; f = f->next) {
         int field_abs_offset = base_offset + f->offset;
@@ -2568,14 +2633,14 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
         }
         
         if (f->type->kind == TY_STRUCT) {
-            emit_struct_fields(cc, f->type->fields, args, num_args, arg_idx, field_abs_offset, emitted);
+            emit_struct_fields(cc, f->type->fields, args, num_args, arg_idx, arg_end, field_abs_offset, emitted);
         } else if (f->type->kind == TY_ARRAY) {
             int j;
             if (f->type->base && (f->type->base->kind == TY_STRUCT || f->type->base->kind == TY_UNION)) {
                 int elem_size = type_size(f->type->base);
                 for (j = 0; j < f->type->array_len; j++) {
                     int expected_end = field_abs_offset + (j + 1) * elem_size;
-                    emit_struct_fields(cc, f->type->base->fields, args, num_args, arg_idx, field_abs_offset + j * elem_size, emitted);
+                    emit_struct_fields(cc, f->type->base->fields, args, num_args, arg_idx, arg_end, field_abs_offset + j * elem_size, emitted);
                     if (*emitted < expected_end) {
                         fprintf(cc->out, "    .zero %d\n", expected_end - *emitted);
                         *emitted = expected_end;
@@ -2584,16 +2649,18 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
             } else {
                 int elem_size = type_size(f->type->base);
                 for (j = 0; j < f->type->array_len; j++) {
-                    if (*arg_idx < num_args) {
+                    if (*arg_idx < arg_end && *arg_idx < num_args) {
                         Node *elem = args[(*arg_idx)++];
                         while (elem && elem->kind == 26) elem = elem->lhs; /* Strip ND_CAST */
+                        int const_ok = 1;
+                        long long const_val = eval_const_expr_p4(elem, &const_ok);
                         if (!elem) {
                             fprintf(cc->out, "    .zero %d\n", elem_size);
-                        } else if (elem->kind == ND_NUM) {
-                            if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", elem->int_val);
-                            else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", elem->int_val);
-                            else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", elem->int_val);
-                            else fprintf(cc->out, "    .quad %lld\n", elem->int_val);
+                        } else if (const_ok) {
+                            if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
+                            else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
+                            else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
+                            else fprintf(cc->out, "    .quad %lld\n", const_val);
                         } else if (elem->kind == ND_STR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                             else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
@@ -2614,16 +2681,18 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
             }
         } else {
             int elem_size = type_size(f->type);
-            if (*arg_idx < num_args) {
+            if (*arg_idx < arg_end && *arg_idx < num_args) {
                 Node *elem = args[(*arg_idx)++];
                 while (elem && elem->kind == 26) elem = elem->lhs; /* Strip ND_CAST */
+                int const_ok = 1;
+                long long const_val = eval_const_expr_p4(elem, &const_ok);
                 if (!elem) {
                     fprintf(cc->out, "    .zero %d\n", elem_size);
-                } else if (elem->kind == ND_NUM) {
-                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", elem->int_val);
-                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", elem->int_val);
-                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", elem->int_val);
-                    else fprintf(cc->out, "    .quad %lld\n", elem->int_val);
+                } else if (const_ok) {
+                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
+                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
+                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
+                    else fprintf(cc->out, "    .quad %lld\n", const_val);
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
@@ -2649,6 +2718,15 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
 
   if (gvar->is_extern)
     return; /* no emission for extern */
+
+  if (gvar->name && strstr(gvar->name, "DateTimeFuncs")) {
+      fprintf(stderr, "GVAR-DEBUG: %s, init_kind=%d\n", gvar->name, gvar->initializer ? gvar->initializer->kind : -1);
+      if (gvar->initializer && gvar->initializer->kind == ND_INIT_LIST) {
+          for (int dbg_i = 0; dbg_i < gvar->initializer->num_args; dbg_i++) {
+              fprintf(stderr, "args[%d].kind = %d\n", dbg_i, gvar->initializer->args[dbg_i] ? gvar->initializer->args[dbg_i]->kind : -1);
+          }
+      }
+  }
 
   size = type_size(gvar->type);
   if (size <= 0)
@@ -2704,18 +2782,23 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
           if (size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", gvar->initializer->str_id);
           else fprintf(cc->out, "    .quad .Lstr_%d\n", gvar->initializer->str_id);
       }
-    } else if (gvar->initializer->kind == ND_INIT_LIST) {
-        int emitted = 0;
+        } else if (gvar->initializer->kind == ND_INIT_LIST) {
+            int emitted = 0;
+            int i;
+            int elem_size = 1;
         if (gvar->type && gvar->type->kind == TY_STRUCT) {
             int arg_idx = 0;
-            emit_struct_fields(cc, gvar->type->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, 0, &emitted);
+            emit_struct_fields(cc, gvar->type->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, gvar->initializer->num_args, 0, &emitted);
         } else if (gvar->type && gvar->type->kind == TY_ARRAY && gvar->type->base && (gvar->type->base->kind == TY_STRUCT || gvar->type->base->kind == TY_UNION)) {
             int i;
             int arg_idx = 0;
             int elem_size = type_size(gvar->type->base);
+            int budget = gvar->initializer->num_args / gvar->type->array_len;
             for (i = 0; i < gvar->type->array_len; i++) {
                 int expected_end = (i + 1) * elem_size;
-                emit_struct_fields(cc, gvar->type->base->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, i * elem_size, &emitted);
+                int arg_end = (i + 1) * budget;
+                if (arg_end > gvar->initializer->num_args) arg_end = gvar->initializer->num_args;
+                emit_struct_fields(cc, gvar->type->base->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, arg_end, i * elem_size, &emitted);
                 if (emitted < expected_end) {
                     fprintf(cc->out, "    .zero %d\n", expected_end - emitted);
                     emitted = expected_end;
@@ -2727,13 +2810,15 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
             if (gvar->type && gvar->type->base) elem_size = type_size(gvar->type->base);
             for (i = 0; i < gvar->initializer->num_args; i++) {
                 Node *elem = gvar->initializer->args[i];
+                int const_ok = 1;
+                long long const_val = eval_const_expr_p4(elem, &const_ok);
                 if (!elem) {
                     fprintf(cc->out, "    .zero %d\n", elem_size);
-                } else if (elem->kind == ND_NUM) {
-                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", elem->int_val);
-                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", elem->int_val);
-                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", elem->int_val);
-                    else fprintf(cc->out, "    .quad %lld\n", elem->int_val);
+                } else if (const_ok) {
+                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
+                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
+                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
+                    else fprintf(cc->out, "    .quad %lld\n", const_val);
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
@@ -3054,10 +3139,38 @@ void codegen_program(Compiler *cc, Node *prog) {
     n = n->next;
   }
 
+  /* Deduplicate tentative definitions: keep only one instance (prioritizing initializers) */
+  for (i = 0; i < cc->num_globals; i++) {
+    int j;
+    Node *g1 = cc->globals[i];
+    if (!g1 || g1->kind != ND_GLOBAL_VAR) continue;
+    
+    for (j = i + 1; j < cc->num_globals; j++) {
+      Node *g2 = cc->globals[j];
+      if (!g2 || g2->kind != ND_GLOBAL_VAR) continue;
+
+      
+      if (strcmp(g1->name, g2->name) == 0) {
+        if (g1->initializer && g2->initializer) {
+          cc->globals[j] = 0; /* Keep first initializer, drop second */
+        } else if (g1->initializer) {
+          cc->globals[j] = 0; /* Keep initialized, drop uninitialized */
+        } else if (g2->initializer) {
+          cc->globals[i] = 0; /* Drop uninitialized, keep initialized */
+          break; /* g1 is gone, stop checking against g1 */
+        } else {
+          cc->globals[j] = 0; /* Both uninitialized, drop second */
+        }
+      }
+    }
+  }
+
   /* Emit global variables */
   for (i = 0; i < cc->num_globals; i++) {
-    fold_constants(cc, cc->globals[i]->initializer);
-    emit_global_var(cc, cc->globals[i]);
+    if (cc->globals[i]) {
+      fold_constants(cc, cc->globals[i]->initializer);
+      emit_global_var(cc, cc->globals[i]);
+    }
   }
 
   /* Emit string literals */
