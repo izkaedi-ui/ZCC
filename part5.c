@@ -26,6 +26,8 @@ static void init_compiler(Compiler *cc) {
   cc->ty_ulong = type_new(cc, TY_ULONG);
   cc->ty_longlong = type_new(cc, TY_LONGLONG);
   cc->ty_ulonglong = type_new(cc, TY_ULONGLONG);
+  cc->ty_float = type_new(cc, TY_FLOAT);
+  cc->ty_double = type_new(cc, TY_DOUBLE);
 
   /* init lexer */
   cc->line = 1;
@@ -394,12 +396,16 @@ int main(int argc, char **argv) {
 
   int zcc_verbose_flag = 0;
 
+  int compile_only = 0;
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
       i++;
       if (i < argc)
         output_file = argv[i];
+    } else if (strcmp(argv[i], "-c") == 0) {
+      compile_only = 1;
     } else if (strcmp(argv[i], "--pp-only") == 0) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
@@ -527,7 +533,9 @@ int main(int argc, char **argv) {
   /* assemble and link if not stopping at assembly */
   if (!stop_at_asm) {
     printf("[Phase 6] GCC Assembly/Linker Binding... ");
-    if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
+    if (compile_only) {
+      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
+    } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file);

@@ -329,8 +329,8 @@ Type *parse_type(Compiler *cc) {
         }
     }
     else if (cc->tk == TK_FLOAT || cc->tk == TK_DOUBLE) {
-        /* treat float/double as long for now */
-        type = cc->ty_long;
+        if (cc->tk == TK_FLOAT) type = cc->ty_float;
+        else type = cc->ty_double;
         next_token(cc);
     }
     else if (cc->tk == TK_STRUCT) {
@@ -1234,6 +1234,8 @@ Node *parse_unary(Compiler *cc) {
 static Type *promote_type(Compiler *cc, Type *t1, Type *t2) {
     if (!t1) return t2;
     if (!t2) return t1;
+    if (t1->kind == TY_DOUBLE || t2->kind == TY_DOUBLE) return cc->ty_double;
+    if (t1->kind == TY_FLOAT || t2->kind == TY_FLOAT) return cc->ty_float;
     if (t1->kind == TY_PTR) return t1;
     if (t2->kind == TY_PTR) return t2;
     if (type_size(t1) >= 8 || type_size(t2) >= 8) {
@@ -1764,94 +1766,12 @@ Node *parse_stmt(Compiler *cc) {
         Node *old_sw = current_sw;
         current_sw = sw;
 
-        /* parse the block manually */
-    expect(cc, TK_LBRACE);
-        while (cc->tk != TK_RBRACE) {
-            if (cc->tk == TK_EOF) break;
-            if (cc->tk == TK_CASE) {
-                Node *cn;
-                next_token(cc);
-                cn = node_new(cc, ND_CASE, cc->tk_line);
-                cn->case_val = eval_const_expr(parse_assign(cc));
-                expect(cc, TK_COLON);
-                /* parse statements until next case/default/rbrace */
-                {
-                    Node *block;
-                    int cap;
-                    int cnt;
-                    block = node_new(cc, ND_BLOCK, line);
-                    cap = 16;
-                    block->stmts = (Node **)cc_alloc(cc, sizeof(Node *) * cap);
-                    cnt = 0;
-                    while (cc->tk != TK_CASE && cc->tk != TK_DEFAULT && cc->tk != TK_RBRACE) {
-                        if (cc->tk == TK_EOF) break;
-                        if (cnt >= cap) {
-                            Node **old;
-                            int newcap;
-                            int i;
-                            old = block->stmts;
-                            newcap = cap * 2;
-                            if (newcap > 4096) newcap = 4096;
-                            block->stmts = (Node **)cc_alloc(cc, sizeof(Node *) * newcap);
-                            for (i = 0; i < cnt; i++) block->stmts[i] = old[i];
-                            cap = newcap;
-                        }
-                        block->stmts[cnt] = parse_stmt(cc);
-                        cnt++;
-                    }
-                    block->num_stmts = cnt;
-                    cn->case_body = block;
-                }
-                if (sw->num_cases < MAX_CASES) {
-                    sw->cases[sw->num_cases] = cn;
-                    sw->num_cases++;
-                }
-            }
-            else if (cc->tk == TK_DEFAULT) {
-                Node *dn;
-                next_token(cc);
-                expect(cc, TK_COLON);
-                dn = node_new(cc, ND_DEFAULT, cc->tk_line);
-                {
-                    Node *block;
-                    int cap;
-                    int cnt;
-                    block = node_new(cc, ND_BLOCK, line);
-                    cap = 16;
-                    block->stmts = (Node **)cc_alloc(cc, sizeof(Node *) * cap);
-                    cnt = 0;
-                    while (cc->tk != TK_CASE && cc->tk != TK_DEFAULT && cc->tk != TK_RBRACE) {
-                        if (cc->tk == TK_EOF) break;
-                        if (cnt >= cap) {
-                            Node **old;
-                            int newcap;
-                            int i;
-                            old = block->stmts;
-                            newcap = cap * 2;
-                            if (newcap > 4096) newcap = 4096;
-                            block->stmts = (Node **)cc_alloc(cc, sizeof(Node *) * newcap);
-                            for (i = 0; i < cnt; i++) block->stmts[i] = old[i];
-                            cap = newcap;
-                        }
-                        block->stmts[cnt] = parse_stmt(cc);
-                        cnt++;
-                    }
-                    block->num_stmts = cnt;
-                    dn->case_body = block;
-                }
-                sw->default_case = dn;
-            }
-            else {
-                /* stray statement in switch body before first case */
-                parse_stmt(cc);
-            }
-        }
-        expect(cc, TK_RBRACE);
+        sw->body = parse_stmt(cc);
+
         current_sw = old_sw;
         return sw;
     }
 
-    /* case/default inside braced block! */
     if (cc->tk == TK_CASE) {
         Node *cn;
         Node *cnode;
@@ -2465,6 +2385,12 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
         ftype = type_func(cc, ret_type);
         ftype->num_params = func->num_params;
         ftype->is_variadic = is_variadic;
+        if (func->num_params > 0) {
+            ftype->params = (Type **)cc_alloc(cc, sizeof(Type *) * func->num_params);
+            for (int k = 0; k < func->num_params; k++) {
+                ftype->params[k] = func->param_types[k];
+            }
+        }
         func->func_type = ftype;
 
         /* add to parent scope (global) */
