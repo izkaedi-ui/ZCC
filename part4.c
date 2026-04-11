@@ -1591,10 +1591,14 @@ void codegen_expr(Compiler *cc, Node *node) {
           fprintf(cc->out, "    movswl %%ax, %%eax\n");
         break;
       case 4:
-        if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG)
+        if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
+            fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+            fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+        } else if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG) {
             fprintf(cc->out, "    movl %%eax, %%eax\n");
-        else if (!is_pointer(node->lhs ? node->lhs->type : 0))
+        } else if (!is_pointer(node->lhs ? node->lhs->type : 0)) {
             fprintf(cc->out, "    cltq\n");
+        }
         break;
       case 8:
         if (node->cast_type && is_float_type(node->cast_type) && node->lhs && node->lhs->type && !is_float_type(node->lhs->type)) {
