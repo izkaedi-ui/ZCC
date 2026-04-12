@@ -1360,6 +1360,51 @@ void codegen_expr(Compiler *cc, Node *node) {
     int use32;
     char lhs_ir[32];
     char rhs_ir[32];
+
+    if ((node->lhs && node->lhs->type && is_float_type(node->lhs->type)) ||
+        (node->rhs && node->rhs->type && is_float_type(node->rhs->type))) {
+      codegen_expr_checked(cc, node->lhs);
+      if (!node->lhs->type || !is_float_type(node->lhs->type)) {
+        fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
+      } else {
+        fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+      }
+      fprintf(cc->out, "    subq $8, %%rsp\n");
+      fprintf(cc->out, "    movsd %%xmm0, (%%rsp)\n");
+      codegen_expr_checked(cc, node->rhs);
+      if (!node->rhs->type || !is_float_type(node->rhs->type)) {
+        fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
+      } else {
+        fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+      }
+      fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
+      fprintf(cc->out, "    addq $8, %%rsp\n");
+      fprintf(cc->out, "    ucomisd %%xmm0, %%xmm1\n");
+      switch (node->kind) {
+      case ND_EQ:
+        fprintf(cc->out, "    sete %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
+        break;
+      case ND_NE:
+        fprintf(cc->out, "    setne %%al\n    setp %%r11b\n    orb %%r11b, %%al\n");
+        break;
+      case ND_LT:
+        fprintf(cc->out, "    setb %%al\n");
+        break;
+      case ND_LE:
+        fprintf(cc->out, "    setbe %%al\n");
+        break;
+      case ND_GT:
+        fprintf(cc->out, "    seta %%al\n");
+        break;
+      case ND_GE:
+        fprintf(cc->out, "    setae %%al\n");
+        break;
+      }
+      fprintf(cc->out, "    movzbl %%al, %%eax\n");
+      ir_emit_binary_op(node->kind, node->type, "f_lhs", "f_rhs", node->line);
+      return;
+    }
+
     uns = (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) ||
           (node->rhs && node->rhs->type && is_unsigned_type(node->rhs->type));
     use32 = node->lhs && node->lhs->type && node->rhs &&
@@ -2810,7 +2855,6 @@ void codegen_func(Compiler *cc, Node *func) {
 
 static long long eval_const_expr_p4(Node *elem, int *ok) {
     if (!elem) { *ok = 0; return 0; }
-    printf("EVAL kind=%d\n", elem->kind);
     if (elem->kind == ND_CAST) return eval_const_expr_p4(elem->lhs, ok);
     if (elem->kind == ND_NUM) return elem->int_val;
     if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
@@ -2874,6 +2918,16 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                         } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                             else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
+                    long long offset = elem->lhs->lhs->rhs->int_val;
+                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
+                    long long offset = elem->rhs->int_val;
+                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
                         } else if (elem->kind == ND_VAR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
                             else fprintf(cc->out, "    .quad %s\n", elem->name);
@@ -2908,6 +2962,16 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
+                    long long offset = elem->lhs->lhs->rhs->int_val;
+                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
+                    long long offset = elem->rhs->int_val;
+                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
                 } else if (elem->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->name);
@@ -2957,6 +3021,16 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long %s\n", gvar->initializer->lhs->name);
       else
         fprintf(cc->out, "    .quad %s\n", gvar->initializer->lhs->name);
+    } else if (gvar->initializer->kind == ND_ADDR && gvar->initializer->lhs && gvar->initializer->lhs->kind == ND_DEREF && gvar->initializer->lhs->lhs && gvar->initializer->lhs->lhs->kind == ND_ADD && gvar->initializer->lhs->lhs->lhs && gvar->initializer->lhs->lhs->lhs->kind == ND_VAR && gvar->initializer->lhs->lhs->rhs && gvar->initializer->lhs->lhs->rhs->kind == ND_NUM) {
+      long long offset = gvar->initializer->lhs->lhs->rhs->int_val;
+      if (gvar->initializer->lhs->lhs->lhs->type && gvar->initializer->lhs->lhs->lhs->type->base) offset *= type_size(gvar->initializer->lhs->lhs->lhs->type->base);
+      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", gvar->initializer->lhs->lhs->lhs->name, offset);
+      else fprintf(cc->out, "    .quad %s + %lld\n", gvar->initializer->lhs->lhs->lhs->name, offset);
+    } else if (gvar->initializer->kind == ND_ADD && gvar->initializer->lhs && gvar->initializer->lhs->kind == ND_VAR && gvar->initializer->rhs && gvar->initializer->rhs->kind == ND_NUM) {
+      long long offset = gvar->initializer->rhs->int_val;
+      if (gvar->initializer->lhs->type && gvar->initializer->lhs->type->base) offset *= type_size(gvar->initializer->lhs->type->base);
+      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", gvar->initializer->lhs->name, offset);
+      else fprintf(cc->out, "    .quad %s + %lld\n", gvar->initializer->lhs->name, offset);
     } else if (gvar->initializer->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", gvar->initializer->name);
@@ -3027,6 +3101,16 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
+                    long long offset = elem->lhs->lhs->rhs->int_val;
+                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
+                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
+                    long long offset = elem->rhs->int_val;
+                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
+                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
+                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
                 } else if (elem->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->name);
@@ -3043,14 +3127,13 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .zero %d\n", size);
     }
   } else {
-    /* uninitialized data goes in .bss */
-    fprintf(cc->out, "    .bss\n");
-    fprintf(cc->out, "    .p2align 3\n");
-    if (!gvar->is_static) {
-      fprintf(cc->out, "    .globl %s\n", gvar->name);
+    /* tentative definitions and uninitialized data */
+    if (gvar->is_static) {
+        fprintf(cc->out, "    .local %s\n", gvar->name);
+        fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
+    } else {
+        fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
     }
-    fprintf(cc->out, "%s:\n", gvar->name);
-    fprintf(cc->out, "    .zero %d\n", size);
   }
 }
 
@@ -3355,7 +3438,12 @@ void codegen_program(Compiler *cc, Node *prog) {
           cc->globals[i] = 0; /* Drop uninitialized, keep initialized */
           break; /* g1 is gone, stop checking against g1 */
         } else {
-          cc->globals[j] = 0; /* Both uninitialized, drop second */
+          if (g1->is_extern && !g2->is_extern) {
+              cc->globals[i] = 0; /* Keep tentative, drop extern */
+              break;
+          } else {
+              cc->globals[j] = 0; /* Both uninitialized, prioritize g1 */
+          }
         }
       }
     }

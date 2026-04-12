@@ -930,6 +930,24 @@ again:
     if (c == ';') { cc->tk = TK_SEMI; return; }
     if (c == ',') { cc->tk = TK_COMMA; return; }
     if (c == '.') {
+        if (is_digit(peek_char(cc))) {
+            char *end;
+            double fval = strtod(cc->source + cc->pos - 1, &end);
+            int len = end - (cc->source + cc->pos - 1);
+            if (len <= 0) len = 1;
+            cc->pos = cc->pos - 1 + len;
+            cc->col = cc->col - 1 + len;
+            if (cc->pos < cc->source_len) {
+                char sc = cc->source[cc->pos];
+                if (sc == 'f' || sc == 'F' || sc == 'l' || sc == 'L') {
+                    cc->pos++; cc->col++;
+                }
+            }
+            cc->tk = TK_FLIT;
+            cc->tk_fval = fval;
+            cc->tk_text[0] = 0;
+            return;
+        }
         if (peek_char(cc) == '.') {
             read_char(cc);
             if (peek_char(cc) == '.') { read_char(cc); cc->tk = TK_ELLIPSIS; return; }

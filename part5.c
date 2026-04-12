@@ -62,6 +62,21 @@ static void init_compiler(Compiler *cc) {
     sym = scope_add(cc, "ptrdiff_t", cc->ty_long);
     sym->is_typedef = 1;
 
+    /* SysV ABI requires va_list to be an array of 1 struct of size 24 */
+    {
+        Type *t_va = type_new(cc, TY_STRUCT);
+        t_va->size = 24;
+        t_va->align = 8;
+        t_va->is_complete = 1;
+        sym = scope_add(cc, "__builtin_va_list", type_array(cc, t_va, 1));
+    }
+    sym->is_typedef = 1;
+
+    /* _Float128 workaround */
+    sym = scope_add(cc, "_Float128", cc->ty_double);
+    sym->is_typedef = 1;
+
+
     /* NULL as enum constant */
     sym = scope_add(cc, "NULL", cc->ty_long);
     sym->is_enum_const = 1;
