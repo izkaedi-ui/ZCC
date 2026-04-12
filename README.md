@@ -25,6 +25,10 @@ GCC → zcc₁ → zcc₁ compiles itself → zcc₂.s
 | IR backend tests | ✅ 21/21 pass |
 | Peephole elisions (self-compile) | 5,363 |
 
+### DOOM 1.10 (id Software Engine)
+
+ZCC successfully compiles, links, and runs the entire `linuxdoom-1.10` source code (45,000 lines). The engine reliably boots, loads WAD format assets, initializes the core subsystems, and renders 3D frames into an X11 shared memory framebuffer using a 32-bit TrueColor synthesized palette LUT without any runtime segment faults. This stresses and validates the robustness of ZCC's structural alignment, global state management, and memory pointer arithmetic.
+
 ### SQLite Round-Trip Verification
 
 ZCC compiles SQLite 3.45.0 (85,000 lines) and produces a working binary:
@@ -331,7 +335,6 @@ ZCC's development produced a compiler bug corpus with ground-truth fixes, CWE cl
 ## Limitations
 
 - No preprocessor (use `gcc -E` or `cpp`)
-- No floating-point codegen (parsed but not emitted)
 - No bitfields in structs
 - No VLA (variable-length arrays)
 - No `_Complex`, `_Atomic`, `_Generic`
