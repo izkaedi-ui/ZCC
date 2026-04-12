@@ -386,3 +386,23 @@ Apache 2.0
 **ZKAEDI** — [@LongNumberGeek](https://twitter.com/LongNumberGeek) — [zkaedi.ai](https://zkaedi.ai) — [HuggingFace](https://huggingface.co/zkaedi)
 
 Built solo. Every line, every bug, every fix.
+
+
+## Cross-Compilation Targets
+
+| Target | Status | Notes |
+|--------|--------|-------|
+| x86-64 Linux | ✅ Verified | Self-host, curl 133/133, SQLite, Lua, DOOM |
+| thumbv6m ARM | ✅ Verified | RP2040 LED blinks on Flipper Game Module |
+| TQPU | ✅ Gen2 | Topological QPU, PRIME-protected attractors |
+| ZSurface | ✅ Gen2 | Surface code stabilizers, logical qubit correction |
+| ZQEC | ✅ Gen2 | Syndrome detection, zprime_selfmod_patch |
+| ZQuantum | ✅ Gen2 | quantum_evolve, entangle, measure_and_collapse |
+| ZPRIME | ✅ Gen2 | Self-modifying runtime Hamiltonian correction |
+
+## Milestones
+
+- M1: GCC reference baseline on RP2040 (Apr 12 2026)
+- M2: ZCC thumbv6m backend wired into part3/4/5 (Apr 12 2026)
+- M3: ZCC-compiled binary running on real RP2040 hardware (Apr 12 2026)
+- M4: Quantum IR backends added — TQPU/ZSurface/ZQEC/ZQuantum/ZPRIME (Apr 12 2026)
