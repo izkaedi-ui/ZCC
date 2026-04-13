@@ -2063,6 +2063,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     {
       char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_inc", node->line);
     }
     return;
 
@@ -2146,6 +2147,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     {
       char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_dec", node->line);
     }
     return;
 
@@ -2212,6 +2214,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
     {
       char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_inc", node->line);
     }
     return;
 
@@ -2278,6 +2281,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
     {
       char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_dec", node->line);
     }
     return;
 
