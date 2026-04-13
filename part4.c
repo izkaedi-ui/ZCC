@@ -551,6 +551,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     /* Satisfy IR subsystem sequence */
     {
       char *dst = ir_bridge_fresh_tmp();
+      long flit_bits;
+      memcpy(&flit_bits, &node->f_val, 8);
+      ZCC_EMIT_FCONST(dst, flit_bits, node->line);
     }
     return;
   }
@@ -977,6 +980,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+    }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
     }
     return;
 
@@ -1679,28 +1686,41 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
   }
 
-  case ND_LAND:
+  case ND_LAND: {
+    char land_lhs_ir[32];
+    char land_lbl[32];
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
+    ir_save_result(land_lhs_ir);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
     else emit_label_fmt(cc, lbl1, FMT_JE);
+    sprintf(land_lbl, ".L%d", lbl1);
+    ZCC_EMIT_BR_IF(land_lhs_ir, land_lbl, node->line);
     codegen_expr_checked(cc, node->rhs);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    setne %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(land_lbl, node->line);
     return;
+  }
 
-  case ND_LOR:
+  case ND_LOR: {
+    char lor_lhs_ir[32];
+    char lor_lbl1[32];
+    char lor_lbl2[32];
     lbl1 = new_label(cc);
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
+    ir_save_result(lor_lhs_ir);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
+    sprintf(lor_lbl1, ".L%d", lbl1);
+    sprintf(lor_lbl2, ".L%d", lbl2);
     codegen_expr_checked(cc, node->rhs);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
@@ -1708,10 +1728,14 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    movq $0, %%rax\n");
     if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
     else emit_label_fmt(cc, lbl2, FMT_JMP);
+    ZCC_EMIT_BR(lor_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(lor_lbl1, node->line);
     fprintf(cc->out, "    movq $1, %%rax\n");
     fprintf(cc->out, ".L%d:\n", lbl2);
+    ZCC_EMIT_LABEL(lor_lbl2, node->line);
     return;
+  }
 
   case ND_VA_ARG: {
     int lbl_overflow;
@@ -2037,6 +2061,9 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+    }
     return;
 
   case ND_PRE_DEC:
@@ -2117,6 +2144,9 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+    }
     return;
 
   case ND_POST_INC:
@@ -2180,6 +2210,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+    }
     return;
 
   case ND_POST_DEC:
@@ -2243,6 +2276,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+    }
     return;
 
   case ND_CALL: {

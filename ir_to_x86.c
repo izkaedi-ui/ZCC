@@ -302,6 +302,45 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
                     break;
                 }
                 default: break;
+                case IR_FCONST: {
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movabsq $%ld, %%rax\n", n->imm);
+                    fprintf(out, "    movq %%rax, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_FADD:
+                case IR_FSUB:
+                case IR_FMUL:
+                case IR_FDIV: {
+                    int off1 = get_or_create_var(n->src1);
+                    int off2 = get_or_create_var(n->src2);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm0\n", off1);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm1\n", off2);
+                    if (n->op == IR_FADD)      fprintf(out, "    addsd %%xmm1, %%xmm0\n");
+                    else if (n->op == IR_FSUB) fprintf(out, "    subsd %%xmm1, %%xmm0\n");
+                    else if (n->op == IR_FMUL) fprintf(out, "    mulsd %%xmm1, %%xmm0\n");
+                    else                        fprintf(out, "    divsd %%xmm1, %%xmm0\n");
+                    fprintf(out, "    movq %%xmm0, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_ITOF: {
+                    int off1 = get_or_create_var(n->src1);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%rax\n", off1);
+                    fprintf(out, "    cvtsi2sdq %%rax, %%xmm0\n");
+                    fprintf(out, "    movq %%xmm0, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_FTOI: {
+                    int off1 = get_or_create_var(n->src1);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm0\n", off1);
+                    fprintf(out, "    cvttsd2si %%xmm0, %%rax\n");
+                    fprintf(out, "    movq %%rax, %d(%%rbp)\n", offd);
+                    break;
+                }
+
             }
             n = n->next;
         }
