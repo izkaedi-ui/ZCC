@@ -2,8 +2,8 @@ CC = gcc
 CFLAGS = -O0 -w -fno-asynchronous-unwind-tables
 LDFLAGS = -lm
 
-PARTS = part1.c part0_pp.c part2.c part3.c ir.h ir_emit_dispatch.h ir_bridge.h part4.c part5.c ir.c ir_to_x86.c
-PASSES = compiler_passes.c compiler_passes_ir.c
+PARTS = part1.c part0_pp.c part2.c part3.c ir.h ir_emit_dispatch.h ir_bridge.h part6_arm.c part4.c part5.c ir.c ir_to_x86.c
+PASSES = compiler_passes.c compiler_passes_ir.c ir_pass_manager.c
 
 .PHONY: all clean selfhost test
 
@@ -38,7 +38,7 @@ ir-verify: zcc2
 	@echo "[IR-VERIFY] Stage 2 IR emission..."
 	ZCC_EMIT_IR=1 ./zcc2 zcc.c -o zcc_ir_stage2.s
 	@echo "[IR-VERIFY] Linking IR stage 2 binary..."
-	gcc zcc_ir_stage2.s compiler_passes.c compiler_passes_ir.c -o zcc_ir_stage2 -lm
+	gcc zcc_ir_stage2.s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c -o zcc_ir_stage2 -lm
 	@echo "[IR-VERIFY] Stage 3 via IR path..."
 	ZCC_EMIT_IR=1 ./zcc_ir_stage2 zcc.c -o zcc_ir_stage3.s
 

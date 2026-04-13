@@ -3,16 +3,7 @@
 /* COMPILER INITIALIZATION                                           */
 /* ================================================================ */
 
-#include "part1.c"
 #include "ir_emit_dispatch.h"
-#include "ir_bridge.h"
-
-#ifdef __clang__
-void register_struct(Compiler *cc, Type *t);
-Type *find_struct(Compiler *cc, char *tag);
-Type *type_func(Compiler *cc, Type *ret);
-char *zcc_preprocess(const char *source, int source_len, const char *filename, const char *include_paths, int *out_len);
-#endif
 
 static void init_compiler(Compiler *cc) {
   /* zero everyt5555hing — cc was calloc'd */
@@ -85,199 +76,6 @@ static void init_compiler(Compiler *cc) {
     sym = scope_add(cc, "_Float128", cc->ty_double);
     sym->is_typedef = 1;
 
-    /* POSIX / system typedefs — needed for GCC-preprocessed code */
-    sym = scope_add(cc, "socklen_t", cc->ty_int);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "sa_family_t", cc->ty_ushort);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "in_port_t", cc->ty_ushort);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "in_addr_t", cc->ty_uint);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "pid_t", cc->ty_int);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "uid_t", cc->ty_uint);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "gid_t", cc->ty_uint);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "mode_t", cc->ty_uint);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "off_t", cc->ty_long);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "time_t", cc->ty_long);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "clock_t", cc->ty_long);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "suseconds_t", cc->ty_long);
-    sym->is_typedef = 1;
-    sym = scope_add(cc, "nfds_t", cc->ty_ulong);
-    sym->is_typedef = 1;
-
-    /* glibc internal __ typedefs — survive GCC preprocessing */
-    sym = scope_add(cc, "__time_t", cc->ty_long);   sym->is_typedef = 1;
-    sym = scope_add(cc, "__clock_t", cc->ty_long);   sym->is_typedef = 1;
-    sym = scope_add(cc, "__pid_t", cc->ty_int);      sym->is_typedef = 1;
-    sym = scope_add(cc, "__uid_t", cc->ty_uint);     sym->is_typedef = 1;
-    sym = scope_add(cc, "__gid_t", cc->ty_uint);     sym->is_typedef = 1;
-    sym = scope_add(cc, "__off_t", cc->ty_long);     sym->is_typedef = 1;
-    sym = scope_add(cc, "__off64_t", cc->ty_long);   sym->is_typedef = 1;
-    sym = scope_add(cc, "__mode_t", cc->ty_uint);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__dev_t", cc->ty_ulong);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__ino_t", cc->ty_ulong);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__nlink_t", cc->ty_ulong);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__blksize_t", cc->ty_long); sym->is_typedef = 1;
-    sym = scope_add(cc, "__blkcnt_t", cc->ty_long);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__ssize_t", cc->ty_long);   sym->is_typedef = 1;
-    sym = scope_add(cc, "__socklen_t", cc->ty_int);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__suseconds_t", cc->ty_long); sym->is_typedef = 1;
-    sym = scope_add(cc, "__syscall_slong_t", cc->ty_long); sym->is_typedef = 1;
-    sym = scope_add(cc, "__syscall_ulong_t", cc->ty_ulong); sym->is_typedef = 1;
-    sym = scope_add(cc, "__intmax_t", cc->ty_long);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__uintmax_t", cc->ty_ulong); sym->is_typedef = 1;
-    sym = scope_add(cc, "__intptr_t", cc->ty_long);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__sig_atomic_t", cc->ty_int); sym->is_typedef = 1;
-    sym = scope_add(cc, "__clockid_t", cc->ty_int);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__timer_t", type_ptr(cc, cc->ty_void)); sym->is_typedef = 1;
-    sym = scope_add(cc, "__loff_t", cc->ty_long);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__key_t", cc->ty_int);      sym->is_typedef = 1;
-    sym = scope_add(cc, "__id_t", cc->ty_uint);      sym->is_typedef = 1;
-    sym = scope_add(cc, "__useconds_t", cc->ty_uint); sym->is_typedef = 1;
-    sym = scope_add(cc, "__daddr_t", cc->ty_int);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__caddr_t", type_ptr(cc, cc->ty_char)); sym->is_typedef = 1;
-    sym = scope_add(cc, "__fsblkcnt_t", cc->ty_ulong); sym->is_typedef = 1;
-    sym = scope_add(cc, "__fsfilcnt_t", cc->ty_ulong); sym->is_typedef = 1;
-    sym = scope_add(cc, "__fsword_t", cc->ty_long);  sym->is_typedef = 1;
-    sym = scope_add(cc, "__rlim_t", cc->ty_ulong);   sym->is_typedef = 1;
-    sym = scope_add(cc, "__quad_t", cc->ty_long);    sym->is_typedef = 1;
-    sym = scope_add(cc, "__u_quad_t", cc->ty_ulong); sym->is_typedef = 1;
-
-
-    /* fd_set — used by select(). glibc: struct with __fds_bits[16] (128 bytes) */
-    {
-        Type *t_fdset = type_new(cc, TY_STRUCT);
-        strncpy(t_fdset->tag, "fd_set", MAX_IDENT - 1);
-        t_fdset->size = 128;
-        t_fdset->align = 8;
-        t_fdset->is_complete = 1;
-        sym = scope_add(cc, "fd_set", t_fdset);
-        sym->is_typedef = 1;
-    }
-
-    /* curl_socket_t — typically int on POSIX */
-    sym = scope_add(cc, "curl_socket_t", cc->ty_int);
-    sym->is_typedef = 1;
-
-    /* struct timespec { long tv_sec; long tv_nsec; } */
-    {
-        Type *ts = type_new(cc, TY_STRUCT);
-        StructField *f1, *f2;
-        strncpy(ts->tag, "timespec", MAX_IDENT - 1);
-        f1 = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f1->name, "tv_sec", MAX_IDENT - 1);
-        f1->type = cc->ty_long;
-        f1->offset = 0;
-        f2 = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f2->name, "tv_nsec", MAX_IDENT - 1);
-        f2->type = cc->ty_long;
-        f2->offset = 8;
-        f1->next = f2;
-        f2->next = 0;
-        ts->fields = f1;
-        ts->size = 16;
-        ts->align = 8;
-        ts->is_complete = 1;
-        register_struct(cc, ts);
-    }
-
-    /* struct sockaddr { unsigned short sa_family; char sa_data[14]; } */
-    {
-        Type *sa = type_new(cc, TY_STRUCT);
-        StructField *f1, *f2;
-        strncpy(sa->tag, "sockaddr", MAX_IDENT - 1);
-        f1 = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f1->name, "sa_family", MAX_IDENT - 1);
-        f1->type = cc->ty_ushort;
-        f1->offset = 0;
-        f2 = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f2->name, "sa_data", MAX_IDENT - 1);
-        f2->type = type_array(cc, cc->ty_char, 14);
-        f2->offset = 2;
-        f1->next = f2;
-        f2->next = 0;
-        sa->fields = f1;
-        sa->size = 16;
-        sa->align = 2;
-        sa->is_complete = 1;
-        register_struct(cc, sa);
-    }
-
-    /* struct addrinfo { int ai_flags, ai_family, ai_socktype, ai_protocol;
-       size_t ai_addrlen; struct sockaddr *ai_addr; char *ai_canonname;
-       struct addrinfo *ai_next; } */
-    {
-        Type *ai = type_new(cc, TY_STRUCT);
-        StructField *prev, *f;
-        Type *sockaddr_ptr;
-        strncpy(ai->tag, "addrinfo", MAX_IDENT - 1);
-        ai->fields = 0;
-        prev = 0;
-
-        /* Look up struct sockaddr for pointer type */
-        sockaddr_ptr = type_ptr(cc, find_struct(cc, "sockaddr"));
-
-        /* ai_flags: int, offset 0 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_flags", MAX_IDENT - 1);
-        f->type = cc->ty_int; f->offset = 0; f->next = 0;
-        ai->fields = f; prev = f;
-
-        /* ai_family: int, offset 4 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_family", MAX_IDENT - 1);
-        f->type = cc->ty_int; f->offset = 4; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_socktype: int, offset 8 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_socktype", MAX_IDENT - 1);
-        f->type = cc->ty_int; f->offset = 8; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_protocol: int, offset 12 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_protocol", MAX_IDENT - 1);
-        f->type = cc->ty_int; f->offset = 12; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_addrlen: size_t (ulong), offset 16 — aligned to 8 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_addrlen", MAX_IDENT - 1);
-        f->type = cc->ty_ulong; f->offset = 16; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_addr: struct sockaddr*, offset 24 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_addr", MAX_IDENT - 1);
-        f->type = sockaddr_ptr; f->offset = 24; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_canonname: char*, offset 32 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_canonname", MAX_IDENT - 1);
-        f->type = type_ptr(cc, cc->ty_char); f->offset = 32; f->next = 0;
-        prev->next = f; prev = f;
-
-        /* ai_next: struct addrinfo*, offset 40 */
-        f = (StructField *)cc_alloc(cc, sizeof(StructField));
-        strncpy(f->name, "ai_next", MAX_IDENT - 1);
-        f->type = type_ptr(cc, ai); f->offset = 40; f->next = 0;
-        prev->next = f; prev = f;
-
-        ai->size = 48;
-        ai->align = 8;
-        ai->is_complete = 1;
-        register_struct(cc, ai);
-    }
 
     /* NULL as enum constant */
     sym = scope_add(cc, "NULL", cc->ty_long);
@@ -441,264 +239,6 @@ static void init_compiler(Compiler *cc) {
       ft = type_func(cc, cc->ty_void);
       sym = scope_add(cc, "_exit", ft);
       sym->is_global = 1;
-
-      /* fflush — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "fflush", ft);
-      sym->is_global = 1;
-
-      /* snprintf — returns int, variadic */
-      ft = type_func(cc, cc->ty_int);
-      ft->is_variadic = 1;
-      sym = scope_add(cc, "snprintf", ft);
-      sym->is_global = 1;
-
-      /* strcat — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "strcat", ft);
-      sym->is_global = 1;
-
-      /* strncat — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "strncat", ft);
-      sym->is_global = 1;
-
-      /* setenv — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "setenv", ft);
-      sym->is_global = 1;
-
-      /* unsetenv — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "unsetenv", ft);
-      sym->is_global = 1;
-
-      /* freopen — returns FILE* (void*) */
-      ft = type_func(cc, type_ptr(cc, cc->ty_void));
-      sym = scope_add(cc, "freopen", ft);
-      sym->is_global = 1;
-
-      /* memcmp — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "memcmp", ft);
-      sym->is_global = 1;
-
-      /* memmove — returns void* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_void));
-      sym = scope_add(cc, "memmove", ft);
-      sym->is_global = 1;
-
-      /* atoi — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "atoi", ft);
-      sym->is_global = 1;
-
-      /* strtol — returns long */
-      ft = type_func(cc, cc->ty_long);
-      sym = scope_add(cc, "strtol", ft);
-      sym->is_global = 1;
-
-      /* strtoul — returns unsigned long */
-      ft = type_func(cc, cc->ty_ulong);
-      sym = scope_add(cc, "strtoul", ft);
-      sym->is_global = 1;
-
-      /* abort — returns void */
-      ft = type_func(cc, cc->ty_void);
-      sym = scope_add(cc, "abort", ft);
-      sym->is_global = 1;
-
-      /* getenv — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "getenv", ft);
-      sym->is_global = 1;
-
-      /* strchr — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "strchr", ft);
-      sym->is_global = 1;
-
-      /* vsnprintf — returns int, variadic */
-      ft = type_func(cc, cc->ty_int);
-      ft->is_variadic = 1;
-      sym = scope_add(cc, "vsnprintf", ft);
-      sym->is_global = 1;
-
-      /* vfprintf — returns int, variadic */
-      ft = type_func(cc, cc->ty_int);
-      ft->is_variadic = 1;
-      sym = scope_add(cc, "vfprintf", ft);
-      sym->is_global = 1;
-
-      /* strrchr — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "strrchr", ft);
-      sym->is_global = 1;
-
-      /* strcspn — returns size_t (ulong) */
-      ft = type_func(cc, cc->ty_ulong);
-      sym = scope_add(cc, "strcspn", ft);
-      sym->is_global = 1;
-
-      /* strspn — returns size_t (ulong) */
-      ft = type_func(cc, cc->ty_ulong);
-      sym = scope_add(cc, "strspn", ft);
-      sym->is_global = 1;
-
-      /* memchr — returns void* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_void));
-      sym = scope_add(cc, "memchr", ft);
-      sym->is_global = 1;
-
-      /* inet_pton — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "inet_pton", ft);
-      sym->is_global = 1;
-
-      /* strtod — returns double */
-      ft = type_func(cc, cc->ty_double);
-      sym = scope_add(cc, "strtod", ft);
-      sym->is_global = 1;
-
-      /* ctype functions — all return int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isalpha", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isdigit", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isxdigit", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "toupper", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "tolower", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isalnum", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isspace", ft); sym->is_global = 1;
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "isupper", ft); sym->is_global = 1;
-
-      /* strerror — returns char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "strerror", ft);
-      sym->is_global = 1;
-
-      /* close — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "close", ft);
-      sym->is_global = 1;
-
-      /* select — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "select", ft);
-      sym->is_global = 1;
-
-      /* socket — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "socket", ft);
-      sym->is_global = 1;
-
-      /* connect — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "connect", ft);
-      sym->is_global = 1;
-
-      /* bind — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "bind", ft);
-      sym->is_global = 1;
-
-      /* listen — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "listen", ft);
-      sym->is_global = 1;
-
-      /* accept — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "accept", ft);
-      sym->is_global = 1;
-
-      /* recv — returns ssize_t */
-      ft = type_func(cc, cc->ty_long);
-      sym = scope_add(cc, "recv", ft);
-      sym->is_global = 1;
-
-      /* send — returns ssize_t */
-      ft = type_func(cc, cc->ty_long);
-      sym = scope_add(cc, "send", ft);
-      sym->is_global = 1;
-
-      /* setsockopt — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "setsockopt", ft);
-      sym->is_global = 1;
-
-      /* getsockopt — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "getsockopt", ft);
-      sym->is_global = 1;
-
-      /* fcntl — returns int, variadic */
-      ft = type_func(cc, cc->ty_int);
-      ft->is_variadic = 1;
-      sym = scope_add(cc, "fcntl", ft);
-      sym->is_global = 1;
-
-      /* ioctl — returns int, variadic */
-      ft = type_func(cc, cc->ty_int);
-      ft->is_variadic = 1;
-      sym = scope_add(cc, "ioctl", ft);
-      sym->is_global = 1;
-
-      /* poll — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "poll", ft);
-      sym->is_global = 1;
-
-      /* gettimeofday — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "gettimeofday", ft);
-      sym->is_global = 1;
-
-      /* clock_gettime — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "clock_gettime", ft);
-      sym->is_global = 1;
-
-      /* getaddrinfo — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "getaddrinfo", ft);
-      sym->is_global = 1;
-
-      /* freeaddrinfo — returns void */
-      ft = type_func(cc, cc->ty_void);
-      sym = scope_add(cc, "freeaddrinfo", ft);
-      sym->is_global = 1;
-
-      /* gai_strerror — returns const char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "gai_strerror", ft);
-      sym->is_global = 1;
-
-      /* inet_ntop — returns const char* */
-      ft = type_func(cc, type_ptr(cc, cc->ty_char));
-      sym = scope_add(cc, "inet_ntop", ft);
-      sym->is_global = 1;
-
-      /* getpeername — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "getpeername", ft);
-      sym->is_global = 1;
-
-      /* getsockname — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "getsockname", ft);
-      sym->is_global = 1;
-
-      /* gethostname — returns int */
-      ft = type_func(cc, cc->ty_int);
-      sym = scope_add(cc, "gethostname", ft);
-      sym->is_global = 1;
     }
   }
 }
@@ -851,6 +391,9 @@ static void peephole_optimize(char *filename) {
 /* Bug fix: Compiler is heap-allocated (52KB+ struct, not stack)     */
 /* ================================================================ */
 
+/* Forward declaration for IR pass manager (linked separately) */
+void ir_pm_run_default(void *mod_ptr, int verbose);
+
 int main(int argc, char **argv) {
   Compiler *cc;
   char *input_file;
@@ -873,6 +416,8 @@ int main(int argc, char **argv) {
 
   int compile_only = 0;
 
+  int g_ir_primary = 0;
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -885,15 +430,9 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
-    } else if (strcmp(argv[i], "-target") == 0) {
-      i++;
-      if (i < argc) {
-          if (strcmp(argv[i], "thumbv6m-none-eabi") == 0) {
-              extern TargetBackend backend_thumbv6m;
-              backend_ops = &backend_thumbv6m;
-              ZCC_POINTER_WIDTH = 4;
-          }
-      }
+    } else if (strcmp(argv[i], "--ir") == 0) {
+      g_emit_ir = 1;
+      g_ir_primary = 1;
     } else {
       input_file = argv[i];
     }
@@ -985,11 +524,6 @@ int main(int argc, char **argv) {
   printf("[Phase 1] Lexical Array Bootstrap... OK\n");
   next_token(cc);
 
-  /* Pass 1: Pre-scan all top-level declarations for forward references */
-  printf("[Phase 1.5] Forward Declaration Pre-Scan... ");
-  prescan_declarations(cc);
-  printf("OK\n");
-
   /* parse */
   printf("[Phase 2] AST Topological Generation... ");
   prog = parse_program(cc);
@@ -1012,9 +546,22 @@ int main(int argc, char **argv) {
   codegen_program(cc, prog);
   fclose(cc->out);
 
+  /* IR pass manager — runs when --ir flag is active */
+  if (g_ir_primary && g_ir_module) {
+    int ir_total_nodes = 0;
+    int ir_fi;
+    for (ir_fi = 0; ir_fi < g_ir_module->func_count; ir_fi++) {
+      ir_total_nodes += g_ir_module->funcs[ir_fi]->node_count;
+    }
+    printf("[Phase IR] IR Pass Manager (%d funcs, %d nodes)...\n",
+           g_ir_module->func_count, ir_total_nodes);
+    ir_pm_run_default(g_ir_module, 1);
+    printf("[Phase IR] Pass Manager Complete.\n");
+  }
 
-
-  ZCC_IR_FLUSH(stdout);
+  if (!g_ir_primary) {
+    ZCC_IR_FLUSH(stdout);
+  }
 
   /* peephole optimize the emitted assembly safely out-of-bounds */
   peephole_optimize(asm_file);
@@ -1022,16 +569,10 @@ int main(int argc, char **argv) {
   /* assemble and link if not stopping at assembly */
   if (!stop_at_asm) {
     printf("[Phase 6] GCC Assembly/Linker Binding... ");
-    if (backend_ops) {
-      if (compile_only) {
-        sprintf(cmd, "arm-none-eabi-gcc -c -o %s %s 2>&1", output_file, asm_file);
-      } else {
-        sprintf(cmd, "arm-none-eabi-gcc -mthumb -mcpu=cortex-m0plus -nostdlib -Wl,-Ttext=0x10000000 -o %s %s 2>&1", output_file, asm_file);
-      }
-    } else if (compile_only) {
+    if (compile_only) {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file);
     }
