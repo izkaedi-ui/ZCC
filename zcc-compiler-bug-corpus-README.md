@@ -19,7 +19,7 @@ size_categories:
 
 # ZCC Compiler Bug Corpus
 
-A ground-truth dataset of 12 real codegen bugs discovered and fixed in a single debugging session on ZCC, a self-hosting C compiler with a dual-emission IR backend.
+A ground-truth dataset of 13 real codegen bugs discovered and fixed in a single debugging session on ZCC, a self-hosting C compiler with a dual-emission IR backend.
 
 ## Why this matters
 
@@ -44,7 +44,7 @@ The IR backend runs inside the AST's stack frame (hybrid architecture) — the A
 | Instruction selection | 2 | CWE-704 |
 | SSA destruction (PHI) | 1 (3 sub-bugs) | CWE-682 |
 | Bridge layer gaps | 3 | CWE-476, CWE-839 |
-| ABI violations | 2 | CWE-682 |
+| ABI violations | 3 | CWE-682 |
 
 ## PRIME energy scoring
 
@@ -117,14 +117,14 @@ for b in sorted(bugs, key=lambda x: -x["prime_energy_score"]):
 - **Compiler**: ZCC (github: zkaedi, HuggingFace: zkaedi)
 - **Discovery date**: April 4, 2026
 - **Discovery method**: Self-hosting bootstrap failure + GDB register-level debugging
-- **Verification**: All 12 bugs fixed, `make selfhost` produces SELF-HOST VERIFIED (byte-identical zcc2.s == zcc3.s), 21/21 regression tests pass
+- **Verification**: All 13 bugs fixed, `make selfhost` produces SELF-HOST VERIFIED (byte-identical zcc2.s == zcc3.s), 21/21 regression tests pass
 - **Environment**: x86-64 Linux (WSL2 Ubuntu 24.04), GCC bootstrap, AMD Ryzen AI 7 350
 
 ## Citation
 
 ```bibtex
 @dataset{zkaedi_zcc_bug_corpus_2026,
-  title={ZCC Compiler Bug Corpus: 12 Real Codegen Bugs with Ground-Truth Fixes},
+  title={ZCC Compiler Bug Corpus: 13 Real Codegen Bugs with Ground-Truth Fixes},
   author={ZKAEDI},
   year={2026},
   publisher={Hugging Face},

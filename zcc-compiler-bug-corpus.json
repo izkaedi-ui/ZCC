@@ -284,5 +284,27 @@
     "before_pattern": "uint32_t order[ZCC_PGO_MAX_BLOCKS];\nuint32_t num_stmts;",
     "after_pattern": "unsigned int order[ZCC_PGO_MAX_BLOCKS];\nunsigned int num_stmts;",
     "regression_test": "Self-hosting ZCC with ASan enabled must compile large input source cleanly"
+  },
+  {
+    "id": "CG-AST-016",
+    "title": "Implicit argument type promotion failure (ABI parameter shifting)",
+    "cwe": "CWE-682",
+    "cwe_name": "Incorrect Calculation",
+    "severity": "critical",
+    "domain": "compiler_frontend",
+    "component": "part3.c:parse_postfix",
+    "symptom": "Functions receiving mixed float/int arguments fail with corrupted sizes. Lua fails with \"core and library have incompatible numeric types\" and a nil table crash in luaL_openlibs.",
+    "root_cause": "The parser iterated function arguments locally and appended them linearly to the function's parameter evaluation frame without coercing integers to floating-point specifications. This caused a literal (e.g., 504) to be loaded natively into a general-purpose integer register rather than the XMM register mapping declared by the prototype, fatally displacing all subsequently evaluated integer parameters down the System V AMD64 ABI stream.",
+    "detection_method": "Isolated function calls into a minimal reproduction test (test_call_promo.c). GDB traced the evaluation of integer arguments incorrectly placed into RSI, displacing expected parameters.",
+    "fix_summary": "Surgically patched direct and indirect parameter processing pathways in part3.c to dynamically fetch prototype definitions and inject an ND_CAST node if the operand natively mismatched the structural prototype.",
+    "affected_functions": ["all function calls mixing floating-point and integer parameters"],
+    "lines_changed": 15,
+    "fix_type": "type_coercion",
+    "prime_energy_score": 8.0,
+    "prime_phase": "wandering",
+    "tags": ["ABI-violation", "type-promotion", "parameter-shifting", "SystemV-AMD64"],
+    "before_pattern": "call->args[call->num_args] = parse_assign(cc);",
+    "after_pattern": "Type *ptype = func_type->params[call->num_args];\\nif (arg->type->kind != ptype->kind) {\\n  /* wrap arg in ND_CAST */\\n}",
+    "regression_test": "test_call_promo.c — executing a prototyped function with a mismatched integer argument must correctly promote the argument without displacing subsequent parameters."
   }
 ]
