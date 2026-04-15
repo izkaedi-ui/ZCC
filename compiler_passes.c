@@ -2749,6 +2749,8 @@ static void lower_stmt(LowerCtx *ctx, ASTNode *ast) {
   }
 }
 
+static int ir_node_budget = 80000;
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * ZCC AST BRIDGE — Lower ZCC-parsed function (scalars + control flow) to IR.
  * ZCCNode and ZND_* come from zcc_ast_bridge.h. Copy from Node* via accessors.
@@ -2911,6 +2913,10 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n);
 static int if_counter;
 
 static ZCCNode *alloc_zcc_node(void) {
+  if (ir_node_budget-- <= 0) {
+      fprintf(stderr, "[ZKAEDI] node budget exhausted in alloc_zcc_node — graceful AST fallback\n");
+      return NULL;
+  }
   ZCCNode *z = calloc(1, sizeof(ZCCNode));
   return z;
 }
@@ -3253,6 +3259,7 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n) {
 ZCCNode *zcc_node_from(struct Node *n) {
   if (!n)
     return NULL;
+  ir_node_budget = 80000;
   if_counter = 0; /* reset at start of each function body */
   return zcc_node_from_stmt(n);
 }
