@@ -2,8 +2,8 @@
 /* CODE GENERATOR — x86-64 Linux (System V) or Windows x64 ABI      */
 /* ================================================================ */
 
-#include "ir_emit_dispatch.h"
 #include "ir_bridge.h"
+#include "ir_emit_dispatch.h"
 
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdangling-else"
@@ -17,12 +17,15 @@ int unsetenv(const char *name);
 
 static void push_reg(Compiler *cc, char *reg) {
   if (backend_ops) {
-      if (strcmp(reg, "rax") == 0) reg = "r0";
-      else if (strcmp(reg, "r11") == 0) reg = "r1";
-      else if (strcmp(reg, "rdx") == 0) reg = "r2";
-      fprintf(cc->out, "    push {%s}\n", reg);
-      cc->stack_depth++;
-      return;
+    if (strcmp(reg, "rax") == 0)
+      reg = "r0";
+    else if (strcmp(reg, "r11") == 0)
+      reg = "r1";
+    else if (strcmp(reg, "rdx") == 0)
+      reg = "r2";
+    fprintf(cc->out, "    push {%s}\n", reg);
+    cc->stack_depth++;
+    return;
   }
   fprintf(cc->out, "    pushq %%%s\n", reg);
   cc->stack_depth++;
@@ -30,12 +33,15 @@ static void push_reg(Compiler *cc, char *reg) {
 
 static void pop_reg(Compiler *cc, char *reg) {
   if (backend_ops) {
-      if (strcmp(reg, "rax") == 0) reg = "r0";
-      else if (strcmp(reg, "r11") == 0) reg = "r1";
-      else if (strcmp(reg, "rdx") == 0) reg = "r2";
-      fprintf(cc->out, "    pop {%s}\n", reg);
-      cc->stack_depth--;
-      return;
+    if (strcmp(reg, "rax") == 0)
+      reg = "r0";
+    else if (strcmp(reg, "r11") == 0)
+      reg = "r1";
+    else if (strcmp(reg, "rdx") == 0)
+      reg = "r2";
+    fprintf(cc->out, "    pop {%s}\n", reg);
+    cc->stack_depth--;
+    return;
   }
   fprintf(cc->out, "    popq %%%s\n", reg);
   cc->stack_depth--;
@@ -67,33 +73,37 @@ static int log2_of(long long val) {
 enum { FMT_JE = 1, FMT_JMP, FMT_DEF, FMT_JNE };
 static void emit_label_fmt(Compiler *cc, int n, int fmt) {
   if (backend_ops) {
-      switch (fmt) {
-      case FMT_JE:
-        fprintf(cc->out, "    beq .L%d\n", n);
-        break;
-      case FMT_JMP:
-        fprintf(cc->out, "    b .L%d\n", n);
-        break;
-      case FMT_DEF:
-        fprintf(cc->out, ".L%d:\n", n);
-        break;
-      case FMT_JNE:
-        fprintf(cc->out, "    bne .L%d\n", n);
-        break;
-      default:
-        fprintf(cc->out, ".L%d:\n", n);
-        break;
-      }
-      return;
+    switch (fmt) {
+    case FMT_JE:
+      fprintf(cc->out, "    beq .L%d\n", n);
+      break;
+    case FMT_JMP:
+      fprintf(cc->out, "    b .L%d\n", n);
+      break;
+    case FMT_DEF:
+      fprintf(cc->out, ".L%d:\n", n);
+      break;
+    case FMT_JNE:
+      fprintf(cc->out, "    bne .L%d\n", n);
+      break;
+    default:
+      fprintf(cc->out, ".L%d:\n", n);
+      break;
+    }
+    return;
   }
   switch (fmt) {
   case FMT_JE:
-    if (backend_ops) fprintf(cc->out, "    beq .L%d\n" \
-    ); else fprintf(cc->out, "    je .L%d\n", n);
+    if (backend_ops)
+      fprintf(cc->out, "    beq .L%d\n");
+    else
+      fprintf(cc->out, "    je .L%d\n", n);
     break;
   case FMT_JMP:
-    if (backend_ops) fprintf(cc->out, "    b .L%d\n" \
-    ); else fprintf(cc->out, "    jmp .L%d\n", n);
+    if (backend_ops)
+      fprintf(cc->out, "    b .L%d\n");
+    else
+      fprintf(cc->out, "    jmp .L%d\n", n);
     break;
   case FMT_DEF:
     fprintf(cc->out, ".L%d:\n", n);
@@ -127,14 +137,14 @@ int ptr_in_fault_range(const void *p) {
 
 void codegen_load(Compiler *cc, Type *type) {
   if (backend_ops) {
-      if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
-          fprintf(cc->out, "    ldr r0, [r0]\n");
-      } else if (type->size == 1) {
-          fprintf(cc->out, "    ldrb r0, [r0]\n");
-      } else if (type->size == 2) {
-          fprintf(cc->out, "    ldrh r0, [r0]\n");
-      }
-      return;
+    if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
+      fprintf(cc->out, "    ldr r0, [r0]\n");
+    } else if (type->size == 1) {
+      fprintf(cc->out, "    ldrb r0, [r0]\n");
+    } else if (type->size == 2) {
+      fprintf(cc->out, "    ldrh r0, [r0]\n");
+    }
+    return;
   }
   if (!type) {
     fprintf(cc->out, "    movq (%%rax), %%rax\n");
@@ -184,21 +194,25 @@ void codegen_load(Compiler *cc, Type *type) {
 void codegen_store(Compiler *cc, Type *type) {
   pop_reg(cc, "r11");
   if (backend_ops) {
-      if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
-          fprintf(cc->out, "    str r1, [r0]\n");
-      } else if (type->size == 1) {
-          fprintf(cc->out, "    strb r1, [r0]\n");
-      } else if (type->size == 2) {
-          fprintf(cc->out, "    strh r1, [r0]\n");
-      }
-      fprintf(cc->out, "    mov r0, r1\n");
-      return;
+    if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
+      fprintf(cc->out, "    str r1, [r0]\n");
+    } else if (type->size == 1) {
+      fprintf(cc->out, "    strb r1, [r0]\n");
+    } else if (type->size == 2) {
+      fprintf(cc->out, "    strh r1, [r0]\n");
+    }
+    fprintf(cc->out, "    mov r0, r1\n");
+    return;
   }
   if (!type) {
-    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    str r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   /* Do NOT check fault range here: stage2 miscompiles it and rejects valid
@@ -206,10 +220,14 @@ void codegen_store(Compiler *cc, Type *type) {
   /* Pointers must always be 64-bit (fixes stage2 sign-extended 32-bit store).
    */
   if (type->kind == TY_PTR) {
-    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    str r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   if (type->kind == TY_STRUCT || type->kind == TY_UNION || type->size > 8) {
@@ -223,30 +241,42 @@ void codegen_store(Compiler *cc, Type *type) {
     fprintf(cc->out, "    popq %%rcx\n");
     fprintf(cc->out, "    popq %%rdi\n");
     fprintf(cc->out, "    popq %%rsi\n");
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   switch (type->size) {
   case 1:
-    if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    strb r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
     break;
   case 2:
-    if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    strh r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
     break;
   case 4:
-    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    str r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
     break;
   default:
-    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops)
+      fprintf(cc->out, "    str r1, [r0]\n");
+    else
+      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
     break;
   }
-  if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+  if (backend_ops)
+    fprintf(cc->out, "    mov r0, r1\n");
+  else
+    fprintf(cc->out, "    movq %%r11, %%rax\n");
 }
 
 /* Return cutoff so stage2 can't miscompile inline constant (GDB showed
@@ -400,9 +430,9 @@ void codegen_addr(Compiler *cc, Node *node) {
                        address) and crash */
       if (off != 0 && !node->sym->is_global) {
         if (backend_ops) {
-            fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r7, r3\n", off);
+          fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r7, r3\n", off);
         } else {
-            fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", off);
+          fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", off);
         }
         char vname[32];
         sprintf(vname, "%%stack_%d", off);
@@ -412,9 +442,9 @@ void codegen_addr(Compiler *cc, Node *node) {
       }
     }
     if (backend_ops) {
-        fprintf(cc->out, "    ldr r0, =%s\n", node->name);
+      fprintf(cc->out, "    ldr r0, =%s\n", node->name);
     } else {
-        fprintf(cc->out, "    leaq %s(%%rip), %%rax\n", node->name);
+      fprintf(cc->out, "    leaq %s(%%rip), %%rax\n", node->name);
     }
     char gname[32];
     sprintf(gname, "%%%s", node->name);
@@ -510,12 +540,12 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_NUM:
     if (backend_ops) {
-        fprintf(cc->out, "    ldr r0, =%lld\n", node->int_val);
-        {
-          char *dst = ir_bridge_fresh_tmp();
-          ZCC_EMIT_CONST(ir_map_type(node->type), dst, node->int_val, node->line);
-        }
-        return;
+      fprintf(cc->out, "    ldr r0, =%lld\n", node->int_val);
+      {
+        char *dst = ir_bridge_fresh_tmp();
+        ZCC_EMIT_CONST(ir_map_type(node->type), dst, node->int_val, node->line);
+      }
+      return;
     }
     if (node->int_val >= -2147483648) {
       if (node->int_val <= 2147483647) {
@@ -572,15 +602,26 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_VAR:
     if (node->sym && node->sym->assigned_reg) {
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", node->sym->assigned_reg); else fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", node->sym->assigned_reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
       if (node->type && !node_type_unsigned(node) && !is_pointer(node->type)) {
-          if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-          else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-          else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+        if (node->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
+        } else if (node->type->size == 1)
+          fprintf(cc->out, "    movsbq %%al, %%rax\n");
+        else if (node->type->size == 2)
+          fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->type && node_type_unsigned(node)) {
-          if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-          else if (node->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-          else if (node->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+        if (node->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
+        } else if (node->type->size == 1)
+          fprintf(cc->out, "    movzbq %%al, %%rax\n");
+        else if (node->type->size == 2)
+          fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
       {
         char *vname = ir_var_name(node);
@@ -619,16 +660,28 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(rhs_ir);
     if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->sym &&
         node->lhs->sym->assigned_reg) {
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+      if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+          !is_pointer(node->lhs->type)) {
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movsbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movzbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", node->lhs->sym->assigned_reg); else fprintf(cc->out, "    movq %%rax, %s\n", node->lhs->sym->assigned_reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov %s, r0\n", node->lhs->sym->assigned_reg);
+      else
+        fprintf(cc->out, "    movq %%rax, %s\n", node->lhs->sym->assigned_reg);
       {
         char *vname = ir_var_name(node->lhs);
         ZCC_EMIT_STORE(ir_map_type(node->lhs->type), vname, rhs_ir, node->line);
@@ -654,7 +707,9 @@ void codegen_expr(Compiler *cc, Node *node) {
      * not 8 */
     if (node->lhs->kind == ND_MEMBER && node->lhs->member_size > 0) {
       pop_reg(cc, "r11");
-      if ((node->lhs->type && (node->lhs->type->kind == TY_STRUCT || node->lhs->type->kind == TY_UNION)) || node->lhs->member_size > 8) {
+      if ((node->lhs->type && (node->lhs->type->kind == TY_STRUCT ||
+                               node->lhs->type->kind == TY_UNION)) ||
+          node->lhs->member_size > 8) {
         fprintf(cc->out, "    pushq %%rsi\n");
         fprintf(cc->out, "    pushq %%rdi\n");
         fprintf(cc->out, "    pushq %%rcx\n");
@@ -665,35 +720,50 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    popq %%rcx\n");
         fprintf(cc->out, "    popq %%rdi\n");
         fprintf(cc->out, "    popq %%rsi\n");
-        if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+        if (backend_ops)
+          fprintf(cc->out, "    mov r0, r1\n");
+        else
+          fprintf(cc->out, "    movq %%r11, %%rax\n");
       } else {
-        /* If member type is pointer/func, always use movq regardless of member_size */
+        /* If member type is pointer/func, always use movq regardless of
+         * member_size */
         if (node->lhs->type && is_pointer(node->lhs->type)) {
-          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+          if (backend_ops)
+            fprintf(cc->out, "    str r1, [r0]\n");
+          else
+            fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         } else {
-        switch (node->lhs->member_size) {
-        case 1:
-          if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
-          break;
-        case 2:
-          if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
-          break;
-        case 4:
-          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
-          break;
-        default:
-          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
-          break;
+          switch (node->lhs->member_size) {
+          case 1:
+            if (backend_ops)
+              fprintf(cc->out, "    strb r1, [r0]\n");
+            else
+              fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+            break;
+          case 2:
+            if (backend_ops)
+              fprintf(cc->out, "    strh r1, [r0]\n");
+            else
+              fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+            break;
+          case 4:
+            if (backend_ops)
+              fprintf(cc->out, "    str r1, [r0]\n");
+            else
+              fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+            break;
+          default:
+            if (backend_ops)
+              fprintf(cc->out, "    str r1, [r0]\n");
+            else
+              fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+            break;
+          }
         }
-        }
-        if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
+        if (backend_ops)
+          fprintf(cc->out, "    mov r0, r1\n");
+        else
+          fprintf(cc->out, "    movq %%r11, %%rax\n");
       }
     } else {
       codegen_store(cc, node->lhs->type);
@@ -716,9 +786,14 @@ void codegen_expr(Compiler *cc, Node *node) {
         node->lhs->sym->assigned_reg) {
       char *reg = node->lhs->sym->assigned_reg;
       codegen_expr_checked(cc, node->rhs);
-      if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r1, r0\n");
+      else
+        fprintf(cc->out, "    movq %%rax, %%r11\n");
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", reg);
       switch (node->compound_op) {
       case ND_ADD:
         if (is_pointer(node->lhs->type)) {
@@ -734,12 +809,16 @@ void codegen_expr(Compiler *cc, Node *node) {
           if (esz > 1)
             fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
         }
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
-      else fprintf(cc->out, "    subq %%r11, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_SUB);
+        else
+          fprintf(cc->out, "    subq %%r11, %%rax\n");
         break;
       case ND_MUL:
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
-      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_MUL);
+        else
+          fprintf(cc->out, "    imulq %%r11, %%rax\n");
         break;
       case ND_DIV:
         if (node->lhs->type && is_unsigned_type(node->lhs->type)) {
@@ -758,42 +837,65 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
         break;
       case ND_BAND:
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
-      else fprintf(cc->out, "    andq %%r11, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_BAND);
+        else
+          fprintf(cc->out, "    andq %%r11, %%rax\n");
         break;
       case ND_BOR:
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
-      else fprintf(cc->out, "    orq %%r11, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_BOR);
+        else
+          fprintf(cc->out, "    orq %%r11, %%rax\n");
         break;
       case ND_BXOR:
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
-      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_BXOR);
+        else
+          fprintf(cc->out, "    xorq %%r11, %%rax\n");
         break;
       case ND_SHL:
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHL);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_SHL);
+        else
+          fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
         break;
       case ND_SHR:
         if (node->lhs->type && is_unsigned_type(node->lhs->type))
-          if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+          if (backend_ops)
+            backend_ops->emit_binary_op(cc, ND_SHR);
+          else
+            fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+        else if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_SHR);
         else
-          if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
+          fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
         break;
       default:
         break;
       }
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+      if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+          !is_pointer(node->lhs->type)) {
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movsbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movzbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov %s, r0\n", reg);
+      else
+        fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     codegen_addr_checked(cc, node->lhs);
@@ -829,8 +931,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (node->compound_op) {
     case ND_ADD:
@@ -862,8 +966,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (esz > 1)
           fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
       }
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
-      else fprintf(cc->out, "    subq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_SUB);
+      else
+        fprintf(cc->out, "    subq %%r11, %%rax\n");
       break;
     case ND_MUL:
       if (node->lhs->type && is_float_type(node->lhs->type)) {
@@ -873,8 +979,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
-      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_MUL);
+      else
+        fprintf(cc->out, "    imulq %%r11, %%rax\n");
       break;
     case ND_DIV:
       if (node->lhs->type && is_float_type(node->lhs->type)) {
@@ -895,95 +1003,138 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_unsigned_type(node->lhs->type)) {
         fprintf(cc->out, "    xorq %%rdx, %%rdx\n");
         fprintf(cc->out, "    divq %%r11\n");
-        if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
-      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+        if (backend_ops)
+          fprintf(cc->out, "    mov r0, r2\n");
+        else
+          fprintf(cc->out, "    movq %%rdx, %%rax\n");
       } else {
         fprintf(cc->out, "    cqo\n    idivq %%r11\n    movq %%rdx, %%rax\n");
       }
       break;
     case ND_BAND:
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
-      else fprintf(cc->out, "    andq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_BAND);
+      else
+        fprintf(cc->out, "    andq %%r11, %%rax\n");
       break;
     case ND_BOR:
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
-      else fprintf(cc->out, "    orq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_BOR);
+      else
+        fprintf(cc->out, "    orq %%r11, %%rax\n");
       break;
     case ND_BXOR:
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
-      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_BXOR);
+      else
+        fprintf(cc->out, "    xorq %%r11, %%rax\n");
       break;
     case ND_SHL:
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHL);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_SHL);
+      else
+        fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
       break;
     case ND_SHR:
       if (node->lhs->type && is_unsigned_type(node->lhs->type))
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+        if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_SHR);
+        else
+          fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+      else if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_SHR);
       else
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
-      else fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
+        fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
       break;
     default:
       break;
     }
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->kind == ND_MEMBER && node->lhs->member_size > 0) {
       switch (node->lhs->member_size) {
       case 1:
-        if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    strb r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
         break;
       case 2:
-        if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    strh r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
         break;
       case 4:
-        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    str r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
         break;
       default:
-        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    str r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         break;
       }
     } else {
       switch (type_size(node->lhs->type)) {
       case 1:
-        if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    strb r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
         break;
       case 2:
-        if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    strh r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
         break;
       case 4:
-        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    str r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
         break;
       default:
-        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+        if (backend_ops)
+          fprintf(cc->out, "    str r1, [r0]\n");
+        else
+          fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         break;
       }
     }
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
-    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+        !is_pointer(node->lhs->type)) {
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movsbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movzbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
     {
       char *dst = ir_bridge_fresh_tmp();
-      ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
+      ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs",
+                        node->line);
     }
     return;
 
@@ -1022,15 +1173,20 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-    else if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && is_pointer(node->lhs->type)) {
       int esz = ptr_elem_size(node->lhs->type);
       if (esz > 1) {
-        if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+        if (backend_ops)
+          fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
+        else
+          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -1040,8 +1196,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     } else if (node->rhs->type && is_pointer(node->rhs->type)) {
       int esz = ptr_elem_size(node->rhs->type);
       if (esz > 1) {
-        if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r0, r3, r0\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
+        if (backend_ops)
+          fprintf(cc->out, "    ldr r3, =%d\n    muls r0, r3, r0\n", esz);
+        else
+          fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -1050,15 +1208,17 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
     }
     if (backend_ops && backend_ops->emit_binary_op) {
-        backend_ops->emit_binary_op(cc, ND_ADD);
+      backend_ops->emit_binary_op(cc, ND_ADD);
     } else {
-        fprintf(cc->out, "    addq %%r11, %%rax\n");
+      fprintf(cc->out, "    addq %%r11, %%rax\n");
     }
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        if (!backend_ops) fprintf(cc->out, "    cltq\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_ADD, node->type, lhs_ir, rhs_ir, node->line);
@@ -1101,22 +1261,29 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-    else if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && is_pointer(node->lhs->type)) {
       if (node->rhs->type && is_pointer(node->rhs->type)) {
-        if (backend_ops && backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_SUB);
-        else if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
-      else fprintf(cc->out, "    subq %%r11, %%rax\n");
+        if (backend_ops && backend_ops->emit_binary_op)
+          backend_ops->emit_binary_op(cc, ND_SUB);
+        else if (backend_ops)
+          backend_ops->emit_binary_op(cc, ND_SUB);
+        else
+          fprintf(cc->out, "    subq %%r11, %%rax\n");
         {
           int esz;
           esz = ptr_elem_size(node->lhs->type);
           if (esz > 1) {
-            if (backend_ops) { /* no-op for hello.c */ } else {
-            fprintf(cc->out, "    movq $%d, %%r11\n", esz);
-            fprintf(cc->out, "    cqo\n    idivq %%r11\n");
+            if (backend_ops) { /* no-op for hello.c */
+            } else {
+              fprintf(cc->out, "    movq $%d, %%r11\n", esz);
+              fprintf(cc->out, "    cqo\n    idivq %%r11\n");
             }
           }
         }
@@ -1135,14 +1302,19 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
       }
     }
-    if (backend_ops && backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_SUB);
-    else if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
-      else fprintf(cc->out, "    subq %%r11, %%rax\n");
+    if (backend_ops && backend_ops->emit_binary_op)
+      backend_ops->emit_binary_op(cc, ND_SUB);
+    else if (backend_ops)
+      backend_ops->emit_binary_op(cc, ND_SUB);
+    else
+      fprintf(cc->out, "    subq %%r11, %%rax\n");
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        if (!backend_ops) fprintf(cc->out, "    cltq\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_SUB, node->type, lhs_ir, rhs_ir, node->line);
@@ -1228,16 +1400,21 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
     if (backend_ops) {
-        if (backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_MUL);
+      if (backend_ops->emit_binary_op)
+        backend_ops->emit_binary_op(cc, ND_MUL);
     } else {
-        if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
-      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_MUL);
+      else
+        fprintf(cc->out, "    imulq %%r11, %%rax\n");
     }
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        if (!backend_ops) fprintf(cc->out, "    cltq\n");
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_MUL, node->type, lhs_ir, rhs_ir, node->line);
@@ -1301,8 +1478,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && node->rhs->type &&
         (is_unsigned_type(node->lhs->type) ||
@@ -1340,20 +1519,26 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && node->rhs->type &&
         (is_unsigned_type(node->lhs->type) ||
          is_unsigned_type(node->rhs->type))) {
       fprintf(cc->out, "    xorq %%rdx, %%rdx\n");
       fprintf(cc->out, "    divq %%r11\n");
-      if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
-      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, r2\n");
+      else
+        fprintf(cc->out, "    movq %%rdx, %%rax\n");
     } else {
       fprintf(cc->out, "    cqo\n    idivq %%r11\n");
-      if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
-      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, r2\n");
+      else
+        fprintf(cc->out, "    movq %%rdx, %%rax\n");
     }
     ir_emit_binary_op(ND_MOD, node->type, lhs_ir, rhs_ir, node->line);
     return;
@@ -1368,8 +1553,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
-      else fprintf(cc->out, "    andq %%r11, %%rax\n");
+    if (backend_ops)
+      backend_ops->emit_binary_op(cc, ND_BAND);
+    else
+      fprintf(cc->out, "    andq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BAND, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -1383,8 +1570,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
-      else fprintf(cc->out, "    orq %%r11, %%rax\n");
+    if (backend_ops)
+      backend_ops->emit_binary_op(cc, ND_BOR);
+    else
+      fprintf(cc->out, "    orq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BOR, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -1398,8 +1587,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
-      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
+    if (backend_ops)
+      backend_ops->emit_binary_op(cc, ND_BXOR);
+    else
+      fprintf(cc->out, "    xorq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BXOR, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -1472,11 +1663,14 @@ void codegen_expr(Compiler *cc, Node *node) {
     if (node->type && is_float_type(node->type)) {
       codegen_expr_checked(cc, node->lhs);
       fprintf(cc->out, "    movabsq $-9223372036854775808, %%r11\n");
-      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
-      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
+      if (backend_ops)
+        backend_ops->emit_binary_op(cc, ND_BXOR);
+      else
+        fprintf(cc->out, "    xorq %%r11, %%rax\n");
       {
         char *dst = ir_bridge_fresh_tmp();
-        ZCC_EMIT_UNARY(IR_NEG, ir_map_type(node->type), dst, "f_lhs", node->line);
+        ZCC_EMIT_UNARY(IR_NEG, ir_map_type(node->type), dst, "f_lhs",
+                       node->line);
       }
       return;
     }
@@ -1507,8 +1701,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(src_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    sete %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     {
@@ -1557,10 +1753,12 @@ void codegen_expr(Compiler *cc, Node *node) {
       fprintf(cc->out, "    ucomisd %%xmm0, %%xmm1\n");
       switch (node->kind) {
       case ND_EQ:
-        fprintf(cc->out, "    sete %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
+        fprintf(cc->out,
+                "    sete %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
         break;
       case ND_NE:
-        fprintf(cc->out, "    setne %%al\n    setp %%r11b\n    orb %%r11b, %%al\n");
+        fprintf(cc->out,
+                "    setne %%al\n    setp %%r11b\n    orb %%r11b, %%al\n");
         break;
       case ND_LT:
         fprintf(cc->out, "    setb %%al\n");
@@ -1582,105 +1780,131 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     uns = (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) ||
           (node->rhs && node->rhs->type && is_unsigned_type(node->rhs->type));
-    use32 = node->lhs && node->lhs->type && node->rhs &&
-            node->rhs->type && type_size(node->lhs->type) == 4 &&
-            type_size(node->rhs->type) == 4;
+    use32 = node->lhs && node->lhs->type && node->rhs && node->rhs->type &&
+            type_size(node->lhs->type) == 4 && type_size(node->rhs->type) == 4;
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lhs_ir);
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     if (backend_ops) {
-        fprintf(cc->out, "    mov r1, r0\n");
+      fprintf(cc->out, "    mov r1, r0\n");
     } else {
-        if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+      if (backend_ops)
+        fprintf(cc->out, "    mov r1, r0\n");
+      else
+        fprintf(cc->out, "    movq %%rax, %%r11\n");
     }
     pop_reg(cc, "rax");
     if (backend_ops) {
-        fprintf(cc->out, "    cmp r0, r1\n");
-        int lbl_true = new_label(cc);
-        int lbl_end = new_label(cc);
-        if (uns) {
-            switch (node->kind) {
-            case ND_EQ: fprintf(cc->out, "    beq .L%d\n", lbl_true); break;
-            case ND_NE: fprintf(cc->out, "    bne .L%d\n", lbl_true); break;
-            case ND_LT: fprintf(cc->out, "    blo .L%d\n", lbl_true); break;
-            case ND_LE: fprintf(cc->out, "    bls .L%d\n", lbl_true); break;
-            case ND_GT: fprintf(cc->out, "    bhi .L%d\n", lbl_true); break;
-            case ND_GE: fprintf(cc->out, "    bhs .L%d\n", lbl_true); break;
-            }
-        } else {
-            switch (node->kind) {
-            case ND_EQ: fprintf(cc->out, "    beq .L%d\n", lbl_true); break;
-            case ND_NE: fprintf(cc->out, "    bne .L%d\n", lbl_true); break;
-            case ND_LT: fprintf(cc->out, "    blt .L%d\n", lbl_true); break;
-            case ND_LE: fprintf(cc->out, "    ble .L%d\n", lbl_true); break;
-            case ND_GT: fprintf(cc->out, "    bgt .L%d\n", lbl_true); break;
-            case ND_GE: fprintf(cc->out, "    bge .L%d\n", lbl_true); break;
-            }
+      fprintf(cc->out, "    cmp r0, r1\n");
+      int lbl_true = new_label(cc);
+      int lbl_end = new_label(cc);
+      if (uns) {
+        switch (node->kind) {
+        case ND_EQ:
+          fprintf(cc->out, "    beq .L%d\n", lbl_true);
+          break;
+        case ND_NE:
+          fprintf(cc->out, "    bne .L%d\n", lbl_true);
+          break;
+        case ND_LT:
+          fprintf(cc->out, "    blo .L%d\n", lbl_true);
+          break;
+        case ND_LE:
+          fprintf(cc->out, "    bls .L%d\n", lbl_true);
+          break;
+        case ND_GT:
+          fprintf(cc->out, "    bhi .L%d\n", lbl_true);
+          break;
+        case ND_GE:
+          fprintf(cc->out, "    bhs .L%d\n", lbl_true);
+          break;
         }
-        fprintf(cc->out, "    movs r0, #0\n");
-        fprintf(cc->out, "    b .L%d\n", lbl_end);
-        fprintf(cc->out, ".L%d:\n", lbl_true);
-        fprintf(cc->out, "    movs r0, #1\n");
-        fprintf(cc->out, ".L%d:\n", lbl_end);
+      } else {
+        switch (node->kind) {
+        case ND_EQ:
+          fprintf(cc->out, "    beq .L%d\n", lbl_true);
+          break;
+        case ND_NE:
+          fprintf(cc->out, "    bne .L%d\n", lbl_true);
+          break;
+        case ND_LT:
+          fprintf(cc->out, "    blt .L%d\n", lbl_true);
+          break;
+        case ND_LE:
+          fprintf(cc->out, "    ble .L%d\n", lbl_true);
+          break;
+        case ND_GT:
+          fprintf(cc->out, "    bgt .L%d\n", lbl_true);
+          break;
+        case ND_GE:
+          fprintf(cc->out, "    bge .L%d\n", lbl_true);
+          break;
+        }
+      }
+      fprintf(cc->out, "    movs r0, #0\n");
+      fprintf(cc->out, "    b .L%d\n", lbl_end);
+      fprintf(cc->out, ".L%d:\n", lbl_true);
+      fprintf(cc->out, "    movs r0, #1\n");
+      fprintf(cc->out, ".L%d:\n", lbl_end);
     } else {
-        if (use32)
-          fprintf(cc->out,
-                  "    cmpl %%r11d, %%eax\n"); /* 32-bit: avoids sign-extended imm
-                                                  in 64-bit */
-        else
-          if (backend_ops) fprintf(cc->out, "    cmp r0, r1\n" \
-    ); else fprintf(cc->out, "    cmpq %%r11, %%rax\n");
-        if (uns) {
-          switch (node->kind) {
-          case ND_EQ:
-            fprintf(cc->out, "    sete %%al\n");
-            break;
-          case ND_NE:
-            fprintf(cc->out, "    setne %%al\n");
-            break;
-          case ND_LT:
-            fprintf(cc->out, "    setb %%al\n");
-            break;
-          case ND_LE:
-            fprintf(cc->out, "    setbe %%al\n");
-            break;
-          case ND_GT:
-            fprintf(cc->out, "    seta %%al\n");
-            break;
-          case ND_GE:
-            fprintf(cc->out, "    setae %%al\n");
-            break;
-          default:
-            break;
-          }
-        } else {
-          switch (node->kind) {
-          case ND_EQ:
-            fprintf(cc->out, "    sete %%al\n");
-            break;
-          case ND_NE:
-            fprintf(cc->out, "    setne %%al\n");
-            break;
-          case ND_LT:
-            fprintf(cc->out, "    setl %%al\n");
-            break;
-          case ND_LE:
-            fprintf(cc->out, "    setle %%al\n");
-            break;
-          case ND_GT:
-            fprintf(cc->out, "    setg %%al\n");
-            break;
-          case ND_GE:
-            fprintf(cc->out, "    setge %%al\n");
-            break;
-          default:
-            break;
-          }
+      if (use32)
+        fprintf(cc->out,
+                "    cmpl %%r11d, %%eax\n"); /* 32-bit: avoids sign-extended imm
+                                                in 64-bit */
+      else if (backend_ops)
+        fprintf(cc->out, "    cmp r0, r1\n");
+      else
+        fprintf(cc->out, "    cmpq %%r11, %%rax\n");
+      if (uns) {
+        switch (node->kind) {
+        case ND_EQ:
+          fprintf(cc->out, "    sete %%al\n");
+          break;
+        case ND_NE:
+          fprintf(cc->out, "    setne %%al\n");
+          break;
+        case ND_LT:
+          fprintf(cc->out, "    setb %%al\n");
+          break;
+        case ND_LE:
+          fprintf(cc->out, "    setbe %%al\n");
+          break;
+        case ND_GT:
+          fprintf(cc->out, "    seta %%al\n");
+          break;
+        case ND_GE:
+          fprintf(cc->out, "    setae %%al\n");
+          break;
+        default:
+          break;
         }
-        fprintf(cc->out, "    movzbl %%al, %%eax\n");
+      } else {
+        switch (node->kind) {
+        case ND_EQ:
+          fprintf(cc->out, "    sete %%al\n");
+          break;
+        case ND_NE:
+          fprintf(cc->out, "    setne %%al\n");
+          break;
+        case ND_LT:
+          fprintf(cc->out, "    setl %%al\n");
+          break;
+        case ND_LE:
+          fprintf(cc->out, "    setle %%al\n");
+          break;
+        case ND_GT:
+          fprintf(cc->out, "    setg %%al\n");
+          break;
+        case ND_GE:
+          fprintf(cc->out, "    setge %%al\n");
+          break;
+        default:
+          break;
+        }
+      }
+      fprintf(cc->out, "    movzbl %%al, %%eax\n");
     }
     ir_emit_binary_op(node->kind, node->type, lhs_ir, rhs_ir, node->line);
     return;
@@ -1692,15 +1916,21 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(land_lhs_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
-    if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
-    else emit_label_fmt(cc, lbl1, FMT_JE);
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      emit_label_fmt(cc, lbl1, FMT_JE);
+    else
+      emit_label_fmt(cc, lbl1, FMT_JE);
     sprintf(land_lbl, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(land_lhs_ir, land_lbl, node->line);
     codegen_expr_checked(cc, node->rhs);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    setne %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     fprintf(cc->out, ".L%d:\n", lbl1);
@@ -1716,18 +1946,24 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lor_lhs_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
     sprintf(lor_lbl1, ".L%d", lbl1);
     sprintf(lor_lbl2, ".L%d", lbl2);
     codegen_expr_checked(cc, node->rhs);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
     fprintf(cc->out, "    movq $0, %%rax\n");
-    if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
-    else emit_label_fmt(cc, lbl2, FMT_JMP);
+    if (backend_ops)
+      emit_label_fmt(cc, lbl2, FMT_JMP);
+    else
+      emit_label_fmt(cc, lbl2, FMT_JMP);
     ZCC_EMIT_BR(lor_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
     ZCC_EMIT_LABEL(lor_lbl1, node->line);
@@ -1751,33 +1987,33 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl_end = new_label(cc);
 
     int fp = is_float_type(node->type);
-    
+
     if (fp) {
-        /* Float path: Check fp_offset (4(%%rcx)) threshold 176 */
-        fprintf(cc->out, "    movl 4(%%rcx), %%edx\n");
-        fprintf(cc->out, "    cmpl $176, %%edx\n");
-        fprintf(cc->out, "    jae .L%d\n", lbl_overflow);
-        /* Fast path: fetch from reg_save_area */
-        fprintf(cc->out, "    movq 16(%%rcx), %%rsi\n");
-        fprintf(cc->out, "    movslq %%edx, %%rax\n");
-        fprintf(cc->out, "    addq %%rax, %%rsi\n");
-        fprintf(cc->out, "    movq (%%rsi), %%rax\n");
-        /* Increment fp_offset by 16 */
-        fprintf(cc->out, "    addl $16, %%edx\n");
-        fprintf(cc->out, "    movl %%edx, 4(%%rcx)\n");
+      /* Float path: Check fp_offset (4(%%rcx)) threshold 176 */
+      fprintf(cc->out, "    movl 4(%%rcx), %%edx\n");
+      fprintf(cc->out, "    cmpl $176, %%edx\n");
+      fprintf(cc->out, "    jae .L%d\n", lbl_overflow);
+      /* Fast path: fetch from reg_save_area */
+      fprintf(cc->out, "    movq 16(%%rcx), %%rsi\n");
+      fprintf(cc->out, "    movslq %%edx, %%rax\n");
+      fprintf(cc->out, "    addq %%rax, %%rsi\n");
+      fprintf(cc->out, "    movq (%%rsi), %%rax\n");
+      /* Increment fp_offset by 16 */
+      fprintf(cc->out, "    addl $16, %%edx\n");
+      fprintf(cc->out, "    movl %%edx, 4(%%rcx)\n");
     } else {
-        /* GP path: Check gp_offset (0(%%rcx)) threshold 48 */
-        fprintf(cc->out, "    movl 0(%%rcx), %%edx\n");
-        fprintf(cc->out, "    cmpl $48, %%edx\n");
-        fprintf(cc->out, "    jae .L%d\n", lbl_overflow);
-        /* Fast path: fetch from reg_save_area */
-        fprintf(cc->out, "    movq 16(%%rcx), %%rsi\n");
-        fprintf(cc->out, "    movslq %%edx, %%rax\n");
-        fprintf(cc->out, "    addq %%rax, %%rsi\n");
-        fprintf(cc->out, "    movq (%%rsi), %%rax\n");
-        /* Increment gp_offset by 8 */
-        fprintf(cc->out, "    addl $8, %%edx\n");
-        fprintf(cc->out, "    movl %%edx, 0(%%rcx)\n");
+      /* GP path: Check gp_offset (0(%%rcx)) threshold 48 */
+      fprintf(cc->out, "    movl 0(%%rcx), %%edx\n");
+      fprintf(cc->out, "    cmpl $48, %%edx\n");
+      fprintf(cc->out, "    jae .L%d\n", lbl_overflow);
+      /* Fast path: fetch from reg_save_area */
+      fprintf(cc->out, "    movq 16(%%rcx), %%rsi\n");
+      fprintf(cc->out, "    movslq %%edx, %%rax\n");
+      fprintf(cc->out, "    addq %%rax, %%rsi\n");
+      fprintf(cc->out, "    movq (%%rsi), %%rax\n");
+      /* Increment gp_offset by 8 */
+      fprintf(cc->out, "    addl $8, %%edx\n");
+      fprintf(cc->out, "    movl %%edx, 0(%%rcx)\n");
     }
 
     emit_label_fmt(cc, lbl_end, FMT_JMP);
@@ -1787,7 +2023,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    movq 8(%%rcx), %%rsi\n");
     fprintf(cc->out, "    movq (%%rsi), %%rax\n");
 
-    /* Increment overflow_arg_area by 8 (even for floats, stack passing is 8-aligned) */
+    /* Increment overflow_arg_area by 8 (even for floats, stack passing is
+     * 8-aligned) */
     fprintf(cc->out, "    leaq 8(%%rsi), %%rdi\n");
     fprintf(cc->out, "    movq %%rdi, 8(%%rcx)\n");
 
@@ -1823,9 +2060,9 @@ void codegen_expr(Compiler *cc, Node *node) {
       ir_save_result(deref_addr);
       /* Type-aware load: char* -> movsbl, int* -> movl, ptr/long* -> movq */
       if (node->type && node->type->kind == TY_FUNC) {
-          /* Do nothing: function pointer decays natively */
+        /* Do nothing: function pointer decays natively */
       } else {
-          codegen_load(cc, node->type);
+        codegen_load(cc, node->type);
       }
       {
         char *dst = ir_bridge_fresh_tmp();
@@ -1877,7 +2114,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(src_ir);
     /* truncate/extend based on target type */
     if (node->cast_type) {
-      int src_size = node->lhs && node->lhs->type ? type_size(node->lhs->type) : 4;
+      int src_size =
+          node->lhs && node->lhs->type ? type_size(node->lhs->type) : 4;
       switch (node->cast_type->size) {
       case 1:
         if (node->cast_type->kind == TY_UCHAR)
@@ -1892,46 +2130,58 @@ void codegen_expr(Compiler *cc, Node *node) {
           fprintf(cc->out, "    movswl %%ax, %%eax\n");
         break;
       case 4:
-        if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
-            fprintf(cc->out, "    movq %%rax, %%xmm0\n");
-            fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
-        } else if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG) {
-            if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->cast_type && !is_float_type(node->cast_type) && node->lhs &&
+            node->lhs->type && is_float_type(node->lhs->type)) {
+          fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+          fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+        } else if (node->cast_type->kind == TY_UINT ||
+                   node->cast_type->kind == TY_ULONG) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
         } else if (!is_pointer(node->lhs ? node->lhs->type : 0)) {
-            if (!backend_ops) fprintf(cc->out, "    cltq\n");
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
         }
         break;
       case 8:
-        if (node->cast_type && is_float_type(node->cast_type) && node->lhs && node->lhs->type && !is_float_type(node->lhs->type)) {
-            if (is_unsigned_type(node->lhs->type)) {
-                fprintf(cc->out, "    testq %%rax, %%rax\n");
-                fprintf(cc->out, "    js 1f\n");
-                fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
-                fprintf(cc->out, "    jmp 2f\n");
-                fprintf(cc->out, "1:\n");
-                if (backend_ops) fprintf(cc->out, "    mov r2, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%rdx\n");
-                fprintf(cc->out, "    shrq $1, %%rdx\n");
-                fprintf(cc->out, "    andl $1, %%eax\n");
-                fprintf(cc->out, "    orq %%rax, %%rdx\n");
-                fprintf(cc->out, "    cvtsi2sdq %%rdx, %%xmm0\n");
-                fprintf(cc->out, "    addsd %%xmm0, %%xmm0\n");
-                fprintf(cc->out, "2:\n");
-            } else {
-                fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
-            }
-            fprintf(cc->out, "    movq %%xmm0, %%rax\n");
-        } else if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
-            fprintf(cc->out, "    movq %%rax, %%xmm0\n");
-            fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
-        } else if (src_size == 4 && !is_pointer(node->lhs ? node->lhs->type : 0)) {
-            if (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) {
-                if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->cast_type && is_float_type(node->cast_type) && node->lhs &&
+            node->lhs->type && !is_float_type(node->lhs->type)) {
+          if (is_unsigned_type(node->lhs->type)) {
+            fprintf(cc->out, "    testq %%rax, %%rax\n");
+            fprintf(cc->out, "    js 1f\n");
+            fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
+            fprintf(cc->out, "    jmp 2f\n");
+            fprintf(cc->out, "1:\n");
+            if (backend_ops)
+              fprintf(cc->out, "    mov r2, r0\n");
+            else
+              fprintf(cc->out, "    movq %%rax, %%rdx\n");
+            fprintf(cc->out, "    shrq $1, %%rdx\n");
+            fprintf(cc->out, "    andl $1, %%eax\n");
+            fprintf(cc->out, "    orq %%rax, %%rdx\n");
+            fprintf(cc->out, "    cvtsi2sdq %%rdx, %%xmm0\n");
+            fprintf(cc->out, "    addsd %%xmm0, %%xmm0\n");
+            fprintf(cc->out, "2:\n");
+          } else {
+            fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
+          }
+          fprintf(cc->out, "    movq %%xmm0, %%rax\n");
+        } else if (node->cast_type && !is_float_type(node->cast_type) &&
+                   node->lhs && node->lhs->type &&
+                   is_float_type(node->lhs->type)) {
+          fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+          fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+        } else if (src_size == 4 &&
+                   !is_pointer(node->lhs ? node->lhs->type : 0)) {
+          if (node->lhs && node->lhs->type &&
+              is_unsigned_type(node->lhs->type)) {
+            if (!backend_ops)
+              fprintf(cc->out, "    movl %%eax, %%eax\n");
 
-            } else {
-                if (!backend_ops) fprintf(cc->out, "    cltq\n");
-
-            }
+          } else {
+            if (!backend_ops)
+              fprintf(cc->out, "    cltq\n");
+          }
         }
         break;
       default:
@@ -1959,15 +2209,21 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(ternary_cond_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
-    if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
-    else emit_label_fmt(cc, lbl1, FMT_JE);
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      emit_label_fmt(cc, lbl1, FMT_JE);
+    else
+      emit_label_fmt(cc, lbl1, FMT_JE);
     sprintf(ternary_lbl1, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(ternary_cond_ir, ternary_lbl1, node->line);
     codegen_expr_checked(cc, node->then_body);
-    if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
-    else emit_label_fmt(cc, lbl2, FMT_JMP);
+    if (backend_ops)
+      emit_label_fmt(cc, lbl2, FMT_JMP);
+    else
+      emit_label_fmt(cc, lbl2, FMT_JMP);
     sprintf(ternary_lbl2, ".L%d", lbl2);
     ZCC_EMIT_BR(ternary_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
@@ -1990,18 +2246,40 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    adds r0, r0, r3\n"); else fprintf(cc->out, "    adds r1, r1, r3\n"); } else fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n", esz);
+        if (strcmp(reg, "rax") == 0)
+          fprintf(cc->out, "    adds r0, r0, r3\n");
+        else
+          fprintf(cc->out, "    adds r1, r1, r3\n");
+      } else
+        fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+          !is_pointer(node->lhs->type)) {
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movsbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movzbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov %s, r0\n", reg);
+      else
+        fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     if (!node->lhs) {
@@ -2027,43 +2305,68 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz); } else fprintf(cc->out, "    addq $%d, %%rax\n", esz);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz);
+      } else
+        fprintf(cc->out, "    addq $%d, %%rax\n", esz);
     }
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (type_size(node->lhs->type)) {
     case 1:
-      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strb r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strh r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
-    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+        !is_pointer(node->lhs->type)) {
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movsbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movzbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_inc", node->line);
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_inc",
+                     node->line);
     }
     return;
 
@@ -2074,18 +2377,40 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    subs r0, r0, r3\n"); else fprintf(cc->out, "    subs r1, r1, r3\n"); } else fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n", esz);
+        if (strcmp(reg, "rax") == 0)
+          fprintf(cc->out, "    subs r0, r0, r3\n");
+        else
+          fprintf(cc->out, "    subs r1, r1, r3\n");
+      } else
+        fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+          !is_pointer(node->lhs->type)) {
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    cltq\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movsbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-          else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-          else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+        if (node->lhs->type->size == 4) {
+          if (!backend_ops)
+            fprintf(cc->out, "    movl %%eax, %%eax\n");
+        } else if (node->lhs->type->size == 1)
+          fprintf(cc->out, "    movzbq %%al, %%rax\n");
+        else if (node->lhs->type->size == 2)
+          fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov %s, r0\n", reg);
+      else
+        fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     if (!node->lhs) {
@@ -2111,43 +2436,68 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz); } else fprintf(cc->out, "    subq $%d, %%rax\n", esz);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz);
+      } else
+        fprintf(cc->out, "    subq $%d, %%rax\n", esz);
     }
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (type_size(node->lhs->type)) {
     case 1:
-      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strb r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strh r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
-      else fprintf(cc->out, "    movq %%r11, %%rax\n");
-    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r1\n");
+    else
+      fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (node->lhs->type && !node_type_unsigned(node->lhs) &&
+        !is_pointer(node->lhs->type)) {
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movsbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-        else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-        else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+      if (node->lhs->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
+      } else if (node->lhs->type->size == 1)
+        fprintf(cc->out, "    movzbq %%al, %%rax\n");
+      else if (node->lhs->type->size == 2)
+        fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_dec", node->line);
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_dec",
+                     node->line);
     }
     return;
 
@@ -2158,8 +2508,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    adds r0, r0, r3\n"); else fprintf(cc->out, "    adds r1, r1, r3\n"); } else fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n", esz);
+        if (strcmp(reg, "rax") == 0)
+          fprintf(cc->out, "    adds r0, r0, r3\n");
+        else
+          fprintf(cc->out, "    adds r1, r1, r3\n");
+      } else
+        fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
       return;
     }
     if (!node->lhs) {
@@ -2186,35 +2546,51 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz); } else fprintf(cc->out, "    addq $%d, %%rax\n", esz);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz);
+      } else
+        fprintf(cc->out, "    addq $%d, %%rax\n", esz);
     }
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rdx"); /* rdx = original value */
     pop_reg(cc, "rax"); /* rax = address */
     switch (type_size(node->lhs->type)) {
     case 1:
-      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strb r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strh r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
-      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r2\n");
+    else
+      fprintf(cc->out, "    movq %%rdx, %%rax\n");
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_inc", node->line);
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_inc",
+                     node->line);
     }
     return;
 
@@ -2225,8 +2601,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    subs r0, r0, r3\n"); else fprintf(cc->out, "    subs r1, r1, r3\n"); } else fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
+      if (backend_ops)
+        fprintf(cc->out, "    mov r0, %s\n", reg);
+      else
+        fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n", esz);
+        if (strcmp(reg, "rax") == 0)
+          fprintf(cc->out, "    subs r0, r0, r3\n");
+        else
+          fprintf(cc->out, "    subs r1, r1, r3\n");
+      } else
+        fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
       return;
     }
     if (!node->lhs) {
@@ -2253,35 +2639,51 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz); } else fprintf(cc->out, "    subq $%d, %%rax\n", esz);
+      if (backend_ops) {
+        fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz);
+      } else
+        fprintf(cc->out, "    subq $%d, %%rax\n", esz);
     }
-    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r1, r0\n");
+    else
+      fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rdx"); /* rdx = original value */
     pop_reg(cc, "rax"); /* rax = address */
     switch (type_size(node->lhs->type)) {
     case 1:
-      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
-      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strb r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
-      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    strh r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
-      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops)
+        fprintf(cc->out, "    str r1, [r0]\n");
+      else
+        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
-      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    mov r0, r2\n");
+    else
+      fprintf(cc->out, "    movq %%rdx, %%rax\n");
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_dec", node->line);
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_dec",
+                     node->line);
     }
     return;
 
@@ -2305,7 +2707,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     argregs[5] = "r9";
 
     if (!node->func_name[0] && !node->lhs) {
-      error_at(cc, node->line, "codegen_expr: ND_CALL no func_name and no callee");
+      error_at(cc, node->line,
+               "codegen_expr: ND_CALL no func_name and no callee");
       fprintf(cc->out, "    movq $0, %%rax\n");
       return;
     }
@@ -2319,14 +2722,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
 
-    /* System V AMD64: no shadow space required. Space for 7th+ gp args and 9th+ fp args is left on the stack. */
+    /* System V AMD64: no shadow space required. Space for 7th+ gp args and 9th+
+     * fp args is left on the stack. */
     {
       int temp_gp = 0, temp_fp = 0;
       for (i = 0; i < nargs; i++) {
-        if (node->args[i] && node->args[i]->type && is_float_type(node->args[i]->type)) {
-          if (temp_fp < 8) temp_fp++;
+        if (node->args[i] && node->args[i]->type &&
+            is_float_type(node->args[i]->type)) {
+          if (temp_fp < 8)
+            temp_fp++;
         } else {
-          if (temp_gp < 6) temp_gp++;
+          if (temp_gp < 6)
+            temp_gp++;
         }
       }
       args_on_stack = nargs - (temp_gp + temp_fp);
@@ -2341,7 +2748,6 @@ void codegen_expr(Compiler *cc, Node *node) {
         alignment_pad = 8;
       }
     }
-
 
     if (alignment_pad > 0) {
       fprintf(cc->out, "    subq $%d, %%rsp\n", alignment_pad);
@@ -2362,16 +2768,19 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       ir_save_result(&args_ir_1d[i * 32]);
-      ZCC_EMIT_ARG(ir_map_type(node->args[i] ? node->args[i]->type : 0), &args_ir_1d[i * 32], node->line);
+      ZCC_EMIT_ARG(ir_map_type(node->args[i] ? node->args[i]->type : 0),
+                   &args_ir_1d[i * 32], node->line);
       push_reg(cc, "rax");
     }
 
-    /* pop args into correct registers: floats->xmm, ints->gpregs independently */
+    /* pop args into correct registers: floats->xmm, ints->gpregs independently
+     */
     {
       int gp_idx = 0;
       int fp_idx = 0;
       for (i = 0; i < nargs; i++) {
-        if (node->args[i] && node->args[i]->type && is_float_type(node->args[i]->type)) {
+        if (node->args[i] && node->args[i]->type &&
+            is_float_type(node->args[i]->type)) {
           if (fp_idx < 8) {
             fprintf(cc->out, "    popq %%rax\n");
             cc->stack_depth--;
@@ -2380,21 +2789,21 @@ void codegen_expr(Compiler *cc, Node *node) {
           }
         } else {
           if (backend_ops) {
-              if (gp_idx < 4) {
-                 fprintf(cc->out, "    pop {r%d}\n", gp_idx);
-                 cc->stack_depth--;
-                 gp_idx++;
-              }
+            if (gp_idx < 4) {
+              fprintf(cc->out, "    pop {r%d}\n", gp_idx);
+              cc->stack_depth--;
+              gp_idx++;
+            }
           } else {
-              if (gp_idx < 6) {
-                pop_reg(cc, argregs[gp_idx]);
-                gp_idx++;
-              }
+            if (gp_idx < 6) {
+              pop_reg(cc, argregs[gp_idx]);
+              gp_idx++;
+            }
           }
         }
       }
       if (!backend_ops) {
-          fprintf(cc->out, "    movl $%d, %%eax\n", fp_idx > 8 ? 8 : fp_idx);
+        fprintf(cc->out, "    movl $%d, %%eax\n", fp_idx > 8 ? 8 : fp_idx);
       }
     }
     if (node->func_name[0] == 0 && node->lhs) {
@@ -2406,10 +2815,12 @@ void codegen_expr(Compiler *cc, Node *node) {
       int nparams_gp = 0;
       int nparams_fp = 0;
       if (fsym && fsym->type && fsym->type->params) {
-          for (int j = 0; j < fsym->type->num_params; j++) {
-              if (is_float_type(fsym->type->params[j])) nparams_fp++;
-              else nparams_gp++;
-          }
+        for (int j = 0; j < fsym->type->num_params; j++) {
+          if (is_float_type(fsym->type->params[j]))
+            nparams_fp++;
+          else
+            nparams_gp++;
+        }
       }
       int gp_offset = nparams_gp * 8;
       int fp_offset = 48 + nparams_fp * 16;
@@ -2419,29 +2830,38 @@ void codegen_expr(Compiler *cc, Node *node) {
       fprintf(cc->out, "    leaq 16(%%rbp), %%rax\n");
       fprintf(cc->out, "    movq %%rax, 8(%%rdi)\n");
       /* The reg_save_area is dynamically stored at stack bottom. */
-      fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", fsym ? fsym->stack_offset : -176);
+      fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n",
+              fsym ? fsym->stack_offset : -176);
       fprintf(cc->out, "    movq %%rax, 16(%%rdi)\n");
     } else if (strcmp(node->func_name, "__builtin_va_end") == 0) {
       /* va_end is a no-op on x86-64 SysV ABI */
       fprintf(cc->out, "    # __builtin_va_end (no-op)\n");
     } else {
       if (backend_ops && backend_ops->emit_call) {
-          backend_ops->emit_call(cc, node);
+        backend_ops->emit_call(cc, node);
       } else {
-          fprintf(cc->out, "    call %s\n", node->func_name);
+        fprintf(cc->out, "    call %s\n", node->func_name);
       }
     }
 
     if (node->type && is_float_type(node->type)) {
-        fprintf(cc->out, "    movq %%xmm0, %%rax\n");
+      fprintf(cc->out, "    movq %%xmm0, %%rax\n");
     } else if (node->type && !node_type_unsigned(node)) {
-        if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
-        else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
-        else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
+      if (node->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    cltq\n");
+      } else if (node->type->size == 1)
+        fprintf(cc->out, "    movsbq %%al, %%rax\n");
+      else if (node->type->size == 2)
+        fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->type && node_type_unsigned(node)) {
-        if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
-        else if (node->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
-        else if (node->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+      if (node->type->size == 4) {
+        if (!backend_ops)
+          fprintf(cc->out, "    movl %%eax, %%eax\n");
+      } else if (node->type->size == 1)
+        fprintf(cc->out, "    movzbq %%al, %%rax\n");
+      else if (node->type->size == 2)
+        fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
 
     {
@@ -2511,8 +2931,10 @@ void codegen_stmt(Compiler *cc, Node *node) {
     } else {
       ZCC_EMIT_RET(0, "", node->line);
     }
-    if (backend_ops) fprintf(cc->out, "    b .Lfunc_end_%d\n", cc->func_end_label);
-    else fprintf(cc->out, "    jmp .Lfunc_end_%d\n", cc->func_end_label);
+    if (backend_ops)
+      fprintf(cc->out, "    b .Lfunc_end_%d\n", cc->func_end_label);
+    else
+      fprintf(cc->out, "    jmp .Lfunc_end_%d\n", cc->func_end_label);
     return;
 
   case ND_BLOCK: {
@@ -2539,9 +2961,12 @@ void codegen_stmt(Compiler *cc, Node *node) {
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
-    else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl1, FMT_JE);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -2580,9 +3005,12 @@ void codegen_stmt(Compiler *cc, Node *node) {
     ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
-    else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl2, FMT_JE);
     sprintf(ir_lbl, ".L%d", lbl2);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -2616,9 +3044,12 @@ void codegen_stmt(Compiler *cc, Node *node) {
     if (node->cond) {
       codegen_expr_checked(cc, node->cond);
       ir_save_result(cond_ir);
-      if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
-      else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+      if (backend_ops)
+        fprintf(cc->out, "    cmp r0, #0\n");
+      else if (backend_ops)
+        fprintf(cc->out, "    cmp r0, #0\n");
+      else
+        fprintf(cc->out, "    cmpq $0, %%rax\n");
       emit_label_fmt(cc, lbl2, FMT_JE);
       sprintf(ir_lbl, ".L%d", lbl2);
       ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -2653,16 +3084,16 @@ void codegen_stmt(Compiler *cc, Node *node) {
      * NOT back to lbl_body (which would skip the while-condition entirely,
      * turning "do { if(!x) continue; } while(++i<n)" into an infinite loop
      * because ++i is in the condition and never evaluated). */
-    int lbl3;   /* separate continue-target label = condition start */
+    int lbl3; /* separate continue-target label = condition start */
     char cond_ir[32];
     char ir_lbl[32];
-    lbl1 = new_label(cc);  /* body start */
-    lbl2 = new_label(cc);  /* break/exit */
-    lbl3 = new_label(cc);  /* continue target = condition-start */
+    lbl1 = new_label(cc); /* body start */
+    lbl2 = new_label(cc); /* break/exit */
+    lbl3 = new_label(cc); /* continue target = condition-start */
     old_break = cc->break_label;
     old_continue = cc->continue_label;
     cc->break_label = lbl2;
-    cc->continue_label = lbl3;   /* ← fix: continue skips to condition */
+    cc->continue_label = lbl3; /* ← fix: continue skips to condition */
     emit_label_fmt(cc, lbl1, FMT_DEF);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_LABEL(ir_lbl, node->line);
@@ -2673,8 +3104,10 @@ void codegen_stmt(Compiler *cc, Node *node) {
     ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
-    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops)
+      fprintf(cc->out, "    cmp r0, #0\n");
+    else
+      fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl1, FMT_JNE);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -2848,10 +3281,14 @@ static Symbol *ra_locals[1024];
 static int num_ra_locals = 0;
 static char *get_callee_reg(int i) {
   if (backend_ops) {
-    if (i == 0) return "r4";
-    if (i == 1) return "r5";
-    if (i == 2) return "r6";
-    if (i == 3) return "r7";
+    if (i == 0)
+      return "r4";
+    if (i == 1)
+      return "r5";
+    if (i == 2)
+      return "r6";
+    if (i == 3)
+      return "r7";
     return "r4";
   }
   if (i == 0)
@@ -3004,18 +3441,29 @@ static int allocate_registers(Node *func) {
 }
 
 extern struct ZCCNode *zcc_node_from(struct Node *ast);
-extern int zcc_run_passes_emit_body_pgo(struct ZCCNode *body, const char *profile, const char *name, void *out, int stack_size, int num_params, int end_label1, int end_label2);
+extern void zcc_node_free(struct ZCCNode *z);
+extern int zcc_run_passes_emit_body_pgo(struct ZCCNode *body,
+                                        const char *profile, const char *name,
+                                        void *out, int stack_size,
+                                        int num_params, int end_label1,
+                                        int end_label2);
 
 #pragma weak zcc_run_passes_emit_body_pgo
 #pragma weak zcc_node_from
+#pragma weak zcc_node_free
 
 static int ir_blacklisted(const char *name) {
   if (!name)
     return 0;
   static const char *blacklist[] = {
       /* Add explicitly dangerous functions here to fallback to AST backend */
-      "main", "read_file", "init_compiler", 
-      "lookup_keyword_fallback", "parse_stmt", "next_token", NULL};
+      "main",
+      "read_file",
+      "init_compiler",
+      "lookup_keyword_fallback",
+      "parse_stmt",
+      "next_token",
+      NULL};
   int i;
   for (i = 0; blacklist[i]; i++) {
     if (strcmp(name, blacklist[i]) == 0) {
@@ -3050,31 +3498,31 @@ void codegen_func(Compiler *cc, Node *func) {
   ir_bridge_func_begin(func);
 
   if (backend_ops && backend_ops->emit_prologue) {
-      backend_ops->emit_prologue(cc, func);
+    backend_ops->emit_prologue(cc, func);
   } else {
-      stack_size = func->stack_size + 40; /* reserve 5x8 byte push slots */
-      if (func->func_type && func->func_type->is_variadic) {
-          stack_size += 176;
-      }
-      if (stack_size < 256)
-        stack_size = 256;
-      stack_size = (stack_size + 15) & ~15;
+    stack_size = func->stack_size + 40; /* reserve 5x8 byte push slots */
+    if (func->func_type && func->func_type->is_variadic) {
+      stack_size += 176;
+    }
+    if (stack_size < 256)
+      stack_size = 256;
+    stack_size = (stack_size + 15) & ~15;
 
-      fprintf(cc->out, "    .text\n");
-      if (!func->is_static) {
-        fprintf(cc->out, "    .globl %s\n", func->func_def_name);
-      }
-      fprintf(cc->out, "%s:\n", func->func_def_name);
-      fprintf(cc->out, "    pushq %%rbp\n");
-      fprintf(cc->out, "    movq %%rsp, %%rbp\n");
-      fprintf(cc->out, "    subq $%d, %%rsp\n", stack_size);
+    fprintf(cc->out, "    .text\n");
+    if (!func->is_static) {
+      fprintf(cc->out, "    .globl %s\n", func->func_def_name);
+    }
+    fprintf(cc->out, "%s:\n", func->func_def_name);
+    fprintf(cc->out, "    pushq %%rbp\n");
+    fprintf(cc->out, "    movq %%rsp, %%rbp\n");
+    fprintf(cc->out, "    subq $%d, %%rsp\n", stack_size);
 
-      for (i = 0; i < 5; i++) {
-        if (used_regs & (1 << i)) {
-          fprintf(cc->out, "    movq %s, %d(%%rbp)\n", get_callee_reg(i),
-                  -(func->stack_size + 8 * (i + 1)));
-        }
+    for (i = 0; i < 5; i++) {
+      if (used_regs & (1 << i)) {
+        fprintf(cc->out, "    movq %s, %d(%%rbp)\n", get_callee_reg(i),
+                -(func->stack_size + 8 * (i + 1)));
       }
+    }
   }
 
   cc->stack_depth = 0;
@@ -3093,12 +3541,14 @@ void codegen_func(Compiler *cc, Node *func) {
   int f_idx = 0;
   int gp_idx = 0;
   if (!backend_ops) {
-  for (i = 0; i < func->num_params; i++) {
-    int sz = type_size(func->param_types[i]);
-    if (sz < 8) sz = 8;
-    param_offset -= sz;
-    
-    if (func->param_types[i]->kind == TY_STRUCT || func->param_types[i]->kind == TY_UNION) {
+    for (i = 0; i < func->num_params; i++) {
+      int sz = type_size(func->param_types[i]);
+      if (sz < 8)
+        sz = 8;
+      param_offset -= sz;
+
+      if (func->param_types[i]->kind == TY_STRUCT ||
+          func->param_types[i]->kind == TY_UNION) {
         if (i < 6) {
           fprintf(cc->out, "    movq %%%s, %%r10\n", argregs[gp_idx]);
           gp_idx++;
@@ -3107,44 +3557,47 @@ void codegen_func(Compiler *cc, Node *func) {
         }
         int j;
         for (j = 0; j < sz; j++) {
-            fprintf(cc->out, "    movb %d(%%r10), %%al\n", j);
-            fprintf(cc->out, "    movb %%al, %d(%%rbp)\n", param_offset + j);
+          fprintf(cc->out, "    movb %d(%%r10), %%al\n", j);
+          fprintf(cc->out, "    movb %%al, %d(%%rbp)\n", param_offset + j);
         }
-    } else if (is_float_type(func->param_types[i])) {
+      } else if (is_float_type(func->param_types[i])) {
         if (f_idx < 8) {
-            fprintf(cc->out, "    movq %%xmm%d, %%rax\n", f_idx);
-            fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
+          fprintf(cc->out, "    movq %%xmm%d, %%rax\n", f_idx);
+          fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
         } else {
-            fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
-            fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
+          fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
+          fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
         }
         f_idx++;
-    } else {
+      } else {
         if (i < 6) {
-          fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[gp_idx], param_offset);
+          fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[gp_idx],
+                  param_offset);
           gp_idx++;
         } else {
           fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
           fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
         }
+      }
     }
-  }
 
-  if (func->func_type && func->func_type->is_variadic) {
-    int save_base = -(func->stack_size + 40 + 176);
-    /* Save GP regs at offsets 0-47 */
-    for (i = 0; i < 6; i++) {
-        fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[i], save_base + i*8);
-    }
-    /* Save XMM regs at offsets 48-175 */
-    for (i = 0; i < 8; i++) {
-        fprintf(cc->out, "    movsd %%xmm%d, %d(%%rbp)\n", i, save_base + 48 + i*16);
-    }
-    Symbol *fsym = scope_find(cc, func->func_def_name);
-    if (fsym) {
+    if (func->func_type && func->func_type->is_variadic) {
+      int save_base = -(func->stack_size + 40 + 176);
+      /* Save GP regs at offsets 0-47 */
+      for (i = 0; i < 6; i++) {
+        fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[i],
+                save_base + i * 8);
+      }
+      /* Save XMM regs at offsets 48-175 */
+      for (i = 0; i < 8; i++) {
+        fprintf(cc->out, "    movsd %%xmm%d, %d(%%rbp)\n", i,
+                save_base + 48 + i * 16);
+      }
+      Symbol *fsym = scope_find(cc, func->func_def_name);
+      if (fsym) {
         fsym->stack_offset = save_base;
+      }
     }
-  }
   } /* end !backend_ops block */
 
   int ir_ok = 0;
@@ -3168,6 +3621,9 @@ void codegen_func(Compiler *cc, Node *func) {
             func->num_params, cc->func_end_label, cc->func_end_label);
 
         unsetenv("ZCC_IR_PARAM_NAMES");
+        if (zcc_node_free) {
+          zcc_node_free(ir_ast);
+        }
       }
     }
   }
@@ -3176,18 +3632,18 @@ void codegen_func(Compiler *cc, Node *func) {
   }
 
   if (backend_ops && backend_ops->emit_epilogue) {
-      backend_ops->emit_epilogue(cc, func);
+    backend_ops->emit_epilogue(cc, func);
   } else {
-      fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
-      for (i = 4; i >= 0; i--) {
-        if (used_regs & (1 << i)) {
-          fprintf(cc->out, "    movq %d(%%rbp), %s\n",
-                  -(func->stack_size + 8 * (i + 1)), get_callee_reg(i));
-        }
+    fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
+    for (i = 4; i >= 0; i--) {
+      if (used_regs & (1 << i)) {
+        fprintf(cc->out, "    movq %d(%%rbp), %s\n",
+                -(func->stack_size + 8 * (i + 1)), get_callee_reg(i));
       }
-      fprintf(cc->out, "    movq %%rbp, %%rsp\n");
-      fprintf(cc->out, "    popq %%rbp\n");
-      fprintf(cc->out, "    ret\n");
+    }
+    fprintf(cc->out, "    movq %%rbp, %%rsp\n");
+    fprintf(cc->out, "    popq %%rbp\n");
+    fprintf(cc->out, "    ret\n");
   }
 
   ir_bridge_func_end();
@@ -3202,138 +3658,237 @@ void codegen_func(Compiler *cc, Node *func) {
 /* ================================================================ */
 
 static long long eval_const_expr_p4(Node *elem, int *ok) {
-    if (!elem) { *ok = 0; return 0; }
-    if (elem->kind == ND_CAST) return eval_const_expr_p4(elem->lhs, ok);
-    if (elem->kind == ND_NUM) return elem->int_val;
-    if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_SUB) return eval_const_expr_p4(elem->lhs, ok) - eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_MUL) return eval_const_expr_p4(elem->lhs, ok) * eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_DIV) { long long r = eval_const_expr_p4(elem->rhs, ok); if(r) return eval_const_expr_p4(elem->lhs, ok) / r; return 0; }
-    if (elem->kind == ND_BOR) return eval_const_expr_p4(elem->lhs, ok) | eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_BAND) return eval_const_expr_p4(elem->lhs, ok) & eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_BXOR) return eval_const_expr_p4(elem->lhs, ok) ^ eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_SHL) return eval_const_expr_p4(elem->lhs, ok) << eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_SHR) return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_NEG) return -eval_const_expr_p4(elem->lhs, ok);
-    if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
-    if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
+  if (!elem) {
     *ok = 0;
     return 0;
+  }
+  if (elem->kind == ND_CAST)
+    return eval_const_expr_p4(elem->lhs, ok);
+  if (elem->kind == ND_NUM)
+    return elem->int_val;
+  if (elem->kind == ND_ADD)
+    return eval_const_expr_p4(elem->lhs, ok) +
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_SUB)
+    return eval_const_expr_p4(elem->lhs, ok) -
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_MUL)
+    return eval_const_expr_p4(elem->lhs, ok) *
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_DIV) {
+    long long r = eval_const_expr_p4(elem->rhs, ok);
+    if (r)
+      return eval_const_expr_p4(elem->lhs, ok) / r;
+    return 0;
+  }
+  if (elem->kind == ND_BOR)
+    return eval_const_expr_p4(elem->lhs, ok) |
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_BAND)
+    return eval_const_expr_p4(elem->lhs, ok) &
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_BXOR)
+    return eval_const_expr_p4(elem->lhs, ok) ^
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_SHL)
+    return eval_const_expr_p4(elem->lhs, ok)
+           << eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_SHR)
+    return eval_const_expr_p4(elem->lhs, ok) >>
+           eval_const_expr_p4(elem->rhs, ok);
+  if (elem->kind == ND_NEG)
+    return -eval_const_expr_p4(elem->lhs, ok);
+  if (elem->kind == ND_BNOT)
+    return ~eval_const_expr_p4(elem->lhs, ok);
+  if (elem->kind == ND_LNOT)
+    return !eval_const_expr_p4(elem->lhs, ok);
+  *ok = 0;
+  return 0;
 }
 
-static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, int num_args, int *arg_idx, int arg_end, int base_offset, int *emitted) {
-    StructField *f;
-    for (f = fields; f; f = f->next) {
-        int field_abs_offset = base_offset + f->offset;
-        
-        if (field_abs_offset > *emitted) {
-            fprintf(cc->out, "    .zero %d\n", field_abs_offset - *emitted);
-            *emitted = field_abs_offset;
-        }
-        
-        if (f->type->kind == TY_STRUCT) {
-            emit_struct_fields(cc, f->type->fields, args, num_args, arg_idx, arg_end, field_abs_offset, emitted);
-        } else if (f->type->kind == TY_ARRAY) {
-            int j;
-            if (f->type->base && (f->type->base->kind == TY_STRUCT || f->type->base->kind == TY_UNION)) {
-                int elem_size = type_size(f->type->base);
-                for (j = 0; j < f->type->array_len; j++) {
-                    int expected_end = field_abs_offset + (j + 1) * elem_size;
-                    emit_struct_fields(cc, f->type->base->fields, args, num_args, arg_idx, arg_end, field_abs_offset + j * elem_size, emitted);
-                    if (*emitted < expected_end) {
-                        fprintf(cc->out, "    .zero %d\n", expected_end - *emitted);
-                        *emitted = expected_end;
-                    }
-                }
-            } else {
-                int elem_size = type_size(f->type->base);
-                for (j = 0; j < f->type->array_len; j++) {
-                    if (*arg_idx < arg_end && *arg_idx < num_args) {
-                        Node *elem = args[(*arg_idx)++];
-                        while (elem && elem->kind == ND_CAST) elem = elem->lhs; /* Strip ND_CAST */
-                        int const_ok = 1;
-                        long long const_val = eval_const_expr_p4(elem, &const_ok);
-                        if (!elem) {
-                            fprintf(cc->out, "    .zero %d\n", elem_size);
-                        } else if (const_ok) {
-                            if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
-                            else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
-                            else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
-                            else fprintf(cc->out, "    .quad %lld\n", const_val);
-                        } else if (elem->kind == ND_STR) {
-                            if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
-                            else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
-                        } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                            if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                            else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                    long long offset = elem->lhs->lhs->rhs->int_val;
-                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                    long long offset = elem->rhs->int_val;
-                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                        } else if (elem->kind == ND_VAR) {
-                            if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                            else fprintf(cc->out, "    .quad %s\n", elem->name);
-                        } else {
-                            fprintf(stderr, "STRUCT-ARRAY FALLBACK ZERO: kind=%d, const_ok=%d\n", elem->kind, const_ok);
-                            if (elem->lhs) fprintf(stderr, "  lhs->kind=%d lhs->name=%s\n", elem->lhs->kind, elem->lhs->name ? elem->lhs->name : "none");
-                            fprintf(cc->out, "    .zero %d\n", elem_size);
-                        }
-                    } else {
-                        fprintf(cc->out, "    .zero %d\n", elem_size);
-                    }
-                    *emitted += elem_size;
-                }
-            }
-        } else {
-            int elem_size = type_size(f->type);
-            if (*arg_idx < arg_end && *arg_idx < num_args) {
-                Node *elem = args[(*arg_idx)++];
-                while (elem && elem->kind == ND_CAST) { elem = elem->lhs; } /* Strip ND_CAST */
-                int const_ok = 1;
-                long long const_val = eval_const_expr_p4(elem, &const_ok);
-                if (!elem) {
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
-                } else if (const_ok) {
-                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
-                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
-                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
-                    else fprintf(cc->out, "    .quad %lld\n", const_val);
-                } else if (elem->kind == ND_STR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
-                    else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                    long long offset = elem->lhs->lhs->rhs->int_val;
-                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                    long long offset = elem->rhs->int_val;
-                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                } else if (elem->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->name);
-                } else {
-                    fprintf(stderr, "STRUCT FIELD FALLBACK ZERO: kind=%d, const_ok=%d\n", elem->kind, const_ok);
-                    if (elem->lhs) fprintf(stderr, "  lhs->kind=%d lhs->name=%s\n", elem->lhs->kind, elem->lhs->name ? elem->lhs->name : "none");
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
-                }
-            } else {
-                fprintf(cc->out, "    .zero %d\n", elem_size);
-            }
-            *emitted += elem_size;
-        }
+static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args,
+                               int num_args, int *arg_idx, int arg_end,
+                               int base_offset, int *emitted) {
+  StructField *f;
+  for (f = fields; f; f = f->next) {
+    int field_abs_offset = base_offset + f->offset;
+
+    if (field_abs_offset > *emitted) {
+      fprintf(cc->out, "    .zero %d\n", field_abs_offset - *emitted);
+      *emitted = field_abs_offset;
     }
+
+    if (f->type->kind == TY_STRUCT) {
+      emit_struct_fields(cc, f->type->fields, args, num_args, arg_idx, arg_end,
+                         field_abs_offset, emitted);
+    } else if (f->type->kind == TY_ARRAY) {
+      int j;
+      if (f->type->base && (f->type->base->kind == TY_STRUCT ||
+                            f->type->base->kind == TY_UNION)) {
+        int elem_size = type_size(f->type->base);
+        for (j = 0; j < f->type->array_len; j++) {
+          int expected_end = field_abs_offset + (j + 1) * elem_size;
+          emit_struct_fields(cc, f->type->base->fields, args, num_args, arg_idx,
+                             arg_end, field_abs_offset + j * elem_size,
+                             emitted);
+          if (*emitted < expected_end) {
+            fprintf(cc->out, "    .zero %d\n", expected_end - *emitted);
+            *emitted = expected_end;
+          }
+        }
+      } else {
+        int elem_size = type_size(f->type->base);
+        for (j = 0; j < f->type->array_len; j++) {
+          if (*arg_idx < arg_end && *arg_idx < num_args) {
+            Node *elem = args[(*arg_idx)++];
+            while (elem && elem->kind == ND_CAST)
+              elem = elem->lhs; /* Strip ND_CAST */
+            int const_ok = 1;
+            long long const_val = eval_const_expr_p4(elem, &const_ok);
+            if (!elem) {
+              fprintf(cc->out, "    .zero %d\n", elem_size);
+            } else if (const_ok) {
+              if (elem_size == 1)
+                fprintf(cc->out, "    .byte %lld\n", const_val);
+              else if (elem_size == 2)
+                fprintf(cc->out, "    .short %lld\n", const_val);
+              else if (elem_size == 4)
+                fprintf(cc->out, "    .long %lld\n", const_val);
+              else
+                fprintf(cc->out, "    .quad %lld\n", const_val);
+            } else if (elem->kind == ND_STR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
+              else
+                fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+            } else if (elem->kind == ND_ADDR && elem->lhs &&
+                       elem->lhs->kind == ND_VAR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s\n", elem->lhs->name);
+              else
+                fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+            } else if (elem->kind == ND_ADDR && elem->lhs &&
+                       elem->lhs->kind == ND_DEREF && elem->lhs->lhs &&
+                       elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs &&
+                       elem->lhs->lhs->lhs->kind == ND_VAR &&
+                       elem->lhs->lhs->rhs &&
+                       elem->lhs->lhs->rhs->kind == ND_NUM) {
+              long long offset = elem->lhs->lhs->rhs->int_val;
+              if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base)
+                offset *= type_size(elem->lhs->lhs->lhs->type->base);
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s + %lld\n",
+                        elem->lhs->lhs->lhs->name, offset);
+              else
+                fprintf(cc->out, "    .quad %s + %lld\n",
+                        elem->lhs->lhs->lhs->name, offset);
+            } else if (elem->kind == ND_ADD && elem->lhs &&
+                       elem->lhs->kind == ND_VAR && elem->rhs &&
+                       elem->rhs->kind == ND_NUM) {
+              long long offset = elem->rhs->int_val;
+              if (elem->lhs->type && elem->lhs->type->base)
+                offset *= type_size(elem->lhs->type->base);
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name,
+                        offset);
+              else
+                fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name,
+                        offset);
+            } else if (elem->kind == ND_VAR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s\n", elem->name);
+              else
+                fprintf(cc->out, "    .quad %s\n", elem->name);
+            } else {
+              fprintf(stderr,
+                      "STRUCT-ARRAY FALLBACK ZERO: kind=%d, const_ok=%d\n",
+                      elem->kind, const_ok);
+              if (elem->lhs)
+                fprintf(stderr, "  lhs->kind=%d lhs->name=%s\n",
+                        elem->lhs->kind,
+                        elem->lhs->name ? elem->lhs->name : "none");
+              fprintf(cc->out, "    .zero %d\n", elem_size);
+            }
+          } else {
+            fprintf(cc->out, "    .zero %d\n", elem_size);
+          }
+          *emitted += elem_size;
+        }
+      }
+    } else {
+      int elem_size = type_size(f->type);
+      if (*arg_idx < arg_end && *arg_idx < num_args) {
+        Node *elem = args[(*arg_idx)++];
+        while (elem && elem->kind == ND_CAST) {
+          elem = elem->lhs;
+        } /* Strip ND_CAST */
+        int const_ok = 1;
+        long long const_val = eval_const_expr_p4(elem, &const_ok);
+        if (!elem) {
+          fprintf(cc->out, "    .zero %d\n", elem_size);
+        } else if (const_ok) {
+          if (elem_size == 1)
+            fprintf(cc->out, "    .byte %lld\n", const_val);
+          else if (elem_size == 2)
+            fprintf(cc->out, "    .short %lld\n", const_val);
+          else if (elem_size == 4)
+            fprintf(cc->out, "    .long %lld\n", const_val);
+          else
+            fprintf(cc->out, "    .quad %lld\n", const_val);
+        } else if (elem->kind == ND_STR) {
+          if (elem_size == 4)
+            fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
+          else
+            fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+        } else if (elem->kind == ND_ADDR && elem->lhs &&
+                   elem->lhs->kind == ND_VAR) {
+          if (elem_size == 4)
+            fprintf(cc->out, "    .long %s\n", elem->lhs->name);
+          else
+            fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+        } else if (elem->kind == ND_ADDR && elem->lhs &&
+                   elem->lhs->kind == ND_DEREF && elem->lhs->lhs &&
+                   elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs &&
+                   elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs &&
+                   elem->lhs->lhs->rhs->kind == ND_NUM) {
+          long long offset = elem->lhs->lhs->rhs->int_val;
+          if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base)
+            offset *= type_size(elem->lhs->lhs->lhs->type->base);
+          if (elem_size == 4)
+            fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name,
+                    offset);
+          else
+            fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name,
+                    offset);
+        } else if (elem->kind == ND_ADD && elem->lhs &&
+                   elem->lhs->kind == ND_VAR && elem->rhs &&
+                   elem->rhs->kind == ND_NUM) {
+          long long offset = elem->rhs->int_val;
+          if (elem->lhs->type && elem->lhs->type->base)
+            offset *= type_size(elem->lhs->type->base);
+          if (elem_size == 4)
+            fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
+          else
+            fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
+        } else if (elem->kind == ND_VAR) {
+          if (elem_size == 4)
+            fprintf(cc->out, "    .long %s\n", elem->name);
+          else
+            fprintf(cc->out, "    .quad %s\n", elem->name);
+        } else {
+          fprintf(stderr, "STRUCT FIELD FALLBACK ZERO: kind=%d, const_ok=%d\n",
+                  elem->kind, const_ok);
+          if (elem->lhs)
+            fprintf(stderr, "  lhs->kind=%d lhs->name=%s\n", elem->lhs->kind,
+                    elem->lhs->name ? elem->lhs->name : "none");
+          fprintf(cc->out, "    .zero %d\n", elem_size);
+        }
+      } else {
+        fprintf(cc->out, "    .zero %d\n", elem_size);
+      }
+      *emitted += elem_size;
+    }
+  }
 }
 
 static void emit_global_var(Compiler *cc, Node *gvar) {
@@ -3345,7 +3900,7 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
   size = type_size(gvar->type);
   if (size <= 0)
     size = 8;
-    
+
   if (gvar->initializer) {
     /* initialized data goes in .data */
     fprintf(cc->out, "    .data\n");
@@ -3358,7 +3913,8 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
     /* Strip ND_CAST wrappers (e.g. function pointer casts like
        `Curl_cmalloc = (curl_malloc_callback)malloc`) */
     Node *init = gvar->initializer;
-    while (init && init->kind == ND_CAST) init = init->lhs;
+    while (init && init->kind == ND_CAST)
+      init = init->lhs;
     if (init && init->kind == ND_NUM) {
       if (size == 1)
         fprintf(cc->out, "    .byte %lld\n", init->int_val);
@@ -3368,21 +3924,47 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long %lld\n", init->int_val);
       else
         fprintf(cc->out, "    .quad %lld\n", init->int_val);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
+    } else if (init && init->kind == ND_FLIT) {
+      /* Scalar floating-point initializer: emit IEEE 754 bit pattern */
+      if (size == 4) {
+        float fv = (float)init->f_val;
+        unsigned int fbits;
+        memcpy(&fbits, &fv, 4);
+        fprintf(cc->out, "    .long %u\n", fbits);
+      } else {
+        unsigned long long dbits;
+        memcpy(&dbits, &init->f_val, 8);
+        fprintf(cc->out, "    .quad %llu\n", dbits);
+      }
+    } else if (init->kind == ND_ADDR && init->lhs &&
+               init->lhs->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->lhs->name);
       else
         fprintf(cc->out, "    .quad %s\n", init->lhs->name);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_DEREF && init->lhs->lhs && init->lhs->lhs->kind == ND_ADD && init->lhs->lhs->lhs && init->lhs->lhs->lhs->kind == ND_VAR && init->lhs->lhs->rhs && init->lhs->lhs->rhs->kind == ND_NUM) {
+    } else if (init->kind == ND_ADDR && init->lhs &&
+               init->lhs->kind == ND_DEREF && init->lhs->lhs &&
+               init->lhs->lhs->kind == ND_ADD && init->lhs->lhs->lhs &&
+               init->lhs->lhs->lhs->kind == ND_VAR && init->lhs->lhs->rhs &&
+               init->lhs->lhs->rhs->kind == ND_NUM) {
       long long offset = init->lhs->lhs->rhs->int_val;
-      if (init->lhs->lhs->lhs->type && init->lhs->lhs->lhs->type->base) offset *= type_size(init->lhs->lhs->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-    } else if (init->kind == ND_ADD && init->lhs && init->lhs->kind == ND_VAR && init->rhs && init->rhs->kind == ND_NUM) {
+      if (init->lhs->lhs->lhs->type && init->lhs->lhs->lhs->type->base)
+        offset *= type_size(init->lhs->lhs->lhs->type->base);
+      if (size == 4)
+        fprintf(cc->out, "    .long %s + %lld\n", init->lhs->lhs->lhs->name,
+                offset);
+      else
+        fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->lhs->lhs->name,
+                offset);
+    } else if (init->kind == ND_ADD && init->lhs && init->lhs->kind == ND_VAR &&
+               init->rhs && init->rhs->kind == ND_NUM) {
       long long offset = init->rhs->int_val;
-      if (init->lhs->type && init->lhs->type->base) offset *= type_size(init->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->name, offset);
+      if (init->lhs->type && init->lhs->type->base)
+        offset *= type_size(init->lhs->type->base);
+      if (size == 4)
+        fprintf(cc->out, "    .long %s + %lld\n", init->lhs->name, offset);
+      else
+        fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->name, offset);
     } else if (init->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->name);
@@ -3390,101 +3972,175 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .quad %s\n", init->name);
     } else if (init->kind == ND_STR) {
       if (gvar->type && gvar->type->kind == TY_ARRAY) {
-          int j;
-          int str_id = init->str_id;
-          int len = cc->strings[str_id].len;
-          fprintf(cc->out, "    .ascii \"");
-          for (j = 0; j < len; j++) {
-              char c = cc->strings[str_id].data[j];
-              if (c == '\n') fprintf(cc->out, "\\n");
-              else if (c == '\t') fprintf(cc->out, "\\t");
-              else if (c == '\r') fprintf(cc->out, "\\r");
-              else if (c == '\\') fprintf(cc->out, "\\\\");
-              else if (c == '"') fprintf(cc->out, "\\\"");
-              else if (c >= 32 && c < 127) fprintf(cc->out, "%c", c);
-              else fprintf(cc->out, "\\%03o", (unsigned char)c);
-          }
-          fprintf(cc->out, "\\0\"\n");
-          if (size > len + 1) fprintf(cc->out, "    .zero %d\n", size - (len + 1));
+        int j;
+        int str_id = init->str_id;
+        int len = cc->strings[str_id].len;
+        fprintf(cc->out, "    .ascii \"");
+        for (j = 0; j < len; j++) {
+          char c = cc->strings[str_id].data[j];
+          if (c == '\n')
+            fprintf(cc->out, "\\n");
+          else if (c == '\t')
+            fprintf(cc->out, "\\t");
+          else if (c == '\r')
+            fprintf(cc->out, "\\r");
+          else if (c == '\\')
+            fprintf(cc->out, "\\\\");
+          else if (c == '"')
+            fprintf(cc->out, "\\\"");
+          else if (c >= 32 && c < 127)
+            fprintf(cc->out, "%c", c);
+          else
+            fprintf(cc->out, "\\%03o", (unsigned char)c);
+        }
+        fprintf(cc->out, "\\0\"\n");
+        if (size > len + 1)
+          fprintf(cc->out, "    .zero %d\n", size - (len + 1));
       } else {
-          if (size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", init->str_id);
-          else fprintf(cc->out, "    .quad .Lstr_%d\n", init->str_id);
+        if (size == 4)
+          fprintf(cc->out, "    .long .Lstr_%d\n", init->str_id);
+        else
+          fprintf(cc->out, "    .quad .Lstr_%d\n", init->str_id);
       }
-        } else if (init->kind == ND_INIT_LIST) {
-            int emitted = 0;
-            int i;
-            int elem_size = 1;
-        if (gvar->type && gvar->type->kind == TY_STRUCT) {
-            int arg_idx = 0;
-            emit_struct_fields(cc, gvar->type->fields, init->args, init->num_args, &arg_idx, init->num_args, 0, &emitted);
-        } else if (gvar->type && gvar->type->kind == TY_ARRAY && gvar->type->base && (gvar->type->base->kind == TY_STRUCT || gvar->type->base->kind == TY_UNION)) {
-            int i;
-            int arg_idx = 0;
-            int elem_size = type_size(gvar->type->base);
-            int budget = init->num_args / gvar->type->array_len;
-            for (i = 0; i < gvar->type->array_len; i++) {
-                int expected_end = (i + 1) * elem_size;
-                int arg_end = (i + 1) * budget;
-                if (arg_end > init->num_args) arg_end = init->num_args;
-                emit_struct_fields(cc, gvar->type->base->fields, init->args, init->num_args, &arg_idx, arg_end, i * elem_size, &emitted);
-                if (emitted < expected_end) {
-                    fprintf(cc->out, "    .zero %d\n", expected_end - emitted);
-                    emitted = expected_end;
-                }
-            }
-        } else {
-            int i;
-            int elem_size = 1;
-            if (gvar->type && gvar->type->base) elem_size = type_size(gvar->type->base);
-            for (i = 0; i < init->num_args; i++) {
-                Node *elem = init->args[i];
-                int const_ok = 1;
-                long long const_val = eval_const_expr_p4(elem, &const_ok);
-                if (!elem) {
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
-                } else if (const_ok) {
-                    if (elem_size == 1) fprintf(cc->out, "    .byte %lld\n", const_val);
-                    else if (elem_size == 2) fprintf(cc->out, "    .short %lld\n", const_val);
-                    else if (elem_size == 4) fprintf(cc->out, "    .long %lld\n", const_val);
-                    else fprintf(cc->out, "    .quad %lld\n", const_val);
-                } else if (elem->kind == ND_STR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
-                    else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                    long long offset = elem->lhs->lhs->rhs->int_val;
-                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                    long long offset = elem->rhs->int_val;
-                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                } else if (elem->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->name);
-                } else {
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
-                }
-                emitted += elem_size;
-            }
+    } else if (init->kind == ND_INIT_LIST) {
+      int emitted = 0;
+      int i;
+      int elem_size = 1;
+      if (gvar->type && gvar->type->kind == TY_STRUCT) {
+        int arg_idx = 0;
+        emit_struct_fields(cc, gvar->type->fields, init->args, init->num_args,
+                           &arg_idx, init->num_args, 0, &emitted);
+      } else if (gvar->type && gvar->type->kind == TY_ARRAY &&
+                 gvar->type->base &&
+                 (gvar->type->base->kind == TY_STRUCT ||
+                  gvar->type->base->kind == TY_UNION)) {
+        int i;
+        int arg_idx = 0;
+        int elem_size = type_size(gvar->type->base);
+        int budget = init->num_args / gvar->type->array_len;
+        for (i = 0; i < gvar->type->array_len; i++) {
+          int expected_end = (i + 1) * elem_size;
+          int arg_end = (i + 1) * budget;
+          if (arg_end > init->num_args)
+            arg_end = init->num_args;
+          emit_struct_fields(cc, gvar->type->base->fields, init->args,
+                             init->num_args, &arg_idx, arg_end, i * elem_size,
+                             &emitted);
+          if (emitted < expected_end) {
+            fprintf(cc->out, "    .zero %d\n", expected_end - emitted);
+            emitted = expected_end;
+          }
         }
-        if (emitted < size) {
-            fprintf(cc->out, "    .zero %d\n", size - emitted);
+      } else {
+        int i;
+        int elem_size = 1;
+        if (gvar->type && gvar->type->base)
+          elem_size = type_size(gvar->type->base);
+        for (i = 0; i < init->num_args; i++) {
+          Node *elem = init->args[i];
+          if (!elem) {
+            fprintf(cc->out, "    .zero %d\n", elem_size);
+          } else if (elem->kind == ND_FLIT) {
+            /* Positive float/double literal */
+            if (elem_size == 4) {
+              float fv = (float)elem->f_val;
+              unsigned int fbits;
+              memcpy(&fbits, &fv, 4);
+              fprintf(cc->out, "    .long %u\n", fbits);
+            } else {
+              unsigned long long dbits;
+              memcpy(&dbits, &elem->f_val, 8);
+              fprintf(cc->out, "    .quad %llu\n", dbits);
+            }
+          } else if (elem->kind == ND_NEG && elem->lhs && elem->lhs->kind == ND_FLIT) {
+            /* Negative float/double literal: -X.Y */
+            double neg_val = -(elem->lhs->f_val);
+            if (elem_size == 4) {
+              float fv = (float)neg_val;
+              unsigned int fbits;
+              memcpy(&fbits, &fv, 4);
+              fprintf(cc->out, "    .long %u\n", fbits);
+            } else {
+              unsigned long long dbits;
+              memcpy(&dbits, &neg_val, 8);
+              fprintf(cc->out, "    .quad %llu\n", dbits);
+            }
+          } else {
+            /* Integer and other const expressions */
+            int const_ok = 1;
+            long long const_val = eval_const_expr_p4(elem, &const_ok);
+            if (const_ok) {
+              if (elem_size == 1)
+                fprintf(cc->out, "    .byte %lld\n", const_val);
+              else if (elem_size == 2)
+                fprintf(cc->out, "    .short %lld\n", const_val);
+              else if (elem_size == 4)
+                fprintf(cc->out, "    .long %lld\n", const_val);
+              else
+                fprintf(cc->out, "    .quad %lld\n", const_val);
+            } else if (elem->kind == ND_STR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
+              else
+                fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+            } else if (elem->kind == ND_ADDR && elem->lhs &&
+                       elem->lhs->kind == ND_VAR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s\n", elem->lhs->name);
+              else
+                fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
+            } else if (elem->kind == ND_ADDR && elem->lhs &&
+                       elem->lhs->kind == ND_DEREF && elem->lhs->lhs &&
+                       elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs &&
+                       elem->lhs->lhs->lhs->kind == ND_VAR &&
+                       elem->lhs->lhs->rhs &&
+                       elem->lhs->lhs->rhs->kind == ND_NUM) {
+              long long offset = elem->lhs->lhs->rhs->int_val;
+              if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base)
+                offset *= type_size(elem->lhs->lhs->lhs->type->base);
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s + %lld\n",
+                        elem->lhs->lhs->lhs->name, offset);
+              else
+                fprintf(cc->out, "    .quad %s + %lld\n",
+                        elem->lhs->lhs->lhs->name, offset);
+            } else if (elem->kind == ND_ADD && elem->lhs &&
+                       elem->lhs->kind == ND_VAR && elem->rhs &&
+                       elem->rhs->kind == ND_NUM) {
+              long long offset = elem->rhs->int_val;
+              if (elem->lhs->type && elem->lhs->type->base)
+                offset *= type_size(elem->lhs->type->base);
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name,
+                        offset);
+              else
+                fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name,
+                        offset);
+            } else if (elem->kind == ND_VAR) {
+              if (elem_size == 4)
+                fprintf(cc->out, "    .long %s\n", elem->name);
+              else
+                fprintf(cc->out, "    .quad %s\n", elem->name);
+            } else {
+              fprintf(cc->out, "    .zero %d\n", elem_size);
+            }
+          }
+          emitted += elem_size;
         }
+      }
+      if (emitted < size) {
+        fprintf(cc->out, "    .zero %d\n", size - emitted);
+      }
     } else {
-        fprintf(cc->out, "    .zero %d\n", size);
+      fprintf(cc->out, "    .zero %d\n", size);
     }
   } else {
     /* tentative definitions and uninitialized data */
     if (gvar->is_static) {
-        fprintf(cc->out, "    .local %s\n", gvar->name);
-        fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
+      fprintf(cc->out, "    .local %s\n", gvar->name);
+      fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
     } else {
-        fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
+      fprintf(cc->out, "    .comm %s, %d, 8\n", gvar->name, size);
     }
   }
 }
@@ -3571,13 +4227,19 @@ static void fold_constants(Compiler *cc, Node *node) {
         res = !v1;
 
       if (node->type && !node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(int)res;
-          else if (node->type->size == 1) res = (long long)(char)res;
-          else if (node->type->size == 2) res = (long long)(short)res;
+        if (node->type->size == 4)
+          res = (long long)(int)res;
+        else if (node->type->size == 1)
+          res = (long long)(char)res;
+        else if (node->type->size == 2)
+          res = (long long)(short)res;
       } else if (node->type && node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(unsigned int)res;
-          else if (node->type->size == 1) res = (long long)(unsigned char)res;
-          else if (node->type->size == 2) res = (long long)(unsigned short)res;
+        if (node->type->size == 4)
+          res = (long long)(unsigned int)res;
+        else if (node->type->size == 1)
+          res = (long long)(unsigned char)res;
+        else if (node->type->size == 2)
+          res = (long long)(unsigned short)res;
       }
       node->kind = ND_NUM;
       node->int_val = res;
@@ -3593,9 +4255,16 @@ static void fold_constants(Compiler *cc, Node *node) {
       int is_unsigned = node->lhs->type && node_type_unsigned(node->lhs);
       unsigned long long u1 = v1, u2 = v2;
       if (is_unsigned && node->lhs->type) {
-          if (node->lhs->type->size == 4) { u1 = (unsigned int)v1; u2 = (unsigned int)v2; }
-          else if (node->lhs->type->size == 1) { u1 = (unsigned char)v1; u2 = (unsigned char)v2; }
-          else if (node->lhs->type->size == 2) { u1 = (unsigned short)v1; u2 = (unsigned short)v2; }
+        if (node->lhs->type->size == 4) {
+          u1 = (unsigned int)v1;
+          u2 = (unsigned int)v2;
+        } else if (node->lhs->type->size == 1) {
+          u1 = (unsigned char)v1;
+          u2 = (unsigned char)v2;
+        } else if (node->lhs->type->size == 2) {
+          u1 = (unsigned short)v1;
+          u2 = (unsigned short)v2;
+        }
       }
 
       if (node->kind == ND_ADD)
@@ -3611,13 +4280,19 @@ static void fold_constants(Compiler *cc, Node *node) {
       else
         return;
       if (node->type && !node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(int)res;
-          else if (node->type->size == 1) res = (long long)(char)res;
-          else if (node->type->size == 2) res = (long long)(short)res;
+        if (node->type->size == 4)
+          res = (long long)(int)res;
+        else if (node->type->size == 1)
+          res = (long long)(char)res;
+        else if (node->type->size == 2)
+          res = (long long)(short)res;
       } else if (node->type && node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(unsigned int)res;
-          else if (node->type->size == 1) res = (long long)(unsigned char)res;
-          else if (node->type->size == 2) res = (long long)(unsigned short)res;
+        if (node->type->size == 4)
+          res = (long long)(unsigned int)res;
+        else if (node->type->size == 1)
+          res = (long long)(unsigned char)res;
+        else if (node->type->size == 2)
+          res = (long long)(unsigned short)res;
       }
       node->kind = ND_NUM;
       node->int_val = res;
@@ -3636,9 +4311,16 @@ static void fold_constants(Compiler *cc, Node *node) {
       int is_unsigned = node->lhs->type && node_type_unsigned(node->lhs);
       unsigned long long u1 = v1, u2 = v2;
       if (is_unsigned && node->lhs->type) {
-          if (node->lhs->type->size == 4) { u1 = (unsigned int)v1; u2 = (unsigned int)v2; }
-          else if (node->lhs->type->size == 1) { u1 = (unsigned char)v1; u2 = (unsigned char)v2; }
-          else if (node->lhs->type->size == 2) { u1 = (unsigned short)v1; u2 = (unsigned short)v2; }
+        if (node->lhs->type->size == 4) {
+          u1 = (unsigned int)v1;
+          u2 = (unsigned int)v2;
+        } else if (node->lhs->type->size == 1) {
+          u1 = (unsigned char)v1;
+          u2 = (unsigned char)v2;
+        } else if (node->lhs->type->size == 2) {
+          u1 = (unsigned short)v1;
+          u2 = (unsigned short)v2;
+        }
       }
 
       if (node->kind == ND_SHL)
@@ -3664,13 +4346,19 @@ static void fold_constants(Compiler *cc, Node *node) {
       else if (node->kind == ND_NE)
         res = v1 != v2;
       if (node->type && !node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(int)res;
-          else if (node->type->size == 1) res = (long long)(char)res;
-          else if (node->type->size == 2) res = (long long)(short)res;
+        if (node->type->size == 4)
+          res = (long long)(int)res;
+        else if (node->type->size == 1)
+          res = (long long)(char)res;
+        else if (node->type->size == 2)
+          res = (long long)(short)res;
       } else if (node->type && node_type_unsigned(node)) {
-          if (node->type->size == 4) res = (long long)(unsigned int)res;
-          else if (node->type->size == 1) res = (long long)(unsigned char)res;
-          else if (node->type->size == 2) res = (long long)(unsigned short)res;
+        if (node->type->size == 4)
+          res = (long long)(unsigned int)res;
+        else if (node->type->size == 1)
+          res = (long long)(unsigned char)res;
+        else if (node->type->size == 2)
+          res = (long long)(unsigned short)res;
       }
       node->kind = ND_NUM;
       node->int_val = res;
@@ -3755,7 +4443,8 @@ void codegen_program(Compiler *cc, Node *prog) {
     return;
 
   /* Linux: avoid "missing .note.GNU-stack" linker warning */
-  if (!backend_ops) fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
+  if (!backend_ops)
+    fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
   if (cc->filename) {
     fprintf(cc->out, "    .file 1 \"%s\"\n", cc->filename);
   }
@@ -3770,17 +4459,19 @@ void codegen_program(Compiler *cc, Node *prog) {
     n = n->next;
   }
 
-  /* Deduplicate tentative definitions: keep only one instance (prioritizing initializers) */
+  /* Deduplicate tentative definitions: keep only one instance (prioritizing
+   * initializers) */
   for (i = 0; i < cc->num_globals; i++) {
     int j;
     Node *g1 = cc->globals[i];
-    if (!g1 || g1->kind != ND_GLOBAL_VAR) continue;
-    
+    if (!g1 || g1->kind != ND_GLOBAL_VAR)
+      continue;
+
     for (j = i + 1; j < cc->num_globals; j++) {
       Node *g2 = cc->globals[j];
-      if (!g2 || g2->kind != ND_GLOBAL_VAR) continue;
+      if (!g2 || g2->kind != ND_GLOBAL_VAR)
+        continue;
 
-      
       if (strcmp(g1->name, g2->name) == 0) {
         if (g1->initializer && g2->initializer) {
           cc->globals[j] = 0; /* Keep first initializer, drop second */
@@ -3788,13 +4479,13 @@ void codegen_program(Compiler *cc, Node *prog) {
           cc->globals[j] = 0; /* Keep initialized, drop uninitialized */
         } else if (g2->initializer) {
           cc->globals[i] = 0; /* Drop uninitialized, keep initialized */
-          break; /* g1 is gone, stop checking against g1 */
+          break;              /* g1 is gone, stop checking against g1 */
         } else {
           if (g1->is_extern && !g2->is_extern) {
-              cc->globals[i] = 0; /* Keep tentative, drop extern */
-              break;
+            cc->globals[i] = 0; /* Keep tentative, drop extern */
+            break;
           } else {
-              cc->globals[j] = 0; /* Both uninitialized, prioritize g1 */
+            cc->globals[j] = 0; /* Both uninitialized, prioritize g1 */
           }
         }
       }

@@ -5,11 +5,20 @@
 
 static unsigned long long next_alloc_id = 1;
 
-/* Cap total arena blocks to avoid OOM from unbounded allocation (e.g. corrupt AST / infinite loop). Use literal 64 so compiler without preprocessor still works. */
+#define MAX_ARENA_BLOCKS 64          // 64 * 16 MiB = 1 GiB hard ceiling (safe for Stage 3)
+#define ARENA_WARN_THRESHOLD 48      // log before critical
+
+int arena_block_count = 0;
+size_t total_arena_bytes = 0;
+
 void *cc_alloc(Compiler *cc, int size) {
     ArenaBlock *a;
     void *p;
-    static int block_count = 0;
+    static int alloc_count = 0;
+    if (++alloc_count % 50000 == 0 && cc) {
+        printf("DEBUG zcc2 alloc_count=%d tk_line=%d tk_text=%.127s\n", alloc_count, cc->tk_line, cc->tk_text);
+        fflush(stdout);
+    }
     size = (size + 7) & ~7;  /* align to 8 */
     a = &cc->arena;
     while (a) {
@@ -32,22 +41,25 @@ void *cc_alloc(Compiler *cc, int size) {
             return p;
         }
         if (!a->next) {
-            if (block_count >= 512) {
-                printf("zcc: too many arena blocks (%d) — possible infinite loop or corrupt AST (last alloc size=%d)\n", block_count, size);
-                if (cc) {
-                    printf("zcc: stuck near token kind=%d line=%d text=%.127s\n", cc->tk, cc->tk_line, cc->tk_text);
-                }
-                exit(1);
+            if (arena_block_count >= MAX_ARENA_BLOCKS) {
+                fprintf(stderr, "\n🔱 ZKAEDI PRIME: ARENA DIVERGENCE DETECTED\n"
+                                "   blocks=%d  total=%zu MiB  size=%zu\n"
+                                "   → forcing fallback to AST path & aborting runaway\n",
+                        arena_block_count, total_arena_bytes/1048576, (size_t)size);
+                exit(1);   // clean kill with diagnostic instead of silent SIGKILL
             }
-            if (block_count >= 500 && cc) {
-                printf("zcc: near block limit block_count=%d token=%d line=%d size=%d text=%.127s\n", block_count, cc->tk, cc->tk_line, size, cc->tk_text);
+            if (arena_block_count >= ARENA_WARN_THRESHOLD && arena_block_count % 8 == 0) {
+                fprintf(stderr, "[ZKAEDI] arena block %d / %d  (%zu MiB)\n",
+                        arena_block_count, MAX_ARENA_BLOCKS, total_arena_bytes/1048576);
             }
-            block_count++;
+            arena_block_count++;
+            
             {
                 int newcap;
                 ArenaBlock *nb;
                 newcap = ARENA_SIZE;
                 if (size > newcap) newcap = size * 2;
+                total_arena_bytes += newcap;
                 nb = (ArenaBlock *)malloc(sizeof(ArenaBlock));
                 nb->data = (char *)malloc(newcap);
                 nb->pos = 0;
@@ -930,6 +942,24 @@ again:
     if (c == ';') { cc->tk = TK_SEMI; return; }
     if (c == ',') { cc->tk = TK_COMMA; return; }
     if (c == '.') {
+        if (is_digit(peek_char(cc))) {
+            char *end;
+            double fval = strtod(cc->source + cc->pos - 1, &end);
+            int len = end - (cc->source + cc->pos - 1);
+            if (len <= 0) len = 1;
+            cc->pos = cc->pos - 1 + len;
+            cc->col = cc->col - 1 + len;
+            if (cc->pos < cc->source_len) {
+                char sc = cc->source[cc->pos];
+                if (sc == 'f' || sc == 'F' || sc == 'l' || sc == 'L') {
+                    cc->pos++; cc->col++;
+                }
+            }
+            cc->tk = TK_FLIT;
+            cc->tk_fval = fval;
+            cc->tk_text[0] = 0;
+            return;
+        }
         if (peek_char(cc) == '.') {
             read_char(cc);
             if (peek_char(cc) == '.') { read_char(cc); cc->tk = TK_ELLIPSIS; return; }

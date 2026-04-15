@@ -1,3 +1,554 @@
+/*
+ * ZCC - ZKAEDI C Compiler
+ * A self-hosting C subset compiler targeting x86-64 Linux (System V ABI)
+ * Single-file design: cat part1.c part2.c part3.c part4.c part5.c > zcc.c
+ *
+ * Usage:  ./zcc input.c -o output
+ * Self-host: ./zcc zcc.c -o zcc2 && ./zcc2 zcc.c -o zcc3 && cmp zcc2 zcc3
+ *
+ * Supports: int/char/long/short/void/unsigned, pointers, arrays, structs,
+ *           unions, enums, typedef, sizeof, function calls (up to 6 args),
+ *           if/else/while/for/do-while/switch-case, goto/labels, break/continue,
+ *           string literals, char literals, compound assignment, ternary,
+ *           bitwise ops, shift ops, logical ops, pre/post inc/dec,
+ *           struct member access (. and ->), casts, global/local vars,
+ *           static/extern/const qualifiers, #include <stdio.h> etc via host cpp.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stddef.h>
+
+/* ================================================================ */
+/* CONSTANTS — using enum for self-hosting (no preprocessor needed)  */
+/* ================================================================ */
+
+enum {
+    MAX_IDENT   = 128,
+    MAX_STR     = 4096,
+    MAX_STRINGS = 16384,
+    MAX_GLOBALS = 16384,
+    MAX_STRUCTS = 8192,
+    MAX_PARAMS  = 128,
+    MAX_CALL_ARGS = 256,
+    MAX_CASES   = 4096,
+    MAX_INIT    = 8192,
+    ARENA_SIZE  = 16777216
+};
+
+/* ================================================================ */
+/* TOKEN TYPES                                                       */
+/* ================================================================ */
+
+enum {
+    TK_EOF = 0,
+    TK_NUM, TK_STR, TK_CHAR_LIT, TK_IDENT, TK_FLIT,
+    /* type keywords */
+    TK_INT, TK_CHAR, TK_VOID, TK_LONG, TK_SHORT,
+    TK_UNSIGNED, TK_SIGNED, TK_FLOAT, TK_DOUBLE,
+    /* control flow */
+    TK_IF, TK_ELSE, TK_WHILE, TK_FOR, TK_DO,
+    TK_RETURN, TK_BREAK, TK_CONTINUE, TK_GOTO,
+    TK_SWITCH, TK_CASE, TK_DEFAULT,
+    /* type-related */
+    TK_STRUCT, TK_UNION, TK_ENUM, TK_TYPEDEF,
+    TK_SIZEOF, TK_STATIC, TK_EXTERN, TK_CONST,
+    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE,
+    TK_BUILTIN_VA_ARG,
+    /* operators */
+    TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
+    TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_BANG,
+    TK_ASSIGN, TK_EQ, TK_NE,
+    TK_LT, TK_GT, TK_LE, TK_GE,
+    TK_LAND, TK_LOR,
+    TK_SHL, TK_SHR,
+    TK_INC, TK_DEC,
+    TK_ARROW, TK_DOT,
+    TK_QUESTION, TK_COLON,
+    /* compound assignment */
+    TK_PLUS_ASSIGN, TK_MINUS_ASSIGN, TK_STAR_ASSIGN,
+    TK_SLASH_ASSIGN, TK_PERCENT_ASSIGN,
+    TK_AMP_ASSIGN, TK_PIPE_ASSIGN, TK_CARET_ASSIGN,
+    TK_SHL_ASSIGN, TK_SHR_ASSIGN,
+    /* delimiters */
+    TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
+    TK_LBRACKET, TK_RBRACKET,
+    TK_SEMI, TK_COMMA, TK_ELLIPSIS,
+    TK_HASH
+};
+
+/* ================================================================ */
+/* AST NODE TYPES                                                    */
+/* ================================================================ */
+
+enum {
+    ND_NUM = 1, ND_STR, ND_CHAR_LIT, ND_FLIT,
+    ND_VAR, ND_ASSIGN,
+    ND_ADD, ND_SUB, ND_MUL, ND_DIV, ND_MOD,
+    ND_EQ, ND_NE, ND_LT, ND_LE, ND_GT, ND_GE,
+    ND_LAND, ND_LOR, ND_LNOT,
+    ND_BAND, ND_BOR, ND_BXOR, ND_BNOT,
+    ND_SHL, ND_SHR,
+    ND_FADD, ND_FSUB, ND_FMUL, ND_FDIV,
+    ND_NEG, ND_ADDR, ND_DEREF,
+    ND_CALL, ND_RETURN, ND_BLOCK,
+    ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
+    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_LABEL,
+    ND_SWITCH, ND_CASE, ND_DEFAULT,
+    ND_CAST, ND_SIZEOF, ND_VA_ARG,
+    ND_MEMBER, ND_PRE_INC, ND_PRE_DEC,
+    ND_POST_INC, ND_POST_DEC,
+    ND_TERNARY,
+    ND_COMMA_EXPR,
+    ND_FUNC_DEF, ND_GLOBAL_VAR,
+    ND_COMPOUND_ASSIGN,
+    ND_INIT_LIST,
+    ND_NOP
+};
+
+/* ================================================================ */
+/* TYPE KINDS                                                        */
+/* ================================================================ */
+
+enum {
+    TY_VOID = 0, TY_CHAR, TY_UCHAR, TY_SHORT, TY_USHORT,
+    TY_INT, TY_UINT, TY_LONG, TY_ULONG,
+    TY_LONGLONG, TY_ULONGLONG, TY_FLOAT, TY_DOUBLE,
+    TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM
+};
+
+/* ================================================================ */
+/* FORWARD DECLARATIONS OF STRUCTS                                   */
+/* ================================================================ */
+
+typedef struct Type Type;
+typedef struct Node Node;
+typedef struct Symbol Symbol;
+typedef struct Scope Scope;
+typedef struct Compiler Compiler;
+typedef struct ArenaBlock ArenaBlock;
+typedef struct StringEntry StringEntry;
+typedef struct StructField StructField;
+
+/* ================================================================ */
+/* DATA STRUCTURES                                                   */
+/* ================================================================ */
+
+struct ArenaBlock {
+    char *data;
+    int pos;
+    int cap;
+    ArenaBlock *next;
+};
+
+struct StructField {
+    char name[MAX_IDENT];
+    Type *type;
+    int offset;
+    int bitfield_width;
+    int bitfield_offset;
+    StructField *next;
+};
+
+struct Type {
+    unsigned long long magic;
+    unsigned long long alloc_id;
+    int kind;
+    int size;
+    int align;
+    Type *base;        /* for ptr/array */
+    int array_len;
+    /* function */
+    Type *ret;
+    Type **params;
+    int num_params;
+    int is_variadic;
+    /* struct/union */
+    char tag[MAX_IDENT];
+    StructField *fields;
+    int is_complete;
+};
+
+struct StringEntry {
+    char *data;
+    int len;
+    int label_id;
+};
+
+struct Symbol {
+    char name[MAX_IDENT];
+    Type *type;
+    int is_local;
+    int is_global;
+    int is_typedef;
+    int is_enum_const;
+    long long enum_val;
+    int stack_offset;  /* for locals */
+    char asm_name[MAX_IDENT];
+    /* Regalloc */
+    char *assigned_reg;
+    int live_start;
+    int live_end;
+    Symbol *next;      /* linked list in scope */
+};
+
+struct Scope {
+    Symbol *symbols;
+    Scope *parent;
+};
+
+struct Node {
+    unsigned long long magic;
+    unsigned long long alloc_id;
+    int kind;
+    int line;
+    Type *type;
+
+    /* ND_NUM */
+    long long int_val;
+
+    /* ND_FLIT */
+    double f_val;
+
+    /* ND_STR */
+    int str_id;
+
+    /* ND_VAR */
+    char name[MAX_IDENT];
+    Symbol *sym;
+
+    /* ND_ASSIGN, binary ops */
+    Node *lhs;
+    Node *rhs;
+
+    /* ND_CALL */
+    char func_name[MAX_IDENT];
+    Node **args;
+    int num_args;
+
+    /* ND_IF / ND_WHILE / ND_FOR / ND_TERNARY */
+    Node *cond;
+    Node *then_body;
+    Node *else_body;
+    Node *init;
+    Node *inc;
+
+    /* ND_BLOCK */
+    Node **stmts;
+    int num_stmts;
+
+    /* ND_FUNC_DEF */
+    char func_def_name[MAX_IDENT];
+    Type *func_type;
+    char (*param_names_buf)[MAX_IDENT];
+    Type **param_types;
+    int num_params;
+    Node *body;
+    int stack_size;
+
+    /* ND_MEMBER */
+    char member_name[MAX_IDENT];
+    int member_offset;
+    int member_size;
+
+    /* ND_SWITCH */
+    Node **cases;
+    int num_cases;
+    Node *default_case;
+
+    /* ND_CASE */
+    long long case_val;
+    Node *case_body;
+
+    /* ND_GOTO / ND_LABEL */
+    char label_name[MAX_IDENT];
+
+    /* ND_COMPOUND_ASSIGN */
+    int compound_op;  /* ND_ADD, ND_SUB, etc */
+
+    /* ND_CAST */
+    Type *cast_type;
+
+    /* ND_GLOBAL_VAR */
+    int is_static;
+    int is_extern;
+    Node *initializer;
+
+    /* linked list for top-level */
+    Node *next;
+};
+
+#include "zcc_ast_bridge.h"
+
+/* Keep nd_to_znd mapping in sync with this file's enum. */
+/* _Static_assert(ND_NUM == ZCC_ND_NUM, "zcc_ast_bridge.h: ND_NUM out of sync"); */
+/* _Static_assert(ND_STR == ZCC_ND_STR, "zcc_ast_bridge.h: ND_STR out of sync"); */
+/* _Static_assert(ND_WHILE == ZCC_ND_WHILE, "zcc_ast_bridge.h: ND_WHILE out of sync"); */
+/* _Static_assert(ND_CAST == ZCC_ND_CAST, "zcc_ast_bridge.h: ND_CAST out of sync"); */
+/* _Static_assert(ND_CALL == ZCC_ND_CALL, "zcc_ast_bridge.h: ND_CALL out of sync"); */
+/* _Static_assert(ND_NOP == ZCC_ND_NOP, "zcc_ast_bridge.h: ND_NOP out of sync"); */
+/* _Static_assert(ND_GT == ZCC_ND_GT, "zcc_ast_bridge.h: ND_GT out of sync"); */
+/* _Static_assert(ND_GE == ZCC_ND_GE, "zcc_ast_bridge.h: ND_GE out of sync"); */
+/* _Static_assert(ND_EQ == ZCC_ND_EQ, "zcc_ast_bridge.h: ND_EQ out of sync"); */
+/* _Static_assert(ND_NE == ZCC_ND_NE, "zcc_ast_bridge.h: ND_NE out of sync"); */
+/* _Static_assert(ND_MOD == ZCC_ND_MOD, "zcc_ast_bridge.h: ND_MOD out of sync"); */
+/* _Static_assert(ND_ADDR == ZCC_ND_ADDR, "zcc_ast_bridge.h: ND_ADDR out of sync"); */
+/* _Static_assert(ND_DEREF == ZCC_ND_DEREF, "zcc_ast_bridge.h: ND_DEREF out of sync"); */
+/* _Static_assert(ND_SWITCH == ZCC_ND_SWITCH, "zcc_ast_bridge.h: ND_SWITCH out of sync"); */
+
+/* Bridge accessors: Node* → IR bridge (Option A copy boundary). */
+int node_kind(struct Node *n) { return n ? n->kind : 0; }
+long long node_int_val(struct Node *n) { return n ? (long long)n->int_val : 0; }
+int node_str_id(struct Node *n) { return n ? n->str_id : 0; }
+void node_name(struct Node *n, char *buf, int len) {
+    if (!n || !buf || len == 0) return;
+    int i; i = 0;
+    while (i < len - 1 && n->name[i]) { buf[i] = n->name[i]; i++; }
+    buf[i] = '\0';
+}
+struct Node *node_lhs(struct Node *n) { return n ? n->lhs : NULL; }
+struct Node *node_rhs(struct Node *n) { return n ? n->rhs : NULL; }
+struct Node *node_cond(struct Node *n) { return n ? n->cond : NULL; }
+struct Node *node_then_body(struct Node *n) { return n ? n->then_body : NULL; }
+struct Node *node_else_body(struct Node *n) { return n ? n->else_body : NULL; }
+struct Node *node_body(struct Node *n) { return n ? n->body : NULL; }
+struct Node *node_init(struct Node *n) { return n ? n->init : NULL; }
+struct Node *node_inc(struct Node *n) { return n ? n->inc : NULL; }
+int node_compound_op(struct Node *n) { return n ? n->compound_op : 0; }
+struct Node **node_stmts(struct Node *n) { return n ? n->stmts : NULL; }
+int node_num_stmts(struct Node *n) { return n ? n->num_stmts : 0; }
+const char *node_func_name(struct Node *n) {
+    if (!n) return "";
+    if (n->func_name[0]) return n->func_name;
+    if (n->lhs && n->lhs->kind == ND_VAR && n->lhs->name[0]) return n->lhs->name;
+    return "";
+}
+
+int node_lhs_ptr_size(struct Node *n) {
+    if (!n || !n->lhs || !n->lhs->type) return 1;
+    if (is_pointer(n->lhs->type) && n->lhs->type->base) {
+        return type_size(n->lhs->type->base);
+    }
+    return 1;
+}
+
+int node_rhs_ptr_size(struct Node *n) {
+    if (!n || !n->rhs || !n->rhs->type) return 1;
+    if (is_pointer(n->rhs->type) && n->rhs->type->base) {
+        return type_size(n->rhs->type->base);
+    }
+    return 1;
+}
+struct Node *node_arg(struct Node *n, int i) {
+    if (!n || !n->args || i < 0 || i >= n->num_args) return NULL;
+    return n->args[i];
+}
+int node_num_args(struct Node *n) { return n ? n->num_args : 0; }
+struct Node **node_cases(struct Node *n) { return n ? n->cases : NULL; }
+int node_num_cases(struct Node *n) { return n ? n->num_cases : 0; }
+struct Node *node_default_case(struct Node *n) { return n ? n->default_case : NULL; }
+long long node_case_val(struct Node *n) { return n ? (long long)n->case_val : 0; }
+struct Node *node_case_body(struct Node *n) { return n ? n->case_body : NULL; }
+int node_member_offset(struct Node *n) { return n ? n->member_offset : 0; }
+int node_member_size(struct Node *n) { return (n && n->type) ? (int)n->type->size : 8; }
+int node_line_no(struct Node *n) { return n ? n->line : 0; }
+int node_is_global(struct Node *n) {
+    if (!n || n->kind != ND_VAR) return 0;
+    return (n->sym && n->sym->is_local) ? 0 : 1;
+}
+
+int node_is_array(struct Node *n) {
+    if (!n) return 0;
+    return (n->type && n->type->kind == TY_ARRAY) ? 1 : 0;
+}
+
+int node_is_func(struct Node *n) {
+    if (!n) return 0;
+    /* Also handle implicit functions with no symbol/type properly if needed, but normally part3.c typed them as ty_int. Wait, if implicit, how do we know it's a function? Normally implicit functions are only in ND_CALL, and we only decay functions in ND_VAR/ND_MEMBER! */
+    return (n->type && n->type->kind == TY_FUNC) ? 1 : 0;
+}
+
+/* CG-IR-015: Type-width accessors for IR instruction selection.
+ * Used by compiler_passes.c to pick 32-bit vs 64-bit lowering for
+ * OP_DIV / OP_MOD / OP_SHR so the IR backend matches GCC semantics. */
+int node_type_size(struct Node *n) {
+    /* Returns the result type size in bytes (4=int, 8=long/ptr).
+     * Returns 8 (safe default) when type is unknown or absent. */
+    if (!n || !n->type) return 8;
+    return (n->type->size > 0) ? (int)n->type->size : 8;
+}
+int node_type_unsigned(struct Node *n) {
+    /* Returns 1 if the node's result type is an unsigned integer kind. */
+    if (!n || !n->type) return 0;
+    int k = n->type->kind;
+    return (k == TY_UCHAR || k == TY_USHORT || k == TY_UINT ||
+            k == TY_ULONG || k == TY_ULONGLONG) ? 1 : 0;
+}
+
+struct Compiler {
+    int verbose;
+    /* source */
+    char *source;
+    int source_len;
+    int pos;
+    char *filename;
+
+    /* current token */
+    int tk;
+    long long tk_val;
+    double tk_fval;
+    char tk_text[MAX_IDENT];
+    char tk_str[MAX_STR];
+    int tk_str_len;
+    int tk_line;
+    int tk_col;
+
+    /* peek token (for lookahead) */
+    int has_peek;
+    int peek_tk;
+    long long peek_val;
+    double peek_fval;
+    char peek_text[MAX_IDENT];
+    char peek_str[MAX_STR];
+    int peek_str_len;
+    int peek_line;
+    int peek_col;
+
+    /* lexer state */
+    int line;
+    int col;
+
+    /* type singletons */
+    Type *ty_void;
+    Type *ty_char;
+    Type *ty_uchar;
+    Type *ty_short;
+    Type *ty_ushort;
+    Type *ty_int;
+    Type *ty_uint;
+    Type *ty_long;
+    Type *ty_ulong;
+    Type *ty_longlong;
+    Type *ty_ulonglong;
+    Type *ty_float;
+    Type *ty_double;
+
+    /* scope */
+    Scope *current_scope;
+
+    /* strings table */
+    StringEntry strings[MAX_STRINGS];
+    int num_strings;
+
+    /* structs */
+    Type *structs[MAX_STRUCTS];
+    int num_structs;
+
+    /* globals for codegen */
+    Node *globals[MAX_GLOBALS];
+    int num_globals;
+
+    /* codegen state */
+    FILE *out;
+    int label_count;
+    int stack_depth;
+
+    /* loop labels for break/continue */
+    int break_label;
+    int continue_label;
+
+    /* switch labels */
+    int switch_end_label;
+
+    /* current function name (for returns) */
+    char current_func[MAX_IDENT];
+    int func_end_label;
+
+    /* arena allocator */
+    ArenaBlock arena;
+
+    /* error count */
+    int errors;
+
+    /* local variable offset counter (for codegen) */
+    int local_offset;
+
+    int current_is_static;
+};
+
+typedef struct TargetBackend {
+    int ptr_size;
+    void (*emit_prologue)(Compiler *cc, Node *func);
+    void (*emit_epilogue)(Compiler *cc, Node *func);
+    void (*emit_call)(Compiler *cc, Node *func);
+    void (*emit_binary_op)(Compiler *cc, int op);
+    void (*emit_load_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_store_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_float_binop)(Compiler *cc, int op);
+} TargetBackend;
+
+extern TargetBackend *backend_ops;
+extern int ZCC_POINTER_WIDTH;
+extern int ZCC_INT_WIDTH;
+
+/* ================================================================ */
+/* FORWARD DECLARATIONS                                              */
+/* ================================================================ */
+
+void *cc_alloc(Compiler *cc, int size);
+char *cc_strdup(Compiler *cc, char *s);
+void next_token(Compiler *cc);
+void expect(Compiler *cc, int tk);
+Node *parse_program(Compiler *cc);
+Node *parse_stmt(Compiler *cc);
+Node *parse_expr(Compiler *cc);
+Node *parse_assign(Compiler *cc);
+Node *parse_ternary(Compiler *cc);
+Node *parse_logor(Compiler *cc);
+Node *parse_logand(Compiler *cc);
+Node *parse_bitor(Compiler *cc);
+Node *parse_bitxor(Compiler *cc);
+Node *parse_bitand(Compiler *cc);
+Node *parse_equality(Compiler *cc);
+Node *parse_relational(Compiler *cc);
+Node *parse_shift(Compiler *cc);
+Node *parse_add(Compiler *cc);
+Node *parse_mul(Compiler *cc);
+Node *parse_unary(Compiler *cc);
+Node *parse_postfix(Compiler *cc);
+Node *parse_primary(Compiler *cc);
+Type *parse_type(Compiler *cc);
+Type *parse_declarator(Compiler *cc, Type *base, char *name_out);
+void scope_push(Compiler *cc);
+void scope_pop(Compiler *cc);
+Symbol *scope_find(Compiler *cc, char *name);
+Symbol *scope_add(Compiler *cc, char *name, Type *type);
+Symbol *scope_add_local(Compiler *cc, char *name, Type *type);
+void codegen_program(Compiler *cc, Node *prog);
+void codegen_func(Compiler *cc, Node *func);
+void codegen_stmt(Compiler *cc, Node *node);
+void codegen_expr(Compiler *cc, Node *node);
+void codegen_addr(Compiler *cc, Node *node);
+void codegen_store(Compiler *cc, Type *type);
+void codegen_load(Compiler *cc, Type *type);
+Node *node_new(Compiler *cc, int kind, int line);
+Node *node_num(Compiler *cc, long long val, int line);
+Node *node_flit(Compiler *cc, double val, int line);
+Type *type_new(Compiler *cc, int kind);
+Type *type_ptr(Compiler *cc, Type *base);
+Type *type_array(Compiler *cc, Type *base, int len);
+int type_size(Type *t);
+int type_align(Type *t);
+int is_integer(Type *t);
+int is_pointer(Type *t);
+int is_float_type(Type *t);
+static int is_type_token(Compiler *cc);
+int peek_token(Compiler *cc);
+void error(Compiler *cc, char *msg);
+void error_at(Compiler *cc, int line, char *msg);
+
+/* ZKAEDI FORCE RENDER CACHE INVALIDATION */
 /* part0_pp.c -- ZCC Preprocessor */
 #include <string.h>
 #include <stdio.h>
@@ -835,557 +1386,6 @@ char *zcc_preprocess(const char *source, int source_len,
 }
 
 /* ================================================================ */
-/*
- * ZCC - ZKAEDI C Compiler
- * A self-hosting C subset compiler targeting x86-64 Linux (System V ABI)
- * Single-file design: cat part1.c part2.c part3.c part4.c part5.c > zcc.c
- *
- * Usage:  ./zcc input.c -o output
- * Self-host: ./zcc zcc.c -o zcc2 && ./zcc2 zcc.c -o zcc3 && cmp zcc2 zcc3
- *
- * Supports: int/char/long/short/void/unsigned, pointers, arrays, structs,
- *           unions, enums, typedef, sizeof, function calls (up to 6 args),
- *           if/else/while/for/do-while/switch-case, goto/labels, break/continue,
- *           string literals, char literals, compound assignment, ternary,
- *           bitwise ops, shift ops, logical ops, pre/post inc/dec,
- *           struct member access (. and ->), casts, global/local vars,
- *           static/extern/const qualifiers, #include <stdio.h> etc via host cpp.
- */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stddef.h>
-
-/* ================================================================ */
-/* CONSTANTS — using enum for self-hosting (no preprocessor needed)  */
-/* ================================================================ */
-
-enum {
-    MAX_IDENT   = 128,
-    MAX_STR     = 4096,
-    MAX_STRINGS = 16384,
-    MAX_GLOBALS = 16384,
-    MAX_STRUCTS = 8192,
-    MAX_PARAMS  = 128,
-    MAX_CALL_ARGS = 256,
-    MAX_CASES   = 4096,
-    MAX_INIT    = 8192,
-    ARENA_SIZE  = 16777216
-};
-
-/* ================================================================ */
-/* TOKEN TYPES                                                       */
-/* ================================================================ */
-
-enum {
-    TK_EOF = 0,
-    TK_NUM, TK_STR, TK_CHAR_LIT, TK_IDENT, TK_FLIT,
-    /* type keywords */
-    TK_INT, TK_CHAR, TK_VOID, TK_LONG, TK_SHORT,
-    TK_UNSIGNED, TK_SIGNED, TK_FLOAT, TK_DOUBLE,
-    /* control flow */
-    TK_IF, TK_ELSE, TK_WHILE, TK_FOR, TK_DO,
-    TK_RETURN, TK_BREAK, TK_CONTINUE, TK_GOTO,
-    TK_SWITCH, TK_CASE, TK_DEFAULT,
-    /* type-related */
-    TK_STRUCT, TK_UNION, TK_ENUM, TK_TYPEDEF,
-    TK_SIZEOF, TK_STATIC, TK_EXTERN, TK_CONST,
-    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE,
-    TK_BUILTIN_VA_ARG,
-    /* operators */
-    TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
-    TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_BANG,
-    TK_ASSIGN, TK_EQ, TK_NE,
-    TK_LT, TK_GT, TK_LE, TK_GE,
-    TK_LAND, TK_LOR,
-    TK_SHL, TK_SHR,
-    TK_INC, TK_DEC,
-    TK_ARROW, TK_DOT,
-    TK_QUESTION, TK_COLON,
-    /* compound assignment */
-    TK_PLUS_ASSIGN, TK_MINUS_ASSIGN, TK_STAR_ASSIGN,
-    TK_SLASH_ASSIGN, TK_PERCENT_ASSIGN,
-    TK_AMP_ASSIGN, TK_PIPE_ASSIGN, TK_CARET_ASSIGN,
-    TK_SHL_ASSIGN, TK_SHR_ASSIGN,
-    /* delimiters */
-    TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
-    TK_LBRACKET, TK_RBRACKET,
-    TK_SEMI, TK_COMMA, TK_ELLIPSIS,
-    TK_HASH
-};
-
-/* ================================================================ */
-/* AST NODE TYPES                                                    */
-/* ================================================================ */
-
-enum {
-    ND_NUM = 1, ND_STR, ND_CHAR_LIT, ND_FLIT,
-    ND_VAR, ND_ASSIGN,
-    ND_ADD, ND_SUB, ND_MUL, ND_DIV, ND_MOD,
-    ND_EQ, ND_NE, ND_LT, ND_LE, ND_GT, ND_GE,
-    ND_LAND, ND_LOR, ND_LNOT,
-    ND_BAND, ND_BOR, ND_BXOR, ND_BNOT,
-    ND_SHL, ND_SHR,
-    ND_FADD, ND_FSUB, ND_FMUL, ND_FDIV,
-    ND_NEG, ND_ADDR, ND_DEREF,
-    ND_CALL, ND_RETURN, ND_BLOCK,
-    ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
-    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_LABEL,
-    ND_SWITCH, ND_CASE, ND_DEFAULT,
-    ND_CAST, ND_SIZEOF, ND_VA_ARG,
-    ND_MEMBER, ND_PRE_INC, ND_PRE_DEC,
-    ND_POST_INC, ND_POST_DEC,
-    ND_TERNARY,
-    ND_COMMA_EXPR,
-    ND_FUNC_DEF, ND_GLOBAL_VAR,
-    ND_COMPOUND_ASSIGN,
-    ND_INIT_LIST,
-    ND_NOP
-};
-
-/* ================================================================ */
-/* TYPE KINDS                                                        */
-/* ================================================================ */
-
-enum {
-    TY_VOID = 0, TY_CHAR, TY_UCHAR, TY_SHORT, TY_USHORT,
-    TY_INT, TY_UINT, TY_LONG, TY_ULONG,
-    TY_LONGLONG, TY_ULONGLONG, TY_FLOAT, TY_DOUBLE,
-    TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM
-};
-
-/* ================================================================ */
-/* FORWARD DECLARATIONS OF STRUCTS                                   */
-/* ================================================================ */
-
-typedef struct Type Type;
-typedef struct Node Node;
-typedef struct Symbol Symbol;
-typedef struct Scope Scope;
-typedef struct Compiler Compiler;
-typedef struct ArenaBlock ArenaBlock;
-typedef struct StringEntry StringEntry;
-typedef struct StructField StructField;
-
-/* ================================================================ */
-/* DATA STRUCTURES                                                   */
-/* ================================================================ */
-
-struct ArenaBlock {
-    char *data;
-    int pos;
-    int cap;
-    ArenaBlock *next;
-};
-
-struct StructField {
-    char name[MAX_IDENT];
-    Type *type;
-    int offset;
-    int bitfield_width;
-    int bitfield_offset;
-    StructField *next;
-};
-
-struct Type {
-    unsigned long long magic;
-    unsigned long long alloc_id;
-    int kind;
-    int size;
-    int align;
-    Type *base;        /* for ptr/array */
-    int array_len;
-    /* function */
-    Type *ret;
-    Type **params;
-    int num_params;
-    int is_variadic;
-    /* struct/union */
-    char tag[MAX_IDENT];
-    StructField *fields;
-    int is_complete;
-};
-
-struct StringEntry {
-    char *data;
-    int len;
-    int label_id;
-};
-
-struct Symbol {
-    char name[MAX_IDENT];
-    Type *type;
-    int is_local;
-    int is_global;
-    int is_typedef;
-    int is_enum_const;
-    long long enum_val;
-    int stack_offset;  /* for locals */
-    char asm_name[MAX_IDENT];
-    /* Regalloc */
-    char *assigned_reg;
-    int live_start;
-    int live_end;
-    Symbol *next;      /* linked list in scope */
-};
-
-struct Scope {
-    Symbol *symbols;
-    Scope *parent;
-};
-
-struct Node {
-    unsigned long long magic;
-    unsigned long long alloc_id;
-    int kind;
-    int line;
-    Type *type;
-
-    /* ND_NUM */
-    long long int_val;
-
-    /* ND_FLIT */
-    double f_val;
-
-    /* ND_STR */
-    int str_id;
-
-    /* ND_VAR */
-    char name[MAX_IDENT];
-    Symbol *sym;
-
-    /* ND_ASSIGN, binary ops */
-    Node *lhs;
-    Node *rhs;
-
-    /* ND_CALL */
-    char func_name[MAX_IDENT];
-    Node **args;
-    int num_args;
-
-    /* ND_IF / ND_WHILE / ND_FOR / ND_TERNARY */
-    Node *cond;
-    Node *then_body;
-    Node *else_body;
-    Node *init;
-    Node *inc;
-
-    /* ND_BLOCK */
-    Node **stmts;
-    int num_stmts;
-
-    /* ND_FUNC_DEF */
-    char func_def_name[MAX_IDENT];
-    Type *func_type;
-    char (*param_names_buf)[MAX_IDENT];
-    Type **param_types;
-    int num_params;
-    Node *body;
-    int stack_size;
-
-    /* ND_MEMBER */
-    char member_name[MAX_IDENT];
-    int member_offset;
-    int member_size;
-
-    /* ND_SWITCH */
-    Node **cases;
-    int num_cases;
-    Node *default_case;
-
-    /* ND_CASE */
-    long long case_val;
-    Node *case_body;
-
-    /* ND_GOTO / ND_LABEL */
-    char label_name[MAX_IDENT];
-
-    /* ND_COMPOUND_ASSIGN */
-    int compound_op;  /* ND_ADD, ND_SUB, etc */
-
-    /* ND_CAST */
-    Type *cast_type;
-
-    /* ND_GLOBAL_VAR */
-    int is_static;
-    int is_extern;
-    Node *initializer;
-
-    /* linked list for top-level */
-    Node *next;
-};
-
-#include "zcc_ast_bridge.h"
-
-/* Keep nd_to_znd mapping in sync with this file's enum. */
-/* _Static_assert(ND_NUM == ZCC_ND_NUM, "zcc_ast_bridge.h: ND_NUM out of sync"); */
-/* _Static_assert(ND_STR == ZCC_ND_STR, "zcc_ast_bridge.h: ND_STR out of sync"); */
-/* _Static_assert(ND_WHILE == ZCC_ND_WHILE, "zcc_ast_bridge.h: ND_WHILE out of sync"); */
-/* _Static_assert(ND_CAST == ZCC_ND_CAST, "zcc_ast_bridge.h: ND_CAST out of sync"); */
-/* _Static_assert(ND_CALL == ZCC_ND_CALL, "zcc_ast_bridge.h: ND_CALL out of sync"); */
-/* _Static_assert(ND_NOP == ZCC_ND_NOP, "zcc_ast_bridge.h: ND_NOP out of sync"); */
-/* _Static_assert(ND_GT == ZCC_ND_GT, "zcc_ast_bridge.h: ND_GT out of sync"); */
-/* _Static_assert(ND_GE == ZCC_ND_GE, "zcc_ast_bridge.h: ND_GE out of sync"); */
-/* _Static_assert(ND_EQ == ZCC_ND_EQ, "zcc_ast_bridge.h: ND_EQ out of sync"); */
-/* _Static_assert(ND_NE == ZCC_ND_NE, "zcc_ast_bridge.h: ND_NE out of sync"); */
-/* _Static_assert(ND_MOD == ZCC_ND_MOD, "zcc_ast_bridge.h: ND_MOD out of sync"); */
-/* _Static_assert(ND_ADDR == ZCC_ND_ADDR, "zcc_ast_bridge.h: ND_ADDR out of sync"); */
-/* _Static_assert(ND_DEREF == ZCC_ND_DEREF, "zcc_ast_bridge.h: ND_DEREF out of sync"); */
-/* _Static_assert(ND_SWITCH == ZCC_ND_SWITCH, "zcc_ast_bridge.h: ND_SWITCH out of sync"); */
-
-/* Bridge accessors: Node* → IR bridge (Option A copy boundary). */
-int node_kind(struct Node *n) { return n ? n->kind : 0; }
-long long node_int_val(struct Node *n) { return n ? (long long)n->int_val : 0; }
-int node_str_id(struct Node *n) { return n ? n->str_id : 0; }
-void node_name(struct Node *n, char *buf, int len) {
-    if (!n || !buf || len == 0) return;
-    int i; i = 0;
-    while (i < len - 1 && n->name[i]) { buf[i] = n->name[i]; i++; }
-    buf[i] = '\0';
-}
-struct Node *node_lhs(struct Node *n) { return n ? n->lhs : NULL; }
-struct Node *node_rhs(struct Node *n) { return n ? n->rhs : NULL; }
-struct Node *node_cond(struct Node *n) { return n ? n->cond : NULL; }
-struct Node *node_then_body(struct Node *n) { return n ? n->then_body : NULL; }
-struct Node *node_else_body(struct Node *n) { return n ? n->else_body : NULL; }
-struct Node *node_body(struct Node *n) { return n ? n->body : NULL; }
-struct Node *node_init(struct Node *n) { return n ? n->init : NULL; }
-struct Node *node_inc(struct Node *n) { return n ? n->inc : NULL; }
-int node_compound_op(struct Node *n) { return n ? n->compound_op : 0; }
-struct Node **node_stmts(struct Node *n) { return n ? n->stmts : NULL; }
-int node_num_stmts(struct Node *n) { return n ? n->num_stmts : 0; }
-const char *node_func_name(struct Node *n) {
-    if (!n) return "";
-    if (n->func_name[0]) return n->func_name;
-    if (n->lhs && n->lhs->kind == ND_VAR && n->lhs->name[0]) return n->lhs->name;
-    return "";
-}
-
-int node_lhs_ptr_size(struct Node *n) {
-    if (!n || !n->lhs || !n->lhs->type) return 1;
-    if (is_pointer(n->lhs->type) && n->lhs->type->base) {
-        return type_size(n->lhs->type->base);
-    }
-    return 1;
-}
-
-int node_rhs_ptr_size(struct Node *n) {
-    if (!n || !n->rhs || !n->rhs->type) return 1;
-    if (is_pointer(n->rhs->type) && n->rhs->type->base) {
-        return type_size(n->rhs->type->base);
-    }
-    return 1;
-}
-struct Node *node_arg(struct Node *n, int i) {
-    if (!n || !n->args || i < 0 || i >= n->num_args) return NULL;
-    return n->args[i];
-}
-int node_num_args(struct Node *n) { return n ? n->num_args : 0; }
-struct Node **node_cases(struct Node *n) { return n ? n->cases : NULL; }
-int node_num_cases(struct Node *n) { return n ? n->num_cases : 0; }
-struct Node *node_default_case(struct Node *n) { return n ? n->default_case : NULL; }
-long long node_case_val(struct Node *n) { return n ? (long long)n->case_val : 0; }
-struct Node *node_case_body(struct Node *n) { return n ? n->case_body : NULL; }
-int node_member_offset(struct Node *n) { return n ? n->member_offset : 0; }
-int node_member_size(struct Node *n) { return (n && n->type) ? (int)n->type->size : 8; }
-int node_line_no(struct Node *n) { return n ? n->line : 0; }
-int node_is_global(struct Node *n) {
-    if (!n || n->kind != ND_VAR) return 0;
-    return (n->sym && n->sym->is_local) ? 0 : 1;
-}
-
-int node_is_array(struct Node *n) {
-    if (!n) return 0;
-    return (n->type && n->type->kind == TY_ARRAY) ? 1 : 0;
-}
-
-int node_is_func(struct Node *n) {
-    if (!n) return 0;
-    /* Also handle implicit functions with no symbol/type properly if needed, but normally part3.c typed them as ty_int. Wait, if implicit, how do we know it's a function? Normally implicit functions are only in ND_CALL, and we only decay functions in ND_VAR/ND_MEMBER! */
-    return (n->type && n->type->kind == TY_FUNC) ? 1 : 0;
-}
-
-/* CG-IR-015: Type-width accessors for IR instruction selection.
- * Used by compiler_passes.c to pick 32-bit vs 64-bit lowering for
- * OP_DIV / OP_MOD / OP_SHR so the IR backend matches GCC semantics. */
-int node_type_size(struct Node *n) {
-    /* Returns the result type size in bytes (4=int, 8=long/ptr).
-     * Returns 8 (safe default) when type is unknown or absent. */
-    if (!n || !n->type) return 8;
-    return (n->type->size > 0) ? (int)n->type->size : 8;
-}
-int node_type_unsigned(struct Node *n) {
-    /* Returns 1 if the node's result type is an unsigned integer kind. */
-    if (!n || !n->type) return 0;
-    int k = n->type->kind;
-    return (k == TY_UCHAR || k == TY_USHORT || k == TY_UINT ||
-            k == TY_ULONG || k == TY_ULONGLONG) ? 1 : 0;
-}
-
-struct Compiler {
-    int verbose;
-    /* source */
-    char *source;
-    int source_len;
-    int pos;
-    char *filename;
-
-    /* current token */
-    int tk;
-    long long tk_val;
-    double tk_fval;
-    char tk_text[MAX_IDENT];
-    char tk_str[MAX_STR];
-    int tk_str_len;
-    int tk_line;
-    int tk_col;
-
-    /* peek token (for lookahead) */
-    int has_peek;
-    int peek_tk;
-    long long peek_val;
-    double peek_fval;
-    char peek_text[MAX_IDENT];
-    char peek_str[MAX_STR];
-    int peek_str_len;
-    int peek_line;
-    int peek_col;
-
-    /* lexer state */
-    int line;
-    int col;
-
-    /* type singletons */
-    Type *ty_void;
-    Type *ty_char;
-    Type *ty_uchar;
-    Type *ty_short;
-    Type *ty_ushort;
-    Type *ty_int;
-    Type *ty_uint;
-    Type *ty_long;
-    Type *ty_ulong;
-    Type *ty_longlong;
-    Type *ty_ulonglong;
-    Type *ty_float;
-    Type *ty_double;
-
-    /* scope */
-    Scope *current_scope;
-
-    /* strings table */
-    StringEntry strings[MAX_STRINGS];
-    int num_strings;
-
-    /* structs */
-    Type *structs[MAX_STRUCTS];
-    int num_structs;
-
-    /* globals for codegen */
-    Node *globals[MAX_GLOBALS];
-    int num_globals;
-
-    /* codegen state */
-    FILE *out;
-    int label_count;
-    int stack_depth;
-
-    /* loop labels for break/continue */
-    int break_label;
-    int continue_label;
-
-    /* switch labels */
-    int switch_end_label;
-
-    /* current function name (for returns) */
-    char current_func[MAX_IDENT];
-    int func_end_label;
-
-    /* arena allocator */
-    ArenaBlock arena;
-
-    /* error count */
-    int errors;
-
-    /* local variable offset counter (for codegen) */
-    int local_offset;
-
-    int current_is_static;
-};
-
-typedef struct TargetBackend {
-    int ptr_size;
-    void (*emit_prologue)(Compiler *cc, Node *func);
-    void (*emit_epilogue)(Compiler *cc, Node *func);
-    void (*emit_call)(Compiler *cc, Node *func);
-    void (*emit_binary_op)(Compiler *cc, int op);
-    void (*emit_load_stack)(Compiler *cc, int offset, const char *reg);
-    void (*emit_store_stack)(Compiler *cc, int offset, const char *reg);
-    void (*emit_float_binop)(Compiler *cc, int op);
-} TargetBackend;
-
-extern TargetBackend *backend_ops;
-extern int ZCC_POINTER_WIDTH;
-extern int ZCC_INT_WIDTH;
-
-/* ================================================================ */
-/* FORWARD DECLARATIONS                                              */
-/* ================================================================ */
-
-void *cc_alloc(Compiler *cc, int size);
-char *cc_strdup(Compiler *cc, char *s);
-void next_token(Compiler *cc);
-void expect(Compiler *cc, int tk);
-Node *parse_program(Compiler *cc);
-Node *parse_stmt(Compiler *cc);
-Node *parse_expr(Compiler *cc);
-Node *parse_assign(Compiler *cc);
-Node *parse_ternary(Compiler *cc);
-Node *parse_logor(Compiler *cc);
-Node *parse_logand(Compiler *cc);
-Node *parse_bitor(Compiler *cc);
-Node *parse_bitxor(Compiler *cc);
-Node *parse_bitand(Compiler *cc);
-Node *parse_equality(Compiler *cc);
-Node *parse_relational(Compiler *cc);
-Node *parse_shift(Compiler *cc);
-Node *parse_add(Compiler *cc);
-Node *parse_mul(Compiler *cc);
-Node *parse_unary(Compiler *cc);
-Node *parse_postfix(Compiler *cc);
-Node *parse_primary(Compiler *cc);
-Type *parse_type(Compiler *cc);
-Type *parse_declarator(Compiler *cc, Type *base, char *name_out);
-void scope_push(Compiler *cc);
-void scope_pop(Compiler *cc);
-Symbol *scope_find(Compiler *cc, char *name);
-Symbol *scope_add(Compiler *cc, char *name, Type *type);
-Symbol *scope_add_local(Compiler *cc, char *name, Type *type);
-void codegen_program(Compiler *cc, Node *prog);
-void codegen_func(Compiler *cc, Node *func);
-void codegen_stmt(Compiler *cc, Node *node);
-void codegen_expr(Compiler *cc, Node *node);
-void codegen_addr(Compiler *cc, Node *node);
-void codegen_store(Compiler *cc, Type *type);
-void codegen_load(Compiler *cc, Type *type);
-Node *node_new(Compiler *cc, int kind, int line);
-Node *node_num(Compiler *cc, long long val, int line);
-Node *node_flit(Compiler *cc, double val, int line);
-Type *type_new(Compiler *cc, int kind);
-Type *type_ptr(Compiler *cc, Type *base);
-Type *type_array(Compiler *cc, Type *base, int len);
-int type_size(Type *t);
-int type_align(Type *t);
-int is_integer(Type *t);
-int is_pointer(Type *t);
-int is_float_type(Type *t);
-static int is_type_token(Compiler *cc);
-int peek_token(Compiler *cc);
-void error(Compiler *cc, char *msg);
-void error_at(Compiler *cc, int line, char *msg);
-
-/* ZKAEDI FORCE RENDER CACHE INVALIDATION */
 
 /* ================================================================ */
 /* ARENA ALLOCATOR                                                   */
@@ -4906,7 +4906,7 @@ Node *parse_stmt(Compiler *cc) {
                                         deref->type = elem_type;
                                         asgn = node_new(cc, ND_ASSIGN, line);
                                         asgn->lhs = deref;
-                                        asgn->rhs = inits[idx];
+                                        asgn->rhs = ensure_type(cc, inits[idx], elem_type);
                                         asgn->type = elem_type;
                                         block->stmts[cnt] = asgn;
                                         cnt++;
@@ -4983,7 +4983,7 @@ Node *parse_stmt(Compiler *cc) {
                                         if (found_f) {
                                             mem_n->member_offset = acc_off;
                                             mem_n->type = found_f->type;
-                                            mem_n->member_size = type_size(found_f->type);
+                                        mem_n->member_size = type_size(found_f->type);
                                         } else {
                                             mem_n->member_offset = sf->offset;
                                             mem_n->type = sf->type;
@@ -4991,7 +4991,7 @@ Node *parse_stmt(Compiler *cc) {
                                         }
                                         asgn_n = node_new(cc, ND_ASSIGN, line);
                                         asgn_n->lhs = mem_n;
-                                        asgn_n->rhs = inits_s[fi];
+                                        asgn_n->rhs = ensure_type(cc, inits_s[fi], mem_n->type);
                                         asgn_n->type = mem_n->type;
                                         /* Grow block if needed */
                                         if (cnt >= cap) {
@@ -5070,7 +5070,7 @@ Node *parse_stmt(Compiler *cc) {
                             var->type = vtype;
                             asgn = node_new(cc, ND_ASSIGN, line);
                             asgn->lhs = var;
-                            asgn->rhs = parse_assign(cc);
+                            asgn->rhs = ensure_type(cc, parse_assign(cc), vtype);
                             asgn->type = vtype;
                             if (cnt < cap) {
                                 block->stmts[cnt] = asgn;
@@ -6441,7 +6441,13 @@ void codegen_load(Compiler *cc, Type *type) {
       fprintf(cc->out, "    movswq (%%rax), %%rax\n");
     break;
   case 4:
-    if (is_unsigned_type(type))
+    /* CG-FLOAT-001: float is 4 bytes signed but must NOT be sign-extended.
+     * movslq destroys IEEE-754 bits. Use movl (zero-extends %eax -> %rax). */
+    if (is_float_type(type)) {
+      fprintf(cc->out, "    movl (%%rax), %%eax\n");
+      fprintf(cc->out, "    movl %%eax, %%eax\n");
+    }
+    else if (is_unsigned_type(type))
       fprintf(cc->out, "    movl (%%rax), %%eax\n");
     else
       fprintf(cc->out, "    movslq (%%rax), %%rax\n");
@@ -6848,7 +6854,7 @@ void codegen_expr(Compiler *cc, Node *node) {
   case ND_VAR:
     if (node->sym && node->sym->assigned_reg) {
       if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", node->sym->assigned_reg); else fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
-      if (node->type && !node_type_unsigned(node) && !is_pointer(node->type)) {
+      if (node->type && !node_type_unsigned(node) && !is_pointer(node->type) && !is_float_type(node->type)) {
           if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -6894,7 +6900,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     ir_save_result(rhs_ir);
     if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->sym &&
         node->lhs->sym->assigned_reg) {
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
+      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type) && !is_float_type(node->lhs->type)) {
           if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -7059,7 +7065,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       default:
         break;
       }
-      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
+      if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type) && !is_float_type(node->lhs->type)) {
           if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -7112,7 +7118,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_float_type(node->lhs->type)) {
         fprintf(cc->out, "    movq %%rax, %%xmm0\n");
         fprintf(cc->out, "    movq %%r11, %%xmm1\n");
-        fprintf(cc->out, "    addsd %%xmm1, %%xmm0\n");
+        if (type_size(node->lhs->type) == 4) {
+            fprintf(cc->out, "    addss %%xmm1, %%xmm0\n");
+        } else {
+            fprintf(cc->out, "    addsd %%xmm1, %%xmm0\n");
+        }
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
@@ -7128,7 +7138,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_float_type(node->lhs->type)) {
         fprintf(cc->out, "    movq %%rax, %%xmm0\n");
         fprintf(cc->out, "    movq %%r11, %%xmm1\n");
-        fprintf(cc->out, "    subsd %%xmm1, %%xmm0\n");
+        if (type_size(node->lhs->type) == 4) {
+            fprintf(cc->out, "    subss %%xmm1, %%xmm0\n");
+        } else {
+            fprintf(cc->out, "    subsd %%xmm1, %%xmm0\n");
+        }
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
@@ -7144,7 +7158,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_float_type(node->lhs->type)) {
         fprintf(cc->out, "    movq %%rax, %%xmm0\n");
         fprintf(cc->out, "    movq %%r11, %%xmm1\n");
-        fprintf(cc->out, "    mulsd %%xmm1, %%xmm0\n");
+        if (type_size(node->lhs->type) == 4) {
+            fprintf(cc->out, "    mulss %%xmm1, %%xmm0\n");
+        } else {
+            fprintf(cc->out, "    mulsd %%xmm1, %%xmm0\n");
+        }
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
@@ -7155,7 +7173,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_float_type(node->lhs->type)) {
         fprintf(cc->out, "    movq %%rax, %%xmm0\n");
         fprintf(cc->out, "    movq %%r11, %%xmm1\n");
-        fprintf(cc->out, "    divsd %%xmm1, %%xmm0\n");
+        if (type_size(node->lhs->type) == 4) {
+            fprintf(cc->out, "    divss %%xmm1, %%xmm0\n");
+        } else {
+            fprintf(cc->out, "    divsd %%xmm1, %%xmm0\n");
+        }
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
@@ -7247,7 +7269,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
       else fprintf(cc->out, "    movq %%r11, %%rax\n");
-    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
+    if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type) && !is_float_type(node->lhs->type)) {
         if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
@@ -7287,7 +7309,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
       fprintf(cc->out, "    addq $8, %%rsp\n");
-      fprintf(cc->out, "    addsd %%xmm1, %%xmm0\n");
+      if (type_size(node->type) == 4) {
+          fprintf(cc->out, "    addss %%xmm1, %%xmm0\n");
+      } else {
+          fprintf(cc->out, "    addsd %%xmm1, %%xmm0\n");
+      }
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
       ir_emit_binary_op(ND_ADD, node->type, "f_lhs", "f_rhs", node->line);
       return;
@@ -7365,8 +7391,13 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
       fprintf(cc->out, "    addq $8, %%rsp\n");
-      fprintf(cc->out, "    subsd %%xmm0, %%xmm1\n");
-      fprintf(cc->out, "    movsd %%xmm1, %%xmm0\n");
+      if (type_size(node->type) == 4) {
+          fprintf(cc->out, "    subss %%xmm0, %%xmm1\n");
+          fprintf(cc->out, "    movss %%xmm1, %%xmm0\n");
+      } else {
+          fprintf(cc->out, "    subsd %%xmm0, %%xmm1\n");
+          fprintf(cc->out, "    movsd %%xmm1, %%xmm0\n");
+      }
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
       ir_emit_binary_op(ND_SUB, node->type, "f_lhs", "f_rhs", node->line);
       return;
@@ -7449,7 +7480,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
       fprintf(cc->out, "    addq $8, %%rsp\n");
-      fprintf(cc->out, "    mulsd %%xmm1, %%xmm0\n");
+      if (type_size(node->type) == 4) {
+          fprintf(cc->out, "    mulss %%xmm1, %%xmm0\n");
+      } else {
+          fprintf(cc->out, "    mulsd %%xmm1, %%xmm0\n");
+      }
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
       ir_emit_binary_op(ND_MUL, node->type, "f_lhs", "f_rhs", node->line);
       return;
@@ -7544,8 +7579,13 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
       fprintf(cc->out, "    addq $8, %%rsp\n");
-      fprintf(cc->out, "    divsd %%xmm0, %%xmm1\n");
-      fprintf(cc->out, "    movsd %%xmm1, %%xmm0\n");
+      if (type_size(node->type) == 4) {
+          fprintf(cc->out, "    divss %%xmm0, %%xmm1\n");
+          fprintf(cc->out, "    movss %%xmm1, %%xmm0\n");
+      } else {
+          fprintf(cc->out, "    divsd %%xmm0, %%xmm1\n");
+          fprintf(cc->out, "    movsd %%xmm1, %%xmm0\n");
+      }
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
       ir_emit_binary_op(ND_DIV, node->type, "f_lhs", "f_rhs", node->line);
       return;
@@ -7829,7 +7869,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       fprintf(cc->out, "    movsd (%%rsp), %%xmm1\n");
       fprintf(cc->out, "    addq $8, %%rsp\n");
-      fprintf(cc->out, "    ucomisd %%xmm0, %%xmm1\n");
+      if ((node->lhs && node->lhs->type && type_size(node->lhs->type) == 4) || (node->rhs && node->rhs->type && type_size(node->rhs->type) == 4)) {
+          fprintf(cc->out, "    ucomiss %%xmm0, %%xmm1\n");
+      } else {
+          fprintf(cc->out, "    ucomisd %%xmm0, %%xmm1\n");
+      }
       switch (node->kind) {
       case ND_EQ:
         fprintf(cc->out, "    sete %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
@@ -8167,16 +8211,26 @@ void codegen_expr(Compiler *cc, Node *node) {
           fprintf(cc->out, "    movswl %%ax, %%eax\n");
         break;
       case 4:
-        if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
+        if (node->cast_type && is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type) && type_size(node->lhs->type) == 8) {
+            /* double to float */
             fprintf(cc->out, "    movq %%rax, %%xmm0\n");
-            fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+            fprintf(cc->out, "    cvtsd2ss %%xmm0, %%xmm0\n");
+            fprintf(cc->out, "    movd %%xmm0, %%eax\n");
+        } else if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
+            if (type_size(node->lhs->type) == 4) {
+                fprintf(cc->out, "    movd %%eax, %%xmm0\n");
+                fprintf(cc->out, "    cvttss2si %%xmm0, %%eax\n");
+            } else {
+                fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+                fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+            }
         } else if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG) {
             if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
-        } else if (!is_pointer(node->lhs ? node->lhs->type : 0)) {
+        } else if (!is_pointer(node->lhs ? node->lhs->type : 0) && (!node->lhs || !is_float_type(node->lhs->type))) {
             if (!backend_ops) fprintf(cc->out, "    cltq\n");
         }
         break;
-      case 8:
+        case 8:
         if (node->cast_type && is_float_type(node->cast_type) && node->lhs && node->lhs->type && !is_float_type(node->lhs->type)) {
             if (is_unsigned_type(node->lhs->type)) {
                 fprintf(cc->out, "    testq %%rax, %%rax\n");
@@ -8196,10 +8250,20 @@ void codegen_expr(Compiler *cc, Node *node) {
                 fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
             }
             fprintf(cc->out, "    movq %%xmm0, %%rax\n");
+        } else if (node->cast_type && is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type) && type_size(node->lhs->type) == 4) {
+            /* float to double promotion */
+            fprintf(cc->out, "    movd %%eax, %%xmm0\n");
+            fprintf(cc->out, "    cvtss2sd %%xmm0, %%xmm0\n");
+            fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         } else if (node->cast_type && !is_float_type(node->cast_type) && node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
-            fprintf(cc->out, "    movq %%rax, %%xmm0\n");
-            fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
-        } else if (src_size == 4 && !is_pointer(node->lhs ? node->lhs->type : 0)) {
+            if (type_size(node->lhs->type) == 4) {
+                fprintf(cc->out, "    movd %%eax, %%xmm0\n");
+                fprintf(cc->out, "    cvttss2si %%xmm0, %%rax\n");
+            } else {
+                fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+                fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+            }
+        } else if (src_size == 4 && !is_pointer(node->lhs ? node->lhs->type : 0) && (!node->lhs || !is_float_type(node->lhs->type))) {
             if (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) {
                 if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
 
@@ -8650,7 +8714,13 @@ void codegen_expr(Compiler *cc, Node *node) {
           if (fp_idx < 8) {
             fprintf(cc->out, "    popq %%rax\n");
             cc->stack_depth--;
-            fprintf(cc->out, "    movq %%rax, %%xmm%d\n", fp_idx);
+            /* CG-FLOAT-004: Float args need promotion to double for varargs */
+            if (node->args[i]->type->kind == 11) {  /* TY_FLOAT = 7 */
+              fprintf(cc->out, "    movd %%eax, %%xmm%d\n", fp_idx);
+              fprintf(cc->out, "    cvtss2sd %%xmm%d, %%xmm%d\n", fp_idx, fp_idx);
+            } else {
+              fprintf(cc->out, "    movq %%rax, %%xmm%d\n", fp_idx);
+            }
             fp_idx++;
           }
         } else {
@@ -9484,6 +9554,26 @@ void codegen_func(Compiler *cc, Node *func) {
 static long long eval_const_expr_p4(Node *elem, int *ok) {
     if (!elem) { *ok = 0; return 0; }
     if (elem->kind == ND_CAST) return eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_FLIT) {
+        /* Return lower 32 bits of IEEE-754 float (stores as double in AST)
+         * Must calculate integer representation directly since zcc2 lacks cvtsd2ss */
+        unsigned long long u;
+        memcpy(&u, &elem->f_val, 8);
+        if (u == 0) return 0;
+        unsigned int sign = (u >> 63) & 1;
+        long long exp = (u >> 52) & 0x7FF;
+        unsigned long long frac = u & 0xFFFFFFFFFFFFFULL;
+        long long exp32;
+        unsigned int fbits;
+        if (exp == 0 && frac == 0) {
+            return (long long)(sign << 31);
+        }
+        exp32 = exp - 1023 + 127;
+        if (exp32 <= 0) fbits = sign << 31;
+        else if (exp32 >= 255) fbits = (sign << 31) | (255 << 23);
+        else fbits = (sign << 31) | ((unsigned int)exp32 << 23) | (frac >> 29);
+        return (long long)fbits;
+    }
     if (elem->kind == ND_NUM) return elem->int_val;
     if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SUB) return eval_const_expr_p4(elem->lhs, ok) - eval_const_expr_p4(elem->rhs, ok);
@@ -9668,6 +9758,28 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long %s\n", init->name);
       else
         fprintf(cc->out, "    .quad %s\n", init->name);
+    } else if (init->kind == ND_FLIT) {
+        unsigned long long u;
+        unsigned int sign;
+        long long exp;
+        unsigned long long frac;
+        long long exp32;
+        unsigned int fbits;
+        memcpy(&u, &init->f_val, 8);
+        if (u == 0) fbits = 0;
+        else {
+            sign = (u >> 63) & 1;
+            exp = (u >> 52) & 0x7FF;
+            frac = u & 0xFFFFFFFFFFFFFULL;
+            if (exp == 0 && frac == 0) fbits = sign << 31;
+            else {
+                exp32 = exp - 1023 + 127;
+                if (exp32 <= 0) fbits = sign << 31;
+                else if (exp32 >= 255) fbits = (sign << 31) | (255 << 23);
+                else fbits = (sign << 31) | ((unsigned int)exp32 << 23) | (frac >> 29);
+            }
+        }
+        fprintf(cc->out, "    .long %u\n", fbits);
     } else if (init->kind == ND_STR) {
       if (gvar->type && gvar->type->kind == TY_ARRAY) {
           int j;
@@ -9718,6 +9830,31 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
             if (gvar->type && gvar->type->base) elem_size = type_size(gvar->type->base);
             for (i = 0; i < init->num_args; i++) {
                 Node *elem = init->args[i];
+                if (elem && (elem->kind == ND_FLIT || (elem->kind == ND_NEG && elem->lhs && elem->lhs->kind == ND_FLIT))) {
+                    if (elem_size == 4) {
+                        unsigned long long u; unsigned int fbits;
+                    double fval = elem->kind == ND_FLIT ? elem->f_val : -elem->lhs->f_val;
+                    memcpy(&u, &fval, 8);
+                        unsigned int sign = (u >> 63) & 1;
+                        long long exp = (u >> 52) & 0x7FF;
+                        unsigned long long frac = u & 0xFFFFFFFFFFFFFULL;
+                        if (u == 0) fbits = 0;
+                        else if (exp == 0 && frac == 0) fbits = sign << 31;
+                        else {
+                            long long exp32 = exp - 1023 + 127;
+                            if (exp32 <= 0) fbits = sign << 31;
+                            else if (exp32 >= 255) fbits = (sign << 31) | (255 << 23);
+                            else fbits = (sign << 31) | ((unsigned int)exp32 << 23) | (frac >> 29);
+                        }
+                        fprintf(cc->out, "    .long %u\n", fbits);
+                    } else if (elem_size == 8) {
+                        unsigned long long bits;
+                        double fval = elem->kind == ND_FLIT ? elem->f_val : -elem->lhs->f_val;
+                        memcpy(&bits, &fval, 8);
+                        fprintf(cc->out, "    .quad %llu\n", bits);
+                    }
+                    continue;
+                }
                 int const_ok = 1;
                 long long const_val = eval_const_expr_p4(elem, &const_ok);
                 if (!elem) {
@@ -9746,6 +9883,29 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
                 } else if (elem->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->name);
+                } else if (elem->kind == ND_FLIT) {
+                    /* Float literal: emit 32-bit IEEE-754 bit pattern as .long */
+                    unsigned long long u;
+                    unsigned int sign;
+                    long long exp;
+                    unsigned long long frac;
+                    long long exp32;
+                    unsigned int fbits;
+                    memcpy(&u, &elem->f_val, 8);
+                    if (u == 0) fbits = 0;
+                    else {
+                        sign = (u >> 63) & 1;
+                        exp = (u >> 52) & 0x7FF;
+                        frac = u & 0xFFFFFFFFFFFFFULL;
+                        if (exp == 0 && frac == 0) fbits = sign << 31;
+                        else {
+                            exp32 = exp - 1023 + 127;
+                            if (exp32 <= 0) fbits = sign << 31;
+                            else if (exp32 >= 255) fbits = (sign << 31) | (255 << 23);
+                            else fbits = (sign << 31) | ((unsigned int)exp32 << 23) | (frac >> 29);
+                        }
+                    }
+                    fprintf(cc->out, "    .long %u\n", fbits);
                 } else {
                     fprintf(cc->out, "    .zero %d\n", elem_size);
                 }
@@ -10712,6 +10872,138 @@ int main(int argc, char **argv) {
 }
 
 /* ZKAEDI FORCE RENDER CACHE INVALIDATION */
+/* ================================================================ */
+/* PART 6: ARM TARGET BACKEND (thumbv6m)                             */
+/* ================================================================ */
+
+
+TargetBackend *backend_ops = 0;
+int ZCC_POINTER_WIDTH = 8;
+int ZCC_INT_WIDTH = 4;
+
+static void thumb_emit_prologue(Compiler *cc, Node *func) {
+    int stack_size = func->stack_size + 40;
+    if (stack_size < 256) stack_size = 256;
+    stack_size = (stack_size + 7) & ~7;
+
+    fprintf(cc->out, "    .text\n");
+    fprintf(cc->out, "    .syntax unified\n");
+    fprintf(cc->out, "    .cpu cortex-m0plus\n");
+    fprintf(cc->out, "    .thumb\n");
+    if (!func->is_static) {
+        fprintf(cc->out, "    .global %s\n", func->func_def_name);
+    }
+    fprintf(cc->out, "    .type %s, %%function\n", func->func_def_name);
+    fprintf(cc->out, "%s:\n", func->func_def_name);
+    
+    fprintf(cc->out, "    push {r4, r5, r6, r7, lr}\n");
+    fprintf(cc->out, "    mov r7, sp\n");
+
+    if (stack_size <= 508 && (stack_size % 4 == 0)) {
+        fprintf(cc->out, "    sub sp, #%d\n", stack_size);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", stack_size);
+        fprintf(cc->out, "    mov r4, sp\n");
+        fprintf(cc->out, "    subs r4, r4, r3\n");
+        fprintf(cc->out, "    mov sp, r4\n");
+    }
+
+    int i;
+    for (i = 0; i < func->num_params && i < 4; i++) {
+        fprintf(cc->out, "    ldr r3, =%d\n", -(i * 4 + 8));
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    str r%d, [r3]\n", i);
+    }
+}
+
+static void thumb_emit_epilogue(Compiler *cc, Node *func) {
+    fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
+    fprintf(cc->out, "    mov sp, r7\n");
+    fprintf(cc->out, "    pop {r4, r5, r6, r7, pc}\n");
+}
+
+static void thumb_emit_call(Compiler *cc, Node *func) {
+    fprintf(cc->out, "    bl %s\n", func->func_name);
+}
+
+static void thumb_emit_binary_op(Compiler *cc, int op) {
+    /* op matches ND_ADD, ND_SUB, etc.
+       r0 = lhs, r1 = rhs
+       output -> r0 */
+    switch (op) {
+        case ND_ADD:
+            fprintf(cc->out, "    adds r0, r0, r1\n");
+            break;
+        case ND_SUB:
+            fprintf(cc->out, "    subs r0, r0, r1\n");
+            break;
+        case ND_MUL:
+            fprintf(cc->out, "    muls r0, r1, r0\n"); /* thumb-1 allows only dest=lhs */
+            break;
+        case ND_DIV:
+            fprintf(cc->out, "    bl __aeabi_idiv\n"); /* software divide */
+            break;
+        case ND_BAND:
+            fprintf(cc->out, "    ands r0, r0, r1\n");
+            break;
+        case ND_BOR:
+            fprintf(cc->out, "    orrs r0, r0, r1\n");
+            break;
+        case ND_BXOR:
+            fprintf(cc->out, "    eors r0, r0, r1\n");
+            break;
+        case ND_SHL:
+            fprintf(cc->out, "    lsls r0, r0, r1\n");
+            break;
+        case ND_SHR:
+            fprintf(cc->out, "    asrs r0, r0, r1\n"); /* arithmetic shift right */
+            break;
+    }
+}
+
+static void thumb_emit_load_stack(Compiler *cc, int offset, const char *reg) {
+    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
+        fprintf(cc->out, "    ldr %s, [r7, #%d]\n", reg, offset);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", offset);
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    ldr %s, [r3]\n", reg);
+    }
+}
+
+static void thumb_emit_store_stack(Compiler *cc, int offset, const char *reg) {
+    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
+        fprintf(cc->out, "    str %s, [r7, #%d]\n", reg, offset);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", offset);
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    str %s, [r3]\n", reg);
+    }
+}
+
+static void thumb_emit_float_binop(Compiler *cc, int op) {
+    const char *fn = 0;
+    switch (op) {
+        case ND_FADD: fn = "__aeabi_fadd"; break;
+        case ND_FSUB: fn = "__aeabi_fsub"; break;
+        case ND_FMUL: fn = "__aeabi_fmul"; break;
+        case ND_FDIV: fn = "__aeabi_fdiv"; break;
+    }
+    if (fn) {
+        fprintf(cc->out, "    bl %s\n", fn);
+    }
+}
+
+TargetBackend backend_thumbv6m = {
+    4, /* ptr_size */
+    thumb_emit_prologue,
+    thumb_emit_epilogue,
+    thumb_emit_call,
+    thumb_emit_binary_op,
+    thumb_emit_load_stack,
+    thumb_emit_store_stack,
+    thumb_emit_float_binop
+};
 /*
  * ir.c — ZCC IR construction and text emission
  *
@@ -11035,478 +11327,6 @@ void ir_module_emit_text(const ir_module_t *mod, FILE *fp) {
     for (i = 0; i < mod->func_count; i++) {
         ir_func_emit_text(mod->funcs[i], fp);
     }
-}
-/* ================================================================ */
-/* PART 6: ARM TARGET BACKEND (thumbv6m)                             */
-/* ================================================================ */
-
-
-TargetBackend *backend_ops = 0;
-int ZCC_POINTER_WIDTH = 8;
-int ZCC_INT_WIDTH = 4;
-
-static void thumb_emit_prologue(Compiler *cc, Node *func) {
-    int stack_size = func->stack_size + 40;
-    if (stack_size < 256) stack_size = 256;
-    stack_size = (stack_size + 7) & ~7;
-
-    fprintf(cc->out, "    .text\n");
-    fprintf(cc->out, "    .syntax unified\n");
-    fprintf(cc->out, "    .cpu cortex-m0plus\n");
-    fprintf(cc->out, "    .thumb\n");
-    if (!func->is_static) {
-        fprintf(cc->out, "    .global %s\n", func->func_def_name);
-    }
-    fprintf(cc->out, "    .type %s, %%function\n", func->func_def_name);
-    fprintf(cc->out, "%s:\n", func->func_def_name);
-    
-    fprintf(cc->out, "    push {r4, r5, r6, r7, lr}\n");
-    fprintf(cc->out, "    mov r7, sp\n");
-
-    if (stack_size <= 508 && (stack_size % 4 == 0)) {
-        fprintf(cc->out, "    sub sp, #%d\n", stack_size);
-    } else {
-        fprintf(cc->out, "    ldr r3, =%d\n", stack_size);
-        fprintf(cc->out, "    mov r4, sp\n");
-        fprintf(cc->out, "    subs r4, r4, r3\n");
-        fprintf(cc->out, "    mov sp, r4\n");
-    }
-
-    int i;
-    for (i = 0; i < func->num_params && i < 4; i++) {
-        fprintf(cc->out, "    ldr r3, =%d\n", -(i * 4 + 8));
-        fprintf(cc->out, "    adds r3, r7, r3\n");
-        fprintf(cc->out, "    str r%d, [r3]\n", i);
-    }
-}
-
-static void thumb_emit_epilogue(Compiler *cc, Node *func) {
-    fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
-    fprintf(cc->out, "    mov sp, r7\n");
-    fprintf(cc->out, "    pop {r4, r5, r6, r7, pc}\n");
-}
-
-static void thumb_emit_call(Compiler *cc, Node *func) {
-    fprintf(cc->out, "    bl %s\n", func->func_name);
-}
-
-static void thumb_emit_binary_op(Compiler *cc, int op) {
-    /* op matches ND_ADD, ND_SUB, etc.
-       r0 = lhs, r1 = rhs
-       output -> r0 */
-    switch (op) {
-        case ND_ADD:
-            fprintf(cc->out, "    adds r0, r0, r1\n");
-            break;
-        case ND_SUB:
-            fprintf(cc->out, "    subs r0, r0, r1\n");
-            break;
-        case ND_MUL:
-            fprintf(cc->out, "    muls r0, r1, r0\n"); /* thumb-1 allows only dest=lhs */
-            break;
-        case ND_DIV:
-            fprintf(cc->out, "    bl __aeabi_idiv\n"); /* software divide */
-            break;
-        case ND_BAND:
-            fprintf(cc->out, "    ands r0, r0, r1\n");
-            break;
-        case ND_BOR:
-            fprintf(cc->out, "    orrs r0, r0, r1\n");
-            break;
-        case ND_BXOR:
-            fprintf(cc->out, "    eors r0, r0, r1\n");
-            break;
-        case ND_SHL:
-            fprintf(cc->out, "    lsls r0, r0, r1\n");
-            break;
-        case ND_SHR:
-            fprintf(cc->out, "    asrs r0, r0, r1\n"); /* arithmetic shift right */
-            break;
-    }
-}
-
-static void thumb_emit_load_stack(Compiler *cc, int offset, const char *reg) {
-    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
-        fprintf(cc->out, "    ldr %s, [r7, #%d]\n", reg, offset);
-    } else {
-        fprintf(cc->out, "    ldr r3, =%d\n", offset);
-        fprintf(cc->out, "    adds r3, r7, r3\n");
-        fprintf(cc->out, "    ldr %s, [r3]\n", reg);
-    }
-}
-
-static void thumb_emit_store_stack(Compiler *cc, int offset, const char *reg) {
-    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
-        fprintf(cc->out, "    str %s, [r7, #%d]\n", reg, offset);
-    } else {
-        fprintf(cc->out, "    ldr r3, =%d\n", offset);
-        fprintf(cc->out, "    adds r3, r7, r3\n");
-        fprintf(cc->out, "    str %s, [r3]\n", reg);
-    }
-}
-
-static void thumb_emit_float_binop(Compiler *cc, int op) {
-    const char *fn = 0;
-    switch (op) {
-        case ND_FADD: fn = "__aeabi_fadd"; break;
-        case ND_FSUB: fn = "__aeabi_fsub"; break;
-        case ND_FMUL: fn = "__aeabi_fmul"; break;
-        case ND_FDIV: fn = "__aeabi_fdiv"; break;
-    }
-    if (fn) {
-        fprintf(cc->out, "    bl %s\n", fn);
-    }
-}
-
-TargetBackend backend_thumbv6m = {
-    4, /* ptr_size */
-    thumb_emit_prologue,
-    thumb_emit_epilogue,
-    thumb_emit_call,
-    thumb_emit_binary_op,
-    thumb_emit_load_stack,
-    thumb_emit_store_stack,
-    thumb_emit_float_binop
-};
-/*
- * regalloc.h — Linear Scan Register Allocator for ZCC IR Backend
- *
- * Fits ZCC's actual IR model: temporaries are string-named (%t0, %t1, …).
- * Only pure temporaries (prefix %t) are candidates; %stack_* vars stay on
- * the stack (they are addressable locals, not ssa temps).
- *
- * Allocatable caller-saved registers (System V x86-64):
- *   We deliberately EXCLUDE:
- *     %rax  — accumulator/return, clobbered on every emit step
- *     %rcx  — shift-count register (shlq/shrq use %cl implicitly)
- *     %rdx  — clobbered by idivq/divq
- *     %rdi,%rsi,%rdx,%rcx,%r8,%r9 — arg-passing; overwritten by IR_ARG
- *   We use only caller-saved regs that are free between instructions:
- *     %rbx, %r12, %r13, %r14, %r15  — callee-saved (need push/pop in prologue)
- *     %r10, %r11                     — caller-saved scratch (safe within fn)
- *
- * Strategy: pure linear scan over the singly-linked node list.
- *   Pass 0: number every node (position index).
- *   Pass 1: compute live intervals [first_def, last_use] per temp name.
- *   Pass 2: sort by start; linear-scan; assign phys reg or keep on stack.
- *
- * Temps that don't get a register keep their existing stack slot (no change
- * to offset logic — the allocator never removes stack slots, only supplements
- * with register assignments where beneficial).
- */
-
-#ifndef ZCC_REGALLOC_H
-#define ZCC_REGALLOC_H
-
-#include "ir.h"
-
-/* ── Physical registers ───────────────────────────────────────────────── */
-typedef enum {
-    PREG_NONE = -1,
-    /* callee-saved — we push/pop these in the function prologue/epilogue */
-    PREG_RBX  = 0,
-    PREG_R12  = 1,
-    PREG_R13  = 2,
-    PREG_R14  = 3,
-    PREG_R15  = 4,
-    /* caller-saved scratch — no push/pop needed */
-    PREG_R10  = 5,
-    PREG_R11  = 6,
-    PREG_COUNT = 7
-} PhysReg;
-
-/* Human-readable name for a PhysReg, e.g. "rbx" */
-const char *preg_name(PhysReg r);
-
-/* Non-zero if this PhysReg is callee-saved (requires push/pop) */
-int preg_callee_saved(PhysReg r);
-
-/* ── Live interval ────────────────────────────────────────────────────── */
-#define RA_NAME_MAX 64
-
-typedef struct LiveInterval {
-    char      name[RA_NAME_MAX]; /* %tN name of the temp              */
-    int       start;             /* node index of first definition    */
-    int       end;               /* node index of last use            */
-    PhysReg   assigned;          /* physical reg, or PREG_NONE        */
-} LiveInterval;
-
-/* ── Allocator state ──────────────────────────────────────────────────── */
-typedef struct RegAllocator {
-    LiveInterval *intervals;     /* sorted array of live intervals    */
-    int           num_intervals;
-    int           cap_intervals;
-
-    /* Which phys regs are used (for push/pop generation) */
-    int           used[PREG_COUNT];
-} RegAllocator;
-
-/* ── API ──────────────────────────────────────────────────────────────── */
-
-/* Create an empty allocator. */
-RegAllocator *ra_create(void);
-
-/* Release all memory. */
-void ra_free(RegAllocator *ra);
-
-/*
- * Run the full linear-scan pipeline over one IR function.
- * After this call, ra->intervals is populated and sorted by start.
- */
-void ra_run(RegAllocator *ra, const ir_func_t *fn);
-
-/*
- * Query: what physical register holds temp `name` at node position `pos`?
- * Returns PREG_NONE if the temp is spilled or unknown.
- * `pos` is the index of the *current* IR node in the linear scan.
- */
-PhysReg ra_get(const RegAllocator *ra, const char *name);
-
-/*
- * Non-zero if temp `name` needed at least one callee-saved register,
- * so the caller must emit pushq/popq for preg_callee_saved regs.
- */
-int ra_any_callee_saved_used(const RegAllocator *ra);
-
-#endif /* ZCC_REGALLOC_H */
-/*
- * regalloc.c — Linear Scan Register Allocator for ZCC IR Backend
- *
- * See regalloc.h for design rationale.
- *
- * The IR is a singly-linked list of ir_node_t with string-named fields:
- *   n->dst   — destination temp (e.g. "%t3", "%stack_-8", "")
- *   n->src1  — first source temp
- *   n->src2  — second source temp
- *
- * Only names with prefix "%t" (pure SSA temporaries) are candidates.
- * %stack_* names are addressable locals: leave them on the stack always.
- */
-
-#include "regalloc.h"
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-
-/* ── Physical register table ─────────────────────────────────────────── */
-
-static const char *preg_names[PREG_COUNT] = {
-    "rbx", "r12", "r13", "r14", "r15",  /* callee-saved */
-    "r10", "r11"                          /* caller-saved scratch */
-};
-
-const char *preg_name(PhysReg r) {
-    if (r < 0 || r >= PREG_COUNT) return "???";
-    return preg_names[r];
-}
-
-int preg_callee_saved(PhysReg r) {
-    return (r >= PREG_RBX && r <= PREG_R15);
-}
-
-/* ── Interval helpers ────────────────────────────────────────────────── */
-
-static int is_temp(const char *name) {
-    return (name && name[0] == '%' && name[1] == 't' &&
-            name[2] >= '0' && name[2] <= '9');
-}
-
-static LiveInterval *find_interval(RegAllocator *ra, const char *name) {
-    int i;
-    for (i = 0; i < ra->num_intervals; i++) {
-        if (strcmp(ra->intervals[i].name, name) == 0)
-            return &ra->intervals[i];
-    }
-    return NULL;
-}
-
-static LiveInterval *get_or_create(RegAllocator *ra, const char *name, int pos) {
-    LiveInterval *iv = find_interval(ra, name);
-    if (iv) return iv;
-
-    /* Grow if needed */
-    if (ra->num_intervals >= ra->cap_intervals) {
-        int newcap = ra->cap_intervals ? ra->cap_intervals * 2 : 64;
-        LiveInterval *nb = (LiveInterval *)realloc(ra->intervals,
-                                newcap * sizeof(LiveInterval));
-        if (!nb) { fprintf(stderr, "[regalloc] OOM\n"); exit(1); }
-        ra->intervals = nb;
-        ra->cap_intervals = newcap;
-    }
-
-    iv = &ra->intervals[ra->num_intervals++];
-    strncpy(iv->name, name, RA_NAME_MAX - 1);
-    iv->name[RA_NAME_MAX - 1] = '\0';
-    iv->start    = pos;
-    iv->end      = pos;
-    iv->assigned = PREG_NONE;
-    return iv;
-}
-
-/* ── Allocator lifecycle ─────────────────────────────────────────────── */
-
-RegAllocator *ra_create(void) {
-    RegAllocator *ra = (RegAllocator *)calloc(1, sizeof(RegAllocator));
-    if (!ra) { fprintf(stderr, "[regalloc] OOM\n"); exit(1); }
-    return ra;
-}
-
-void ra_free(RegAllocator *ra) {
-    if (!ra) return;
-    free(ra->intervals);
-    free(ra);
-}
-
-/* ── Sort helper for qsort ───────────────────────────────────────────── */
-
-static int iv_cmp_start(const void *a, const void *b) {
-    const LiveInterval *ia = (const LiveInterval *)a;
-    const LiveInterval *ib = (const LiveInterval *)b;
-    return ia->start - ib->start;
-}
-
-/* ── Phase 1: Build live intervals ──────────────────────────────────── */
-
-static void build_intervals(RegAllocator *ra, const ir_func_t *fn) {
-    const ir_node_t *n;
-    int pos = 0;
-
-    for (n = fn->head; n; n = n->next, pos++) {
-        /* Process destination (definition) */
-        if (is_temp(n->dst)) {
-            LiveInterval *iv = get_or_create(ra, n->dst, pos);
-            /* definitions extend end too (covers single-use temps) */
-            if (pos > iv->end) iv->end = pos;
-        }
-        /* Process source operands (uses) */
-        if (is_temp(n->src1)) {
-            LiveInterval *iv = get_or_create(ra, n->src1, pos);
-            if (pos > iv->end) iv->end = pos;
-        }
-        if (is_temp(n->src2)) {
-            LiveInterval *iv = get_or_create(ra, n->src2, pos);
-            if (pos > iv->end) iv->end = pos;
-        }
-    }
-
-    /* Sort by start for the scan */
-    qsort(ra->intervals, ra->num_intervals, sizeof(LiveInterval), iv_cmp_start);
-}
-
-/* ── Phase 2: Linear scan allocation ────────────────────────────────── */
-
-/*
- * Classic Poletto & Sarkar linear scan.
- * Active = set of intervals currently occupying a physical register.
- * We maintain active[] sorted by end point (earliest-ending first) so
- * expiry and spill decisions are O(k) where k = PREG_COUNT (small constant).
- */
-
-static void linear_scan(RegAllocator *ra) {
-    /* active[i] = index into ra->intervals of an allocated interval */
-    int active[PREG_COUNT];
-    int active_reg[PREG_COUNT]; /* physical register used by active[i] */
-    int active_cnt = 0;
-
-    /* Free-register stack */
-    PhysReg free_regs[PREG_COUNT];
-    int free_cnt = 0;
-    int r;
-    for (r = 0; r < PREG_COUNT; r++)
-        free_regs[free_cnt++] = (PhysReg)(PREG_COUNT - 1 - r); /* push in reverse so rbx is tried first */
-
-    int i;
-    for (i = 0; i < ra->num_intervals; i++) {
-        LiveInterval *cur = &ra->intervals[i];
-
-        /* --- Expire old intervals --- */
-        int j = 0;
-        while (j < active_cnt) {
-            LiveInterval *act = &ra->intervals[active[j]];
-            if (act->end < cur->start) {
-                /* Return this register to the free pool */
-                free_regs[free_cnt++] = (PhysReg)active_reg[j];
-                /* Compact active[] */
-                active[j]     = active[active_cnt - 1];
-                active_reg[j] = active_reg[active_cnt - 1];
-                active_cnt--;
-                /* Don't advance j — need to recheck this slot */
-            } else {
-                j++;
-            }
-        }
-
-        /* --- Allocate or spill --- */
-        if (free_cnt > 0) {
-            /* Grab a free register */
-            PhysReg preg = free_regs[--free_cnt];
-            cur->assigned = preg;
-            ra->used[preg] = 1;
-
-            /* Add to active */
-            active[active_cnt]     = i;
-            active_reg[active_cnt] = (int)preg;
-            active_cnt++;
-        } else {
-            /*
-             * No free register. Spill the interval that ends latest
-             * (keep the one ending soonest in a register — it frees up
-             * sooner and benefits more instructions).
-             */
-            int spill_idx = -1;
-            int spill_ai  = -1;
-            int latest_end = cur->end;
-
-            for (j = 0; j < active_cnt; j++) {
-                LiveInterval *act = &ra->intervals[active[j]];
-                if (act->end > latest_end) {
-                    latest_end = act->end;
-                    spill_idx  = active[j];
-                    spill_ai   = j;
-                }
-            }
-
-            if (spill_idx >= 0) {
-                /* The active interval ending latest gives its register to cur */
-                PhysReg stolen = (PhysReg)active_reg[spill_ai];
-                ra->intervals[spill_idx].assigned = PREG_NONE; /* spill it */
-                cur->assigned = stolen;
-
-                active[spill_ai]     = i;
-                active_reg[spill_ai] = (int)stolen;
-            }
-            /* else cur->assigned stays PREG_NONE (spilled) */
-        }
-    }
-}
-
-/* ── Public entry point ──────────────────────────────────────────────── */
-
-void ra_run(RegAllocator *ra, const ir_func_t *fn) {
-    build_intervals(ra, fn);
-    if (ra->num_intervals > 0)
-        linear_scan(ra);
-}
-
-/* ── Query API ───────────────────────────────────────────────────────── */
-
-PhysReg ra_get(const RegAllocator *ra, const char *name) {
-    int i;
-    if (!is_temp(name)) return PREG_NONE;
-    for (i = 0; i < ra->num_intervals; i++) {
-        if (strcmp(ra->intervals[i].name, name) == 0)
-            return ra->intervals[i].assigned;
-    }
-    return PREG_NONE;
-}
-
-int ra_any_callee_saved_used(const RegAllocator *ra) {
-    int r;
-    for (r = 0; r < PREG_COUNT; r++) {
-        if (ra->used[r] && preg_callee_saved((PhysReg)r))
-            return 1;
-    }
-    return 0;
 }
 /*
  * ir_to_x86.c — ZCC IR-to-x86_64 Lowering Backend
@@ -11992,41 +11812,6 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
         ra_free(ra);
     }
 }
-/*
- * ir_telemetry_stub.c — No-op stubs for self-host build.
- *
- * The real ir_telemetry.c uses POSIX socket headers (<sys/socket.h>,
- * <netinet/in.h>) which ZCC cannot parse during self-hosting.
- * These stubs satisfy the link requirements of ir_pass_manager.c
- * without any POSIX dependency.
- *
- * The real ir_telemetry.c is compiled separately by GCC and linked
- * into the production compiler_passes_ir.c path only.
- */
-#include "ir_telemetry.h"
-
-void ir_telem_init(void) {}
-
-void ir_telem_pass(const char *pass_name,
-                   int func_count,
-                   int nodes_before,
-                   int nodes_after,
-                   int nodes_deleted,
-                   int nodes_modified) {
-    (void)pass_name; (void)func_count; (void)nodes_before;
-    (void)nodes_after; (void)nodes_deleted; (void)nodes_modified;
-}
-
-void ir_telem_summary(int total_funcs,
-                      int total_nodes_before,
-                      int total_nodes_after,
-                      int pass_count,
-                      const char **pass_names) {
-    (void)total_funcs; (void)total_nodes_before; (void)total_nodes_after;
-    (void)pass_count; (void)pass_names;
-}
-
-void ir_telem_shutdown(void) {}
 /*
  * ir_pass_manager.c — ZCC IR Pass Manager Implementation
  * ========================================================
@@ -12514,3 +12299,277 @@ void ir_pm_run_default(void *mod_ptr, int verbose) {
 
     ir_telem_shutdown();
 }
+/*
+ * regalloc.c — Linear Scan Register Allocator for ZCC IR Backend
+ *
+ * See regalloc.h for design rationale.
+ *
+ * The IR is a singly-linked list of ir_node_t with string-named fields:
+ *   n->dst   — destination temp (e.g. "%t3", "%stack_-8", "")
+ *   n->src1  — first source temp
+ *   n->src2  — second source temp
+ *
+ * Only names with prefix "%t" (pure SSA temporaries) are candidates.
+ * %stack_* names are addressable locals: leave them on the stack always.
+ */
+
+#include "regalloc.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+/* ── Physical register table ─────────────────────────────────────────── */
+
+static const char *preg_names[PREG_COUNT] = {
+    "rbx", "r12", "r13", "r14", "r15",  /* callee-saved */
+    "r10", "r11"                          /* caller-saved scratch */
+};
+
+const char *preg_name(PhysReg r) {
+    if (r < 0 || r >= PREG_COUNT) return "???";
+    return preg_names[r];
+}
+
+int preg_callee_saved(PhysReg r) {
+    return (r >= PREG_RBX && r <= PREG_R15);
+}
+
+/* ── Interval helpers ────────────────────────────────────────────────── */
+
+static int is_temp(const char *name) {
+    return (name && name[0] == '%' && name[1] == 't' &&
+            name[2] >= '0' && name[2] <= '9');
+}
+
+static LiveInterval *find_interval(RegAllocator *ra, const char *name) {
+    int i;
+    for (i = 0; i < ra->num_intervals; i++) {
+        if (strcmp(ra->intervals[i].name, name) == 0)
+            return &ra->intervals[i];
+    }
+    return NULL;
+}
+
+static LiveInterval *get_or_create(RegAllocator *ra, const char *name, int pos) {
+    LiveInterval *iv = find_interval(ra, name);
+    if (iv) return iv;
+
+    /* Grow if needed */
+    if (ra->num_intervals >= ra->cap_intervals) {
+        int newcap = ra->cap_intervals ? ra->cap_intervals * 2 : 64;
+        LiveInterval *nb = (LiveInterval *)realloc(ra->intervals,
+                                newcap * sizeof(LiveInterval));
+        if (!nb) { fprintf(stderr, "[regalloc] OOM\n"); exit(1); }
+        ra->intervals = nb;
+        ra->cap_intervals = newcap;
+    }
+
+    iv = &ra->intervals[ra->num_intervals++];
+    strncpy(iv->name, name, RA_NAME_MAX - 1);
+    iv->name[RA_NAME_MAX - 1] = '\0';
+    iv->start    = pos;
+    iv->end      = pos;
+    iv->assigned = PREG_NONE;
+    return iv;
+}
+
+/* ── Allocator lifecycle ─────────────────────────────────────────────── */
+
+RegAllocator *ra_create(void) {
+    RegAllocator *ra = (RegAllocator *)calloc(1, sizeof(RegAllocator));
+    if (!ra) { fprintf(stderr, "[regalloc] OOM\n"); exit(1); }
+    return ra;
+}
+
+void ra_free(RegAllocator *ra) {
+    if (!ra) return;
+    free(ra->intervals);
+    free(ra);
+}
+
+/* ── Sort helper for qsort ───────────────────────────────────────────── */
+
+static int iv_cmp_start(const void *a, const void *b) {
+    const LiveInterval *ia = (const LiveInterval *)a;
+    const LiveInterval *ib = (const LiveInterval *)b;
+    return ia->start - ib->start;
+}
+
+/* ── Phase 1: Build live intervals ──────────────────────────────────── */
+
+static void build_intervals(RegAllocator *ra, const ir_func_t *fn) {
+    const ir_node_t *n;
+    int pos = 0;
+
+    for (n = fn->head; n; n = n->next, pos++) {
+        /* Process destination (definition) */
+        if (is_temp(n->dst)) {
+            LiveInterval *iv = get_or_create(ra, n->dst, pos);
+            /* definitions extend end too (covers single-use temps) */
+            if (pos > iv->end) iv->end = pos;
+        }
+        /* Process source operands (uses) */
+        if (is_temp(n->src1)) {
+            LiveInterval *iv = get_or_create(ra, n->src1, pos);
+            if (pos > iv->end) iv->end = pos;
+        }
+        if (is_temp(n->src2)) {
+            LiveInterval *iv = get_or_create(ra, n->src2, pos);
+            if (pos > iv->end) iv->end = pos;
+        }
+    }
+
+    /* Sort by start for the scan */
+    qsort(ra->intervals, ra->num_intervals, sizeof(LiveInterval), iv_cmp_start);
+}
+
+/* ── Phase 2: Linear scan allocation ────────────────────────────────── */
+
+/*
+ * Classic Poletto & Sarkar linear scan.
+ * Active = set of intervals currently occupying a physical register.
+ * We maintain active[] sorted by end point (earliest-ending first) so
+ * expiry and spill decisions are O(k) where k = PREG_COUNT (small constant).
+ */
+
+static void linear_scan(RegAllocator *ra) {
+    /* active[i] = index into ra->intervals of an allocated interval */
+    int active[PREG_COUNT];
+    int active_reg[PREG_COUNT]; /* physical register used by active[i] */
+    int active_cnt = 0;
+
+    /* Free-register stack */
+    PhysReg free_regs[PREG_COUNT];
+    int free_cnt = 0;
+    int r;
+    for (r = 0; r < PREG_COUNT; r++)
+        free_regs[free_cnt++] = (PhysReg)(PREG_COUNT - 1 - r); /* push in reverse so rbx is tried first */
+
+    int i;
+    for (i = 0; i < ra->num_intervals; i++) {
+        LiveInterval *cur = &ra->intervals[i];
+
+        /* --- Expire old intervals --- */
+        int j = 0;
+        while (j < active_cnt) {
+            LiveInterval *act = &ra->intervals[active[j]];
+            if (act->end < cur->start) {
+                /* Return this register to the free pool */
+                free_regs[free_cnt++] = (PhysReg)active_reg[j];
+                /* Compact active[] */
+                active[j]     = active[active_cnt - 1];
+                active_reg[j] = active_reg[active_cnt - 1];
+                active_cnt--;
+                /* Don't advance j — need to recheck this slot */
+            } else {
+                j++;
+            }
+        }
+
+        /* --- Allocate or spill --- */
+        if (free_cnt > 0) {
+            /* Grab a free register */
+            PhysReg preg = free_regs[--free_cnt];
+            cur->assigned = preg;
+            ra->used[preg] = 1;
+
+            /* Add to active */
+            active[active_cnt]     = i;
+            active_reg[active_cnt] = (int)preg;
+            active_cnt++;
+        } else {
+            /*
+             * No free register. Spill the interval that ends latest
+             * (keep the one ending soonest in a register — it frees up
+             * sooner and benefits more instructions).
+             */
+            int spill_idx = -1;
+            int spill_ai  = -1;
+            int latest_end = cur->end;
+
+            for (j = 0; j < active_cnt; j++) {
+                LiveInterval *act = &ra->intervals[active[j]];
+                if (act->end > latest_end) {
+                    latest_end = act->end;
+                    spill_idx  = active[j];
+                    spill_ai   = j;
+                }
+            }
+
+            if (spill_idx >= 0) {
+                /* The active interval ending latest gives its register to cur */
+                PhysReg stolen = (PhysReg)active_reg[spill_ai];
+                ra->intervals[spill_idx].assigned = PREG_NONE; /* spill it */
+                cur->assigned = stolen;
+
+                active[spill_ai]     = i;
+                active_reg[spill_ai] = (int)stolen;
+            }
+            /* else cur->assigned stays PREG_NONE (spilled) */
+        }
+    }
+}
+
+/* ── Public entry point ──────────────────────────────────────────────── */
+
+void ra_run(RegAllocator *ra, const ir_func_t *fn) {
+    build_intervals(ra, fn);
+    if (ra->num_intervals > 0)
+        linear_scan(ra);
+}
+
+/* ── Query API ───────────────────────────────────────────────────────── */
+
+PhysReg ra_get(const RegAllocator *ra, const char *name) {
+    int i;
+    if (!is_temp(name)) return PREG_NONE;
+    for (i = 0; i < ra->num_intervals; i++) {
+        if (strcmp(ra->intervals[i].name, name) == 0)
+            return ra->intervals[i].assigned;
+    }
+    return PREG_NONE;
+}
+
+int ra_any_callee_saved_used(const RegAllocator *ra) {
+    int r;
+    for (r = 0; r < PREG_COUNT; r++) {
+        if (ra->used[r] && preg_callee_saved((PhysReg)r))
+            return 1;
+    }
+    return 0;
+}
+/*
+ * ir_telemetry_stub.c — No-op stubs for self-host build.
+ *
+ * The real ir_telemetry.c uses POSIX socket headers (<sys/socket.h>,
+ * <netinet/in.h>) which ZCC cannot parse during self-hosting.
+ * These stubs satisfy the link requirements of ir_pass_manager.c
+ * without any POSIX dependency.
+ *
+ * The real ir_telemetry.c is compiled separately by GCC and linked
+ * into the production compiler_passes_ir.c path only.
+ */
+#include "ir_telemetry.h"
+
+void ir_telem_init(void) {}
+
+void ir_telem_pass(const char *pass_name,
+                   int func_count,
+                   int nodes_before,
+                   int nodes_after,
+                   int nodes_deleted,
+                   int nodes_modified) {
+    (void)pass_name; (void)func_count; (void)nodes_before;
+    (void)nodes_after; (void)nodes_deleted; (void)nodes_modified;
+}
+
+void ir_telem_summary(int total_funcs,
+                      int total_nodes_before,
+                      int total_nodes_after,
+                      int pass_count,
+                      const char **pass_names) {
+    (void)total_funcs; (void)total_nodes_before; (void)total_nodes_after;
+    (void)pass_count; (void)pass_names;
+}
+
+void ir_telem_shutdown(void) {}

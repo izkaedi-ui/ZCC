@@ -21,10 +21,3 @@ int remove(const char*);
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
-
-/* character I/O */
-int fgetc(FILE *stream);
-int ungetc(int c, FILE *stream);
-int feof(FILE *stream);
-int ferror(FILE *stream);
-int getc(FILE *stream);

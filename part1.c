@@ -90,6 +90,7 @@ enum {
     ND_LAND, ND_LOR, ND_LNOT,
     ND_BAND, ND_BOR, ND_BXOR, ND_BNOT,
     ND_SHL, ND_SHR,
+    ND_FADD, ND_FSUB, ND_FMUL, ND_FDIV,
     ND_NEG, ND_ADDR, ND_DEREF,
     ND_CALL, ND_RETURN, ND_BLOCK,
     ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
@@ -145,6 +146,8 @@ struct StructField {
     char name[MAX_IDENT];
     Type *type;
     int offset;
+    int bitfield_width;
+    int bitfield_offset;
     StructField *next;
 };
 
@@ -238,8 +241,8 @@ struct Node {
     /* ND_FUNC_DEF */
     char func_def_name[MAX_IDENT];
     Type *func_type;
-    char param_names_buf[MAX_PARAMS][MAX_IDENT];
-    Type *param_types[MAX_PARAMS];
+    char (*param_names_buf)[MAX_IDENT];
+    Type **param_types;
     int num_params;
     Node *body;
     int stack_size;
@@ -473,6 +476,21 @@ struct Compiler {
 
     int current_is_static;
 };
+
+typedef struct TargetBackend {
+    int ptr_size;
+    void (*emit_prologue)(Compiler *cc, Node *func);
+    void (*emit_epilogue)(Compiler *cc, Node *func);
+    void (*emit_call)(Compiler *cc, Node *func);
+    void (*emit_binary_op)(Compiler *cc, int op);
+    void (*emit_load_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_store_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_float_binop)(Compiler *cc, int op);
+} TargetBackend;
+
+extern TargetBackend *backend_ops;
+extern int ZCC_POINTER_WIDTH;
+extern int ZCC_INT_WIDTH;
 
 /* ================================================================ */
 /* FORWARD DECLARATIONS                                              */

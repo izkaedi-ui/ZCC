@@ -652,5 +652,65 @@
     "regression_test": "ternary operator tests parse into correct bne/beq instructions",
     "target": "thumbv6m-none-eabi",
     "milestone": "ARM-M4"
+  },
+  {
+    "id": "BUG-015",
+    "title": "parse_decl missing ensure_type for float initializers",
+    "file": "part3.c",
+    "symptom": "float x = 3.14f produces 0.0 at runtime",
+    "root_cause": "Local variable declarations with single initializers bypassed ensure_type(). ND_FLIT (ty_double) assigned directly into float slot without ND_CAST, destroying mantissa across 8->4 byte boundary.",
+    "fix": "Wrapped scalar initializers in parse_decl with ensure_type(cc, expr, vtype) to force ND_CAST insertion (cvtsd2ss)",
+    "discovered_via": "float_test.c \u2014 sum/prod evaluating to 0.000000",
+    "date": "2026-04-12",
+    "severity": "critical",
+    "category": "parser"
+  },
+  {
+    "id": "BUG-016",
+    "title": "Float binary ops hardcoded sd suffix ignoring single-precision",
+    "file": "part4.c",
+    "symptom": "Float arithmetic produces wrong results even with correct types",
+    "root_cause": "ND_ADD/SUB/MUL/DIV float intercepts hardcoded \"sd\" (double) instructions regardless of node->type->size. Single-precision (4-byte) floats read 8 bytes from xmm registers.",
+    "fix": "Dynamic width binding: char *sz = (node->type->size == 4) ? \"ss\" : \"sd\" applied to cvtsi2, add, sub, mul, div instructions",
+    "discovered_via": "float_test.c \u2014 arithmetic on float variables",
+    "date": "2026-04-12",
+    "severity": "critical",
+    "category": "codegen"
+  },
+  {
+    "id": "BUG-017",
+    "title": "Missing C default argument promotion for variadic float args",
+    "file": "part3.c",
+    "symptom": "printf(\"%f\", float_var) prints 0.000000 or garbage",
+    "root_cause": "C standard requires float->double promotion for variadic arguments. ZCC passed raw 4-byte ss values in xmm0; callee read 8 bytes (sd), getting corrupted exponent.",
+    "fix": "In parse_call(), after consuming named params, insert ND_CAST to ty_double for TY_FLOAT args and ND_CAST to ty_int for char/short args in variadic positions",
+    "discovered_via": "float_test.c \u2014 printf with float variables without explicit (double) cast",
+    "date": "2026-04-12",
+    "severity": "critical",
+    "category": "parser/ABI"
+  },
+  {
+    "id": "BUG-018",
+    "title": "cond_else_seen state leak across #endif boundaries",
+    "file": "part0_pp.c",
+    "symptom": "#elif chains silently fail — second #if block inherits stale cond_else_seen from previous block at same depth",
+    "root_cause": "#endif handler decremented cond_depth without zeroing cond_else_seen[] and cond_satisfied[] at the popped depth. When a new #if pushed depth back to the same level, it inherited stale state. #elif saw cond_else_seen==1 and treated it as invalid '#elif after #else'.",
+    "fix": "Zero cond_satisfied[depth] and cond_else_seen[depth] in #endif handler before decrementing. Also zero cond_else_seen on #if/#ifdef depth push.",
+    "discovered_via": "pp_test.c test11 — #elif MODE == 2 producing test11_val=0 instead of 2",
+    "date": "2026-04-12",
+    "severity": "critical",
+    "category": "preprocessor"
+  },
+  {
+    "id": "BUG-019",
+    "title": "#if expression evaluator lacks parenthesized sub-expressions and short-circuit &&",
+    "file": "part0_pp.c",
+    "symptom": "#if !defined(X) && (defined(A) || defined(B)) evaluates to true even when X is defined",
+    "root_cause": "pp_eval_expr was a flat heuristic string matcher — no operator precedence, no parenthesis recursion, no short-circuit evaluation. !defined(X) returning false did not prevent (defined(A) || defined(B)) from being evaluated.",
+    "fix": "Replaced with full recursive descent parser: pp_eval_or > pp_eval_and > pp_eval_compare > pp_eval_unary > pp_eval_primary. Handles parentheses, defined(), integer literals, comparisons (==, !=, >=, <=, >, <), and treats unknown identifiers as 0 per C standard.",
+    "discovered_via": "stb_image.h — #if !defined(STBI_NO_SIMD) && (defined(STBI__X86_TARGET) || defined(STBI__X64_TARGET)) leaking SSE2/asm code through guards",
+    "date": "2026-04-12",
+    "severity": "critical",
+    "category": "preprocessor"
   }
 ]
