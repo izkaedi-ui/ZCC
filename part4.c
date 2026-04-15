@@ -2,7 +2,6 @@
 /* CODE GENERATOR — x86-64 Linux (System V) or Windows x64 ABI      */
 /* ================================================================ */
 
-#include "part1.c"
 #include "ir_emit_dispatch.h"
 #include "ir_bridge.h"
 
@@ -552,6 +551,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     /* Satisfy IR subsystem sequence */
     {
       char *dst = ir_bridge_fresh_tmp();
+      long flit_bits;
+      memcpy(&flit_bits, &node->f_val, 8);
+      ZCC_EMIT_FCONST(dst, flit_bits, node->line);
     }
     return;
   }
@@ -978,6 +980,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+    }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
     }
     return;
 
@@ -1680,28 +1686,41 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
   }
 
-  case ND_LAND:
+  case ND_LAND: {
+    char land_lhs_ir[32];
+    char land_lbl[32];
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
+    ir_save_result(land_lhs_ir);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
     else emit_label_fmt(cc, lbl1, FMT_JE);
+    sprintf(land_lbl, ".L%d", lbl1);
+    ZCC_EMIT_BR_IF(land_lhs_ir, land_lbl, node->line);
     codegen_expr_checked(cc, node->rhs);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    setne %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(land_lbl, node->line);
     return;
+  }
 
-  case ND_LOR:
+  case ND_LOR: {
+    char lor_lhs_ir[32];
+    char lor_lbl1[32];
+    char lor_lbl2[32];
     lbl1 = new_label(cc);
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
+    ir_save_result(lor_lhs_ir);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
+    sprintf(lor_lbl1, ".L%d", lbl1);
+    sprintf(lor_lbl2, ".L%d", lbl2);
     codegen_expr_checked(cc, node->rhs);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
@@ -1709,10 +1728,14 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    movq $0, %%rax\n");
     if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
     else emit_label_fmt(cc, lbl2, FMT_JMP);
+    ZCC_EMIT_BR(lor_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(lor_lbl1, node->line);
     fprintf(cc->out, "    movq $1, %%rax\n");
     fprintf(cc->out, ".L%d:\n", lbl2);
+    ZCC_EMIT_LABEL(lor_lbl2, node->line);
     return;
+  }
 
   case ND_VA_ARG: {
     int lbl_overflow;
@@ -1780,6 +1803,12 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
     codegen_addr_checked(cc, node->lhs);
+    {
+      char addr_src[32];
+      ir_save_result(addr_src);
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_ADDR, IR_TY_PTR, dst, addr_src, node->line);
+    }
     return;
 
   case ND_DEREF:
@@ -1789,34 +1818,50 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
     codegen_expr_checked(cc, node->lhs);
-    /* Type-aware load: char* -> movsbl, int* -> movl, ptr/long* -> movq */
-    if (node->type && node->type->kind == TY_FUNC) {
-        /* Do nothing: function pointer decays natively */
-    } else {
-        codegen_load(cc, node->type);
+    {
+      char deref_addr[32];
+      ir_save_result(deref_addr);
+      /* Type-aware load: char* -> movsbl, int* -> movl, ptr/long* -> movq */
+      if (node->type && node->type->kind == TY_FUNC) {
+          /* Do nothing: function pointer decays natively */
+      } else {
+          codegen_load(cc, node->type);
+      }
+      {
+        char *dst = ir_bridge_fresh_tmp();
+        ZCC_EMIT_LOAD(ir_map_type(node->type), dst, deref_addr, node->line);
+      }
     }
     return;
 
   case ND_MEMBER:
     codegen_addr_checked(cc, node);
-    if (node->type) {
-      codegen_load(cc, node->type);
-    } else {
-      switch (node->member_size) {
-      case 1:
-        fprintf(cc->out, "    movzbl (%%rax), %%eax\n");
-        break;
-      case 2:
-        fprintf(cc->out, "    movzwl (%%rax), %%eax\n");
-        break;
-      case 4:
-        fprintf(cc->out, "    movl (%%rax), %%eax\n");
-        break;
-      case 8:
-        fprintf(cc->out, "    movq (%%rax), %%rax\n");
-        break;
-      default:
-        break;
+    {
+      char member_addr[32];
+      ir_save_result(member_addr);
+      if (node->type) {
+        codegen_load(cc, node->type);
+      } else {
+        switch (node->member_size) {
+        case 1:
+          fprintf(cc->out, "    movzbl (%%rax), %%eax\n");
+          break;
+        case 2:
+          fprintf(cc->out, "    movzwl (%%rax), %%eax\n");
+          break;
+        case 4:
+          fprintf(cc->out, "    movl (%%rax), %%eax\n");
+          break;
+        case 8:
+          fprintf(cc->out, "    movq (%%rax), %%rax\n");
+          break;
+        default:
+          break;
+        }
+      }
+      {
+        char *dst = ir_bridge_fresh_tmp();
+        ZCC_EMIT_LOAD(ir_map_type(node->type), dst, member_addr, node->line);
       }
     }
     return;
@@ -1900,7 +1945,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
   }
 
-  case ND_TERNARY:
+  case ND_TERNARY: {
+    char ternary_cond_ir[32];
+    char ternary_lbl1[32];
+    char ternary_lbl2[32];
     if (!node->cond || !node->then_body || !node->else_body) {
       error_at(cc, node->line,
                "codegen_expr: ND_TERNARY missing cond/then/else");
@@ -1910,17 +1958,25 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl1 = new_label(cc);
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->cond);
+    ir_save_result(ternary_cond_ir);
     if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
     ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
     else emit_label_fmt(cc, lbl1, FMT_JE);
+    sprintf(ternary_lbl1, ".L%d", lbl1);
+    ZCC_EMIT_BR_IF(ternary_cond_ir, ternary_lbl1, node->line);
     codegen_expr_checked(cc, node->then_body);
     if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
     else emit_label_fmt(cc, lbl2, FMT_JMP);
+    sprintf(ternary_lbl2, ".L%d", lbl2);
+    ZCC_EMIT_BR(ternary_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(ternary_lbl1, node->line);
     codegen_expr_checked(cc, node->else_body);
     fprintf(cc->out, ".L%d:\n", lbl2);
+    ZCC_EMIT_LABEL(ternary_lbl2, node->line);
     return;
+  }
 
   case ND_COMMA_EXPR:
     codegen_expr_checked(cc, node->lhs);
@@ -2005,6 +2061,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_inc", node->line);
+    }
     return;
 
   case ND_PRE_DEC:
@@ -2085,6 +2145,10 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_dec", node->line);
+    }
     return;
 
   case ND_POST_INC:
@@ -2148,6 +2212,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_inc", node->line);
+    }
     return;
 
   case ND_POST_DEC:
@@ -2211,6 +2279,10 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
       else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_dec", node->line);
+    }
     return;
 
   case ND_CALL: {
@@ -2290,6 +2362,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       ir_save_result(&args_ir_1d[i * 32]);
+      ZCC_EMIT_ARG(ir_map_type(node->args[i] ? node->args[i]->type : 0), &args_ir_1d[i * 32], node->line);
       push_reg(cc, "rax");
     }
 
@@ -2748,6 +2821,12 @@ void codegen_stmt(Compiler *cc, Node *node) {
   }
 
   case ND_NOP:
+    return;
+
+  case ND_ASM:
+    fprintf(cc->out, "    %s\n", node->asm_string);
+    ZCC_EMIT_ASM(node->asm_string, node->line);
+    /* Note: IR backend handles this via ZCC_ND_ASM -> OP_ASM translation if enabled */
     return;
 
   default: {

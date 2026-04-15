@@ -108,6 +108,7 @@ typedef enum {
   OP_UNDEF,
   OP_PGO_COUNTER_ADDR, /* PGO instrumentation: dst = &__zcc_edge_counts[imm] */
   OP_GLOBAL,           /* load address of global symbol: lea name(%rip), %reg */
+  OP_ASM,              /* inline assembly string */
 } Opcode;
 
 static const char *opcode_name[] __attribute__((unused)) = {"nop",
@@ -141,7 +142,8 @@ static const char *opcode_name[] __attribute__((unused)) = {"nop",
                                                             "copy",
                                                             "undef",
                                                             "pgo_counter_addr",
-                                                            "global"};
+                                                            "global",
+                                                            "asm"};
 
 typedef struct {
   RegID reg;     /* source register                    */
@@ -175,6 +177,8 @@ typedef struct Instr {
   IRType ir_type;   /* CG-IR-015: value type for width-sensitive lowering     */
                     /* (0 = IR_TY_I64 default; set for OP_DIV/MOD/SHR/SHL)   */
   int lscan_seq;    /* Liveness sequence ID injected by ir_asm_number_and_liveness */
+
+  char *asm_string;
 
   struct Instr *next;
   struct Instr *prev;
@@ -2790,6 +2794,7 @@ extern int node_compound_op(struct Node *n);
 extern struct Node **node_stmts(struct Node *n);
 extern int node_num_stmts(struct Node *n);
 extern const char *node_func_name(struct Node *n);
+extern const char *node_asm_string(struct Node *n);
 extern struct Node *node_arg(struct Node *n, int i);
 extern int node_num_args(struct Node *n);
 extern int node_ptr_elem_size(struct Node *n);
@@ -2898,6 +2903,8 @@ static int nd_to_znd(int nd_kind) {
     return ZND_MEMBER;
   case ZCC_ND_SWITCH:
     return ZND_SWITCH;
+  case ZCC_ND_ASM:
+    return ZND_ASM;
   default:
     return -1;
   }
@@ -3211,6 +3218,9 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n) {
   }
   break;
   case ZND_NOP:
+    break;
+  case ZND_ASM:
+    z->asm_string = (char *)node_asm_string(n);
     break;
   case ZND_SWITCH: {
     int num = node_num_cases(n);
@@ -4271,6 +4281,15 @@ static void zcc_lower_stmt(LowerCtx *ctx, ZCCNode *node) {
   switch (node->kind) {
   case ZND_NOP:
     return;
+  case ZND_ASM: {
+    Instr *ins = calloc(1, sizeof(Instr));
+    ins->id = ctx->next_instr_id++;
+    ins->op = OP_ASM;
+    ins->asm_string = node->asm_string;
+    ins->ir_type = IR_TY_I64;
+    emit_instr(ctx, ins);
+    return;
+  }
   case ZND_ASSIGN: {
     if (!node->lhs)
       return;
@@ -6089,6 +6108,10 @@ static void ir_asm_lower_insn(IRAsmCtx *ctx, const Instr *ins,
   Function *fn = ctx->fn;
   (void)cur_block;
   switch (ins->op) {
+  case OP_ASM: {
+    fprintf(f, "    %s\n", ins->asm_string ? ins->asm_string : "");
+    break;
+  }
   case OP_PGO_COUNTER_ADDR: {
     int gbid = ctx->global_block_offset + (int)(uint32_t)ins->imm;
     fprintf(f, "    leaq __zcc_edge_counts(%%rip), %%rax\n");

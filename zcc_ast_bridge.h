@@ -62,6 +62,7 @@
 #define ZCC_ND_TERNARY 51
 #define ZCC_ND_COMPOUND_ASSIGN 55
 #define ZCC_ND_NOP     57
+#define ZCC_ND_ASM     58
 
 /* Opaque ZCC AST node; layout defined in zcc.c */
 struct Node;
@@ -120,7 +121,8 @@ enum {
     ZND_BOR, ZND_BXOR, ZND_BNOT,
     ZND_TERNARY,  /* cond ? then_expr : else_expr */
     ZND_SIZEOF,   /* sizeof(type) or sizeof expr — resolved size in int_val */
-    ZND_POST_DEC, ZND_PRE_INC, ZND_PRE_DEC  /* --x, ++x, x-- */
+    ZND_POST_DEC, ZND_PRE_INC, ZND_PRE_DEC,  /* --x, ++x, x-- */
+    ZND_ASM = 58
 };
 
 typedef struct ZCCNode ZCCNode;
@@ -157,6 +159,7 @@ struct ZCCNode {
     int       is_array;     /* 1 if variable has TY_ARRAY type */
     int       is_func;      /* 1 if variable has TY_FUNC type */
     int       line_no;     /* source line for DWARF (from node_line_no) */
+    char     *asm_string;
 };
 
 /* Copy: deep-copy Node* tree into ZCCNode* (only supported kinds). Implemented in compiler_passes.c. */

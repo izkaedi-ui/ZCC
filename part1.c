@@ -54,7 +54,7 @@ enum {
     /* type-related */
     TK_STRUCT, TK_UNION, TK_ENUM, TK_TYPEDEF,
     TK_SIZEOF, TK_STATIC, TK_EXTERN, TK_CONST,
-    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE,
+    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE, TK_ASM,
     TK_BUILTIN_VA_ARG,
     /* operators */
     TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
@@ -90,6 +90,7 @@ enum {
     ND_LAND, ND_LOR, ND_LNOT,
     ND_BAND, ND_BOR, ND_BXOR, ND_BNOT,
     ND_SHL, ND_SHR,
+    ND_FADD, ND_FSUB, ND_FMUL, ND_FDIV,
     ND_NEG, ND_ADDR, ND_DEREF,
     ND_CALL, ND_RETURN, ND_BLOCK,
     ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
@@ -103,6 +104,7 @@ enum {
     ND_FUNC_DEF, ND_GLOBAL_VAR,
     ND_COMPOUND_ASSIGN,
     ND_INIT_LIST,
+    ND_ASM,
     ND_NOP
 };
 
@@ -272,6 +274,9 @@ struct Node {
     int is_extern;
     Node *initializer;
 
+    /* ND_ASM */
+    char *asm_string;
+
     /* linked list for top-level */
     Node *next;
 };
@@ -296,6 +301,7 @@ struct Node {
 
 /* Bridge accessors: Node* → IR bridge (Option A copy boundary). */
 int node_kind(struct Node *n) { return n ? n->kind : 0; }
+const char *node_asm_string(struct Node *n) { return n ? n->asm_string : 0; }
 long long node_int_val(struct Node *n) { return n ? (long long)n->int_val : 0; }
 int node_str_id(struct Node *n) { return n ? n->str_id : 0; }
 void node_name(struct Node *n, char *buf, int len) {
@@ -473,6 +479,21 @@ struct Compiler {
 
     int current_is_static;
 };
+
+typedef struct TargetBackend {
+    int ptr_size;
+    void (*emit_prologue)(Compiler *cc, Node *func);
+    void (*emit_epilogue)(Compiler *cc, Node *func);
+    void (*emit_call)(Compiler *cc, Node *func);
+    void (*emit_binary_op)(Compiler *cc, int op);
+    void (*emit_load_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_store_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_float_binop)(Compiler *cc, int op);
+} TargetBackend;
+
+extern TargetBackend *backend_ops;
+extern int ZCC_POINTER_WIDTH;
+extern int ZCC_INT_WIDTH;
 
 /* ================================================================ */
 /* FORWARD DECLARATIONS                                              */

@@ -1849,6 +1849,25 @@ Node *parse_stmt(Compiler *cc) {
     int line;
     line = cc->tk_line;
 
+    /* inline assembly */
+    if (cc->tk == TK_ASM) {
+        Node *n;
+        next_token(cc);
+        if (cc->tk == TK_VOLATILE) next_token(cc);
+        expect(cc, TK_LPAREN);
+        n = node_new(cc, ND_ASM, line);
+        if (cc->tk == TK_STR) {
+            n->asm_string = cc_strdup(cc, cc->tk_str);
+            next_token(cc);
+        } else {
+            error(cc, "expected string literal in asm");
+            n->asm_string = "";
+        }
+        expect(cc, TK_RPAREN);
+        expect(cc, TK_SEMI);
+        return n;
+    }
+
     /* block */
     if (cc->tk == TK_LBRACE) {
         Node *block;

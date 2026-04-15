@@ -128,4 +128,35 @@ static void ZCC_EMIT_ARG(ir_type_t ty, const char *val, int line) {
     }
 }
 
+static void ZCC_EMIT_FCONST(const char *dst, long bits, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_FCONST, IR_TY_F64, dst, 0, 0, 0, bits, line);
+    }
+}
+
+static void ZCC_EMIT_FBINARY(ir_op_t op, const char *dst, const char *s1, const char *s2, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, op, IR_TY_F64, dst, s1, s2, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_ITOF(const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_ITOF, IR_TY_F64, dst, src, 0, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_FTOI(const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_FTOI, IR_TY_I64, dst, src, 0, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_ASM(const char *asm_str, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_node_t *n = ir_emit(g_ir_cur_func, IR_ASM, IR_TY_VOID, 0, 0, 0, 0, 0, line);
+        if (n) n->asm_string = (char *)asm_str;
+    }
+}
+
 #endif /* ZCC_IR_EMIT_DISPATCH_H */

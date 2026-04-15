@@ -347,6 +347,8 @@ static Keyword keywords[] = {
     {"auto",      TK_AUTO},
     {"register",  TK_REGISTER},
     {"inline",    TK_INLINE},
+    {"asm",       TK_ASM},
+    {"__asm__",   TK_ASM},
     {"__signed__", TK_SIGNED},
     {"__signed",   TK_SIGNED},
     {"__const__",  TK_CONST},
@@ -363,7 +365,7 @@ static Keyword keywords[] = {
     {0, 0}
 };
 
-static int kw_count = 47;
+static int kw_count = 49;
 
 static int lookup_keyword(char *name) {
     int i;
@@ -389,6 +391,8 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==5 && buf[0]=='f'&&buf[1]=='l'&&buf[2]=='o'&&buf[3]=='a'&&buf[4]=='t') return TK_FLOAT;
     if (len==6 && buf[0]=='d'&&buf[1]=='o'&&buf[2]=='u'&&buf[3]=='b'&&buf[4]=='l'&&buf[5]=='e') return TK_DOUBLE;
     if (len==2 && buf[0]=='i'&&buf[1]=='f') return TK_IF;
+    if (len==3 && buf[0]=='a'&&buf[1]=='s'&&buf[2]=='m') return TK_ASM;
+    if (len==7 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='a'&&buf[3]=='s'&&buf[4]=='m'&&buf[5]=='_'&&buf[6]=='_') return TK_ASM;
     if (len==4 && buf[0]=='e'&&buf[1]=='l'&&buf[2]=='s'&&buf[3]=='e') return TK_ELSE;
     if (len==5 && buf[0]=='w'&&buf[1]=='h'&&buf[2]=='i'&&buf[3]=='l'&&buf[4]=='e') return TK_WHILE;
     if (len==3 && buf[0]=='f'&&buf[1]=='o'&&buf[2]=='r') return TK_FOR;

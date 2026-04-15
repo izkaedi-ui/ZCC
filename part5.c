@@ -391,6 +391,9 @@ static void peephole_optimize(char *filename) {
 /* Bug fix: Compiler is heap-allocated (52KB+ struct, not stack)     */
 /* ================================================================ */
 
+/* Forward declaration for IR pass manager (linked separately) */
+void ir_pm_run_default(void *mod_ptr, int verbose);
+
 int main(int argc, char **argv) {
   Compiler *cc;
   char *input_file;
@@ -413,6 +416,8 @@ int main(int argc, char **argv) {
 
   int compile_only = 0;
 
+  int g_ir_primary = 0;
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -425,6 +430,9 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
+    } else if (strcmp(argv[i], "--ir") == 0) {
+      g_emit_ir = 1;
+      g_ir_primary = 1;
     } else {
       input_file = argv[i];
     }
@@ -538,9 +546,22 @@ int main(int argc, char **argv) {
   codegen_program(cc, prog);
   fclose(cc->out);
 
+  /* IR pass manager — runs when --ir flag is active */
+  if (g_ir_primary && g_ir_module) {
+    int ir_total_nodes = 0;
+    int ir_fi;
+    for (ir_fi = 0; ir_fi < g_ir_module->func_count; ir_fi++) {
+      ir_total_nodes += g_ir_module->funcs[ir_fi]->node_count;
+    }
+    printf("[Phase IR] IR Pass Manager (%d funcs, %d nodes)...\n",
+           g_ir_module->func_count, ir_total_nodes);
+    ir_pm_run_default(g_ir_module, 1);
+    printf("[Phase IR] Pass Manager Complete.\n");
+  }
 
-
-  ZCC_IR_FLUSH(stdout);
+  if (!g_ir_primary) {
+    ZCC_IR_FLUSH(stdout);
+  }
 
   /* peephole optimize the emitted assembly safely out-of-bounds */
   peephole_optimize(asm_file);
@@ -551,7 +572,7 @@ int main(int argc, char **argv) {
     if (compile_only) {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file);
     }

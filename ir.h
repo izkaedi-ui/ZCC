@@ -95,6 +95,16 @@ typedef enum {
     IR_LABEL,       /* label definition — label field only                 */
     IR_NOP,         /* no operation — used as placeholder during passes    */
 
+    /* Floating-point operations */
+    IR_FCONST,      /* dst = float_imm  (double stored bitwise in .imm)   */
+    IR_FADD,        /* dst = src1 +f src2  (double add)                    */
+    IR_FSUB,        /* dst = src1 -f src2  (double sub)                    */
+    IR_FMUL,        /* dst = src1 *f src2  (double mul)                    */
+    IR_FDIV,        /* dst = src1 /f src2  (double div)                    */
+    IR_ITOF,        /* dst = (double)src1  (signed int64 to double)        */
+    IR_FTOI,        /* dst = (int64)src1   (double to signed int64)        */
+    IR_ASM,         /* dst = asm_string                                    */
+
     IR_OP_COUNT     /* sentinel — keep last                                */
 } ir_op_t;
 
@@ -145,6 +155,8 @@ typedef struct ir_node_t {
     char               src2[IR_NAME_MAX];   /* second source (if any)     */
     char               label[IR_LABEL_MAX]; /* branch target / label name */
     char               label2[IR_LABEL_MAX];/* phi: label for src2        */
+
+    char              *asm_string;          /* assembly string            */
 
     long               imm;      /* integer immediate (CONST, ALLOCA)     */
     int                lineno;   /* source file line number               */
