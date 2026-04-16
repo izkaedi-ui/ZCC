@@ -54,8 +54,8 @@ enum {
     /* type-related */
     TK_STRUCT, TK_UNION, TK_ENUM, TK_TYPEDEF,
     TK_SIZEOF, TK_STATIC, TK_EXTERN, TK_CONST,
-    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE,
-    TK_BUILTIN_VA_ARG,
+    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE, TK_ASM,
+    TK_BUILTIN_VA_ARG, TK_TYPEOF, TK_AUTO_TYPE, TK_GENERIC,
     /* operators */
     TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
     TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_BANG,
@@ -104,7 +104,11 @@ enum {
     ND_FUNC_DEF, ND_GLOBAL_VAR,
     ND_COMPOUND_ASSIGN,
     ND_INIT_LIST,
-    ND_NOP
+    ND_ASM,
+    ND_NOP,
+    ND_VLA_ALLOC,
+    ND_RSP_SAVE,
+    ND_RSP_RESTORE
 };
 
 /* ================================================================ */
@@ -146,8 +150,9 @@ struct StructField {
     char name[MAX_IDENT];
     Type *type;
     int offset;
-    int bitfield_width;
-    int bitfield_offset;
+    int is_bitfield;
+    int bit_offset;
+    int bit_size;
     StructField *next;
 };
 
@@ -159,6 +164,8 @@ struct Type {
     int align;
     Type *base;        /* for ptr/array */
     int array_len;
+    int is_vla;
+    struct Node *vla_size_expr;
     /* function */
     Type *ret;
     Type **params;
@@ -241,8 +248,8 @@ struct Node {
     /* ND_FUNC_DEF */
     char func_def_name[MAX_IDENT];
     Type *func_type;
-    char (*param_names_buf)[MAX_IDENT];
-    Type **param_types;
+    char param_names_buf[MAX_PARAMS][MAX_IDENT];
+    Type *param_types[MAX_PARAMS];
     int num_params;
     Node *body;
     int stack_size;
@@ -251,6 +258,9 @@ struct Node {
     char member_name[MAX_IDENT];
     int member_offset;
     int member_size;
+    int is_bitfield;
+    int bit_offset;
+    int bit_size;
 
     /* ND_SWITCH */
     Node **cases;
@@ -274,6 +284,9 @@ struct Node {
     int is_static;
     int is_extern;
     Node *initializer;
+
+    /* ND_ASM */
+    char *asm_string;
 
     /* linked list for top-level */
     Node *next;
@@ -299,6 +312,7 @@ struct Node {
 
 /* Bridge accessors: Node* → IR bridge (Option A copy boundary). */
 int node_kind(struct Node *n) { return n ? n->kind : 0; }
+const char *node_asm_string(struct Node *n) { return n ? n->asm_string : 0; }
 long long node_int_val(struct Node *n) { return n ? (long long)n->int_val : 0; }
 int node_str_id(struct Node *n) { return n ? n->str_id : 0; }
 void node_name(struct Node *n, char *buf, int len) {
@@ -351,6 +365,10 @@ struct Node *node_default_case(struct Node *n) { return n ? n->default_case : NU
 long long node_case_val(struct Node *n) { return n ? (long long)n->case_val : 0; }
 struct Node *node_case_body(struct Node *n) { return n ? n->case_body : NULL; }
 int node_member_offset(struct Node *n) { return n ? n->member_offset : 0; }
+
+int node_is_bitfield(struct Node *n) { return n ? n->is_bitfield : 0; }
+int node_bit_offset(struct Node *n) { return n ? n->bit_offset : 0; }
+int node_bit_size(struct Node *n) { return n ? n->bit_size : 0; }
 int node_member_size(struct Node *n) { return (n && n->type) ? (int)n->type->size : 8; }
 int node_line_no(struct Node *n) { return n ? n->line : 0; }
 int node_is_global(struct Node *n) {
@@ -457,6 +475,9 @@ struct Compiler {
     /* loop labels for break/continue */
     int break_label;
     int continue_label;
+    int in_loop_depth;
+    int vla_sp_offsets[100];
+    int vla_sp_depth;
 
     /* switch labels */
     int switch_end_label;

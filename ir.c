@@ -66,7 +66,9 @@ static const char *OP_NAMES[41] = {
     "fmul",
     "fdiv",
     "itof",
-    "ftoi"
+    "ftoi",
+    "asm",
+    "alloca"
 };
 
 /* ── Type table ──────────────────────────────────────────────────────── */
@@ -90,7 +92,7 @@ static const int TY_BYTES[12] = {
 /* ── Query helpers ────────────────────────────────────────────────────── */
 
 const char *ir_op_name(ir_op_t op) {
-    if (op < 0 || op >= 41) return "???";
+    if (op < 0 || op >= IR_OP_COUNT) return "???";
     return OP_NAMES[op];
 }
 
@@ -298,6 +300,11 @@ void ir_func_emit_text(const ir_func_t *fn, FILE *fp) {
         /* label */
         fprintf(fp, "  ");
         emit_field(fp, n->label);
+
+        /* asm string */
+        if (n->op == IR_ASM) {
+            fprintf(fp, "  str=\"%s\"", n->asm_string ? n->asm_string : "");
+        }
 
         /* imm — only print for ops that use it */
         if (n->op == IR_CONST || n->op == IR_ALLOCA || n->op == IR_FCONST) {

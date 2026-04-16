@@ -120,4 +120,7 @@ sqlite3_bt.log
 *_SAVE.c
 *_BROKEN.c
 *_PATCHED.c
-*.IR_VERIFIED
+*.IR_VERIFIEDnode_modules/
+*.exe
+*.o
+*.s

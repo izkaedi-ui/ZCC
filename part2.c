@@ -5,20 +5,11 @@
 
 static unsigned long long next_alloc_id = 1;
 
-#define MAX_ARENA_BLOCKS 64          // 64 * 16 MiB = 1 GiB hard ceiling (safe for Stage 3)
-#define ARENA_WARN_THRESHOLD 48      // log before critical
-
-int arena_block_count = 0;
-size_t total_arena_bytes = 0;
-
+/* Cap total arena blocks to avoid OOM from unbounded allocation (e.g. corrupt AST / infinite loop). Use literal 64 so compiler without preprocessor still works. */
 void *cc_alloc(Compiler *cc, int size) {
     ArenaBlock *a;
     void *p;
-    static int alloc_count = 0;
-    if (++alloc_count % 50000 == 0 && cc) {
-        printf("DEBUG zcc2 alloc_count=%d tk_line=%d tk_text=%.127s\n", alloc_count, cc->tk_line, cc->tk_text);
-        fflush(stdout);
-    }
+    static int block_count = 0;
     size = (size + 7) & ~7;  /* align to 8 */
     a = &cc->arena;
     while (a) {
@@ -41,25 +32,22 @@ void *cc_alloc(Compiler *cc, int size) {
             return p;
         }
         if (!a->next) {
-            if (arena_block_count >= MAX_ARENA_BLOCKS) {
-                fprintf(stderr, "\n🔱 ZKAEDI PRIME: ARENA DIVERGENCE DETECTED\n"
-                                "   blocks=%d  total=%zu MiB  size=%zu\n"
-                                "   → forcing fallback to AST path & aborting runaway\n",
-                        arena_block_count, total_arena_bytes/1048576, (size_t)size);
-                exit(1);   // clean kill with diagnostic instead of silent SIGKILL
+            if (block_count >= 512) {
+                printf("zcc: too many arena blocks (%d) — possible infinite loop or corrupt AST (last alloc size=%d)\n", block_count, size);
+                if (cc) {
+                    printf("zcc: stuck near token kind=%d line=%d text=%.127s\n", cc->tk, cc->tk_line, cc->tk_text);
+                }
+                exit(1);
             }
-            if (arena_block_count >= ARENA_WARN_THRESHOLD && arena_block_count % 8 == 0) {
-                fprintf(stderr, "[ZKAEDI] arena block %d / %d  (%zu MiB)\n",
-                        arena_block_count, MAX_ARENA_BLOCKS, total_arena_bytes/1048576);
+            if (block_count >= 500 && cc) {
+                printf("zcc: near block limit block_count=%d token=%d line=%d size=%d text=%.127s\n", block_count, cc->tk, cc->tk_line, size, cc->tk_text);
             }
-            arena_block_count++;
-            
+            block_count++;
             {
                 int newcap;
                 ArenaBlock *nb;
                 newcap = ARENA_SIZE;
                 if (size > newcap) newcap = size * 2;
-                total_arena_bytes += newcap;
                 nb = (ArenaBlock *)malloc(sizeof(ArenaBlock));
                 nb->data = (char *)malloc(newcap);
                 nb->pos = 0;
@@ -359,6 +347,8 @@ static Keyword keywords[] = {
     {"auto",      TK_AUTO},
     {"register",  TK_REGISTER},
     {"inline",    TK_INLINE},
+    {"asm",       TK_ASM},
+    {"__asm__",   TK_ASM},
     {"__signed__", TK_SIGNED},
     {"__signed",   TK_SIGNED},
     {"__const__",  TK_CONST},
@@ -372,10 +362,15 @@ static Keyword keywords[] = {
     {"restrict",  TK_VOLATILE},
     {"__int128",   TK_LONG},
     {"__int128_t", TK_LONG},
+    {"typeof",     TK_TYPEOF},
+    {"__typeof__", TK_TYPEOF},
+    {"__typeof",   TK_TYPEOF},
+    {"__auto_type", TK_AUTO_TYPE},
+    {"_Generic",   TK_GENERIC},
     {0, 0}
 };
 
-static int kw_count = 47;
+static int kw_count = 53;
 
 static int lookup_keyword(char *name) {
     int i;
@@ -401,6 +396,8 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==5 && buf[0]=='f'&&buf[1]=='l'&&buf[2]=='o'&&buf[3]=='a'&&buf[4]=='t') return TK_FLOAT;
     if (len==6 && buf[0]=='d'&&buf[1]=='o'&&buf[2]=='u'&&buf[3]=='b'&&buf[4]=='l'&&buf[5]=='e') return TK_DOUBLE;
     if (len==2 && buf[0]=='i'&&buf[1]=='f') return TK_IF;
+    if (len==3 && buf[0]=='a'&&buf[1]=='s'&&buf[2]=='m') return TK_ASM;
+    if (len==7 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='a'&&buf[3]=='s'&&buf[4]=='m'&&buf[5]=='_'&&buf[6]=='_') return TK_ASM;
     if (len==4 && buf[0]=='e'&&buf[1]=='l'&&buf[2]=='s'&&buf[3]=='e') return TK_ELSE;
     if (len==5 && buf[0]=='w'&&buf[1]=='h'&&buf[2]=='i'&&buf[3]=='l'&&buf[4]=='e') return TK_WHILE;
     if (len==3 && buf[0]=='f'&&buf[1]=='o'&&buf[2]=='r') return TK_FOR;
@@ -414,6 +411,10 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==5 && buf[0]=='u'&&buf[1]=='n'&&buf[2]=='i'&&buf[3]=='o'&&buf[4]=='n') return TK_UNION;
     if (len==4 && buf[0]=='e'&&buf[1]=='n'&&buf[2]=='u'&&buf[3]=='m') return TK_ENUM;
     if (len==6 && buf[0]=='s'&&buf[1]=='i'&&buf[2]=='z'&&buf[3]=='e'&&buf[4]=='o'&&buf[5]=='f') return TK_SIZEOF;
+    if (len==6 && buf[0]=='t'&&buf[1]=='y'&&buf[2]=='p'&&buf[3]=='e'&&buf[4]=='o'&&buf[5]=='f') return TK_TYPEOF;
+    if (len==8 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='t'&&buf[3]=='y'&&buf[4]=='p'&&buf[5]=='e'&&buf[6]=='o'&&buf[7]=='f') return TK_TYPEOF;
+    if (len==10 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='t'&&buf[3]=='y'&&buf[4]=='p'&&buf[5]=='e'&&buf[6]=='o'&&buf[7]=='f'&&buf[8]=='_'&&buf[9]=='_') return TK_TYPEOF;
+    if (len==11 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='a'&&buf[3]=='u'&&buf[4]=='t'&&buf[5]=='o'&&buf[6]=='_'&&buf[7]=='t'&&buf[8]=='y'&&buf[9]=='p'&&buf[10]=='e') return TK_AUTO_TYPE;
     if (len==6 && buf[0]=='s'&&buf[1]=='t'&&buf[2]=='a'&&buf[3]=='t'&&buf[4]=='i'&&buf[5]=='c') return TK_STATIC;
     if (len==6 && buf[0]=='e'&&buf[1]=='x'&&buf[2]=='t'&&buf[3]=='e'&&buf[4]=='r'&&buf[5]=='n') return TK_EXTERN;
     if (len==5 && buf[0]=='c'&&buf[1]=='o'&&buf[2]=='n'&&buf[3]=='s'&&buf[4]=='t') return TK_CONST;
@@ -428,6 +429,7 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==8 && buf[0]=='r'&&buf[1]=='e'&&buf[2]=='g'&&buf[3]=='i'&&buf[4]=='s'&&buf[5]=='t'&&buf[6]=='e'&&buf[7]=='r') return TK_REGISTER;
     if (len==8 && buf[0]=='r'&&buf[1]=='e'&&buf[2]=='s'&&buf[3]=='t'&&buf[4]=='r'&&buf[5]=='i'&&buf[6]=='c'&&buf[7]=='t') return TK_VOLATILE;
     if (len==8 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='c'&&buf[3]=='o'&&buf[4]=='n'&&buf[5]=='s'&&buf[6]=='t') return TK_CONST;
+    if (len==8 && buf[0]=='_'&&buf[1]=='G'&&buf[2]=='e'&&buf[3]=='n'&&buf[4]=='e'&&buf[5]=='r'&&buf[6]=='i'&&buf[7]=='c') return TK_GENERIC;
     if (len==8 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='s'&&buf[3]=='i'&&buf[4]=='g'&&buf[5]=='n'&&buf[6]=='e'&&buf[7]=='d') return TK_SIGNED;
     if (len==8 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='i'&&buf[3]=='n'&&buf[4]=='l'&&buf[5]=='i'&&buf[6]=='n'&&buf[7]=='e') return TK_INLINE;
     if (len==9 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='c'&&buf[3]=='o'&&buf[4]=='n'&&buf[5]=='s'&&buf[6]=='t'&&buf[7]=='_'&&buf[8]=='_') return TK_CONST;

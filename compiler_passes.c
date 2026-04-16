@@ -108,6 +108,8 @@ typedef enum {
   OP_UNDEF,
   OP_PGO_COUNTER_ADDR, /* PGO instrumentation: dst = &__zcc_edge_counts[imm] */
   OP_GLOBAL,           /* load address of global symbol: lea name(%rip), %reg */
+  OP_ASM,              /* inline assembly string */
+  OP_VLA_ALLOC,
 } Opcode;
 
 static const char *opcode_name[] __attribute__((unused)) = {"nop",
@@ -141,7 +143,8 @@ static const char *opcode_name[] __attribute__((unused)) = {"nop",
                                                             "copy",
                                                             "undef",
                                                             "pgo_counter_addr",
-                                                            "global"};
+                                                            "global",
+                                                            "asm"};
 
 typedef struct {
   RegID reg;     /* source register                    */
@@ -175,6 +178,8 @@ typedef struct Instr {
   IRType ir_type;   /* CG-IR-015: value type for width-sensitive lowering     */
                     /* (0 = IR_TY_I64 default; set for OP_DIV/MOD/SHR/SHL)   */
   int lscan_seq;    /* Liveness sequence ID injected by ir_asm_number_and_liveness */
+
+  char *asm_string;
 
   struct Instr *next;
   struct Instr *prev;
@@ -2749,8 +2754,6 @@ static void lower_stmt(LowerCtx *ctx, ASTNode *ast) {
   }
 }
 
-static int ir_node_budget = 80000;
-
 /* ─────────────────────────────────────────────────────────────────────────────
  * ZCC AST BRIDGE — Lower ZCC-parsed function (scalars + control flow) to IR.
  * ZCCNode and ZND_* come from zcc_ast_bridge.h. Copy from Node* via accessors.
@@ -2792,6 +2795,7 @@ extern int node_compound_op(struct Node *n);
 extern struct Node **node_stmts(struct Node *n);
 extern int node_num_stmts(struct Node *n);
 extern const char *node_func_name(struct Node *n);
+extern const char *node_asm_string(struct Node *n);
 extern struct Node *node_arg(struct Node *n, int i);
 extern int node_num_args(struct Node *n);
 extern int node_ptr_elem_size(struct Node *n);
@@ -2900,6 +2904,8 @@ static int nd_to_znd(int nd_kind) {
     return ZND_MEMBER;
   case ZCC_ND_SWITCH:
     return ZND_SWITCH;
+  case ZCC_ND_ASM:
+    return ZND_ASM;
   default:
     return -1;
   }
@@ -2913,10 +2919,6 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n);
 static int if_counter;
 
 static ZCCNode *alloc_zcc_node(void) {
-  if (ir_node_budget-- <= 0) {
-      fprintf(stderr, "[ZKAEDI] node budget exhausted in alloc_zcc_node — graceful AST fallback\n");
-      return NULL;
-  }
   ZCCNode *z = calloc(1, sizeof(ZCCNode));
   return z;
 }
@@ -3063,6 +3065,9 @@ static ZCCNode *zcc_node_from_expr(struct Node *n) {
     z->lhs = zcc_node_from_expr(node_lhs(n));
     z->member_offset = node_member_offset(n);
     z->member_size = node_member_size(n);
+    z->is_bitfield = node_is_bitfield(n);
+    z->bit_offset = node_bit_offset(n);
+    z->bit_size = node_bit_size(n);
     z->is_array = node_is_array(n);
     z->is_func = node_is_func(n);
     if (z->member_size <= 0)
@@ -3131,9 +3136,32 @@ static ZCCNode *zcc_node_from_expr(struct Node *n) {
 static ZCCNode *zcc_node_from_stmt(struct Node *n) {
   if (!n)
     return NULL;
-  int zk = nd_to_znd(node_kind(n));
+  int nk = node_kind(n);
+  if (nk == 110) { /* ND_RSP_SAVE */
+      ZCCNode *z = alloc_zcc_node();
+      z->kind = ZND_ASM;
+      z->line_no = node_line_no(n);
+      int off = node_member_offset(n);
+      char buf[64];
+      if (off > 0) off = -off;
+      sprintf(buf, "movq %%rsp, %d(%%rbp)", off);
+      z->asm_string = strdup(buf);
+      return z;
+  }
+  if (nk == 111) { /* ND_RSP_RESTORE */
+      ZCCNode *z = alloc_zcc_node();
+      z->kind = ZND_ASM;
+      z->line_no = node_line_no(n);
+      int off = node_member_offset(n);
+      char buf[64];
+      if (off > 0) off = -off;
+      sprintf(buf, "movq %d(%%rbp), %%rsp", off);
+      z->asm_string = strdup(buf);
+      return z;
+  }
+  int zk = nd_to_znd(nk);
   if (zk < 0) {
-    fprintf(stderr, "zcc_node_from: unsupported stmt kind %d\n", node_kind(n));
+    fprintf(stderr, "zcc_node_from: unsupported stmt kind %d\n", nk);
     return NULL;
   }
   ZCCNode *z = alloc_zcc_node();
@@ -3218,6 +3246,9 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n) {
   break;
   case ZND_NOP:
     break;
+  case ZND_ASM:
+    z->asm_string = (char *)node_asm_string(n);
+    break;
   case ZND_SWITCH: {
     int num = node_num_cases(n);
     struct Node **cases = node_cases(n);
@@ -3259,7 +3290,6 @@ static ZCCNode *zcc_node_from_stmt(struct Node *n) {
 ZCCNode *zcc_node_from(struct Node *n) {
   if (!n)
     return NULL;
-  ir_node_budget = 80000;
   if_counter = 0; /* reset at start of each function body */
   return zcc_node_from_stmt(n);
 }
@@ -3389,6 +3419,37 @@ static RegID zcc_lower_expr(LowerCtx *ctx, ZCCNode *node) {
     load_ins->imm = (node->member_size > 0) ? (int64_t)node->member_size : 8;
     load_ins->exec_freq = 1.0;
     emit_instr(ctx, load_ins);
+    
+    if (node->is_bitfield) {
+        fprintf(stderr, "WIRING R-VALUE BITFIELD: offset=%d, size=%d\n", node->bit_offset, node->bit_size);
+        RegID bo_r = ctx->next_reg++;
+        emit_instr(ctx, make_instr_imm(ctx->next_instr_id++, OP_CONST, bo_r, node->bit_offset, node->line_no));
+        RegID shift_r = ctx->next_reg++;
+        Instr *sh_i = calloc(1, sizeof(Instr));
+        sh_i->id = ctx->next_instr_id++;
+        sh_i->op = OP_SHR;
+        sh_i->dst = shift_r;
+        sh_i->src[0] = r;
+        sh_i->src[1] = bo_r;
+        sh_i->n_src = 2;
+        sh_i->exec_freq = 1.0;
+        emit_instr(ctx, sh_i);
+
+        RegID mask_r = ctx->next_reg++;
+        long long mask_val = (1ULL << node->bit_size) - 1;
+        emit_instr(ctx, make_instr_imm(ctx->next_instr_id++, OP_CONST, mask_r, mask_val, node->line_no));
+        RegID band_r = ctx->next_reg++;
+        Instr *band_i = calloc(1, sizeof(Instr));
+        band_i->id = ctx->next_instr_id++;
+        band_i->op = OP_BAND;
+        band_i->dst = band_r;
+        band_i->src[0] = shift_r;
+        band_i->src[1] = mask_r;
+        band_i->n_src = 2;
+        band_i->exec_freq = 1.0;
+        emit_instr(ctx, band_i);
+        r = band_r;
+    }
     return r;
   }
   /* ZND_TERNARY: cond ? then_expr : else_expr. SSA: single def via OP_PHI at
@@ -4178,10 +4239,76 @@ static RegID zcc_lower_expr(LowerCtx *ctx, ZCCNode *node) {
     if (!addr_r)
       return 0;
     RegID val_r = zcc_lower_expr(ctx, node->rhs);
+    
+    if (node->lhs && node->lhs->is_bitfield) {
+        fprintf(stderr, "WIRING L-VALUE BITFIELD: offset=%d, size=%d\n", node->lhs->bit_offset, node->lhs->bit_size);
+        RegID old_r = ctx->next_reg++;
+        Instr *ld_o = calloc(1, sizeof(Instr));
+        ld_o->id = ctx->next_instr_id++;
+        ld_o->op = OP_LOAD;
+        ld_o->dst = old_r;
+        ld_o->src[0] = addr_r;
+        ld_o->n_src = 1;
+        ld_o->imm = (node->lhs->member_size > 0) ? node->lhs->member_size : 8;
+        ld_o->exec_freq = 1.0;
+        emit_instr(ctx, ld_o);
+        
+        RegID mask_r = ctx->next_reg++;
+        long long mask_val = (1ULL << node->lhs->bit_size) - 1;
+        long long shift_mask = ~(mask_val << node->lhs->bit_offset);
+        emit_instr(ctx, make_instr_imm(ctx->next_instr_id++, OP_CONST, mask_r, shift_mask, node->line_no));
+        RegID band1_r = ctx->next_reg++;
+        Instr *b1_i = calloc(1, sizeof(Instr));
+        b1_i->id = ctx->next_instr_id++;
+        b1_i->op = OP_BAND;
+        b1_i->dst = band1_r;
+        b1_i->src[0] = old_r;
+        b1_i->src[1] = mask_r;
+        b1_i->n_src = 2;
+        b1_i->exec_freq = 1.0;
+        emit_instr(ctx, b1_i);
+        
+        RegID just_mask = ctx->next_reg++;
+        emit_instr(ctx, make_instr_imm(ctx->next_instr_id++, OP_CONST, just_mask, mask_val, node->line_no));
+        RegID band2_r = ctx->next_reg++;
+        Instr *b2_i = calloc(1, sizeof(Instr));
+        b2_i->id = ctx->next_instr_id++;
+        b2_i->op = OP_BAND;
+        b2_i->dst = band2_r;
+        b2_i->src[0] = val_r;
+        b2_i->src[1] = just_mask;
+        b2_i->n_src = 2;
+        b2_i->exec_freq = 1.0;
+        emit_instr(ctx, b2_i);
+        
+        RegID bo_r = ctx->next_reg++;
+        emit_instr(ctx, make_instr_imm(ctx->next_instr_id++, OP_CONST, bo_r, node->lhs->bit_offset, node->line_no));
+        RegID shl_r = ctx->next_reg++;
+        Instr *sh_i = calloc(1, sizeof(Instr));
+        sh_i->id = ctx->next_instr_id++;
+        sh_i->op = OP_SHL;
+        sh_i->dst = shl_r;
+        sh_i->src[0] = band2_r;
+        sh_i->src[1] = bo_r;
+        sh_i->n_src = 2;
+        sh_i->exec_freq = 1.0;
+        emit_instr(ctx, sh_i);
+        
+        RegID final_r = ctx->next_reg++;
+        Instr *bor_i = calloc(1, sizeof(Instr));
+        bor_i->id = ctx->next_instr_id++;
+        bor_i->op = OP_BOR;
+        bor_i->dst = final_r;
+        bor_i->src[0] = band1_r;
+        bor_i->src[1] = shl_r;
+        bor_i->n_src = 2;
+        bor_i->exec_freq = 1.0;
+        emit_instr(ctx, bor_i);
+        
+        val_r = final_r;
+    }
+
     Instr *st = calloc(1, sizeof(Instr));
-    st->id = ctx->next_instr_id++;
-    st->op = OP_STORE;
-    st->dst = 0;
     st->src[0] = val_r;
     st->src[1] = addr_r;
     st->n_src = 2;
@@ -4278,6 +4405,56 @@ static void zcc_lower_stmt(LowerCtx *ctx, ZCCNode *node) {
   switch (node->kind) {
   case ZND_NOP:
     return;
+  case ZND_ASM: {
+    Instr *ins = calloc(1, sizeof(Instr));
+    ins->id = ctx->next_instr_id++;
+    ins->op = OP_ASM;
+    ins->asm_string = node->asm_string;
+    ins->ir_type = IR_TY_I64;
+    emit_instr(ctx, ins);
+    return;
+  }
+  case ZND_VLA_ALLOC: {
+    if (!node->lhs) return;
+    RegID count_r = zcc_lower_expr(ctx, node->lhs);
+    
+    Instr *imm = calloc(1, sizeof(Instr));
+    imm->id = ctx->next_instr_id++;
+    imm->op = OP_CONST;
+    imm->dst = ctx->next_reg++;
+    imm->imm = node->int_val;
+    emit_instr(ctx, imm);
+    
+    Instr *imul = calloc(1, sizeof(Instr));
+    imul->id = ctx->next_instr_id++;
+    imul->op = OP_MUL;
+    imul->dst = ctx->next_reg++;
+    imul->src[0] = count_r;
+    imul->src[1] = imm->dst;
+    imul->n_src = 2;
+    emit_instr(ctx, imul);
+    
+    Instr *al = calloc(1, sizeof(Instr));
+    al->id = ctx->next_instr_id++;
+    al->op = OP_VLA_ALLOC;
+    al->dst = ctx->next_reg++;
+    al->src[0] = imul->dst;
+    al->n_src = 1;
+    emit_instr(ctx, al);
+
+    if (node->name[0]) {
+      RegID addr_r = get_or_create_var(ctx, node->name, 8);
+      Instr *st = calloc(1, sizeof(Instr));
+      st->id = ctx->next_instr_id++;
+      st->op = OP_STORE;
+      st->src[0] = al->dst;
+      st->src[1] = addr_r;
+      st->n_src = 2;
+      st->imm = 8;
+      emit_instr(ctx, st);
+    }
+    return;
+  }
   case ZND_ASSIGN: {
     if (!node->lhs)
       return;
@@ -6096,6 +6273,19 @@ static void ir_asm_lower_insn(IRAsmCtx *ctx, const Instr *ins,
   Function *fn = ctx->fn;
   (void)cur_block;
   switch (ins->op) {
+  case OP_ASM: {
+    fprintf(f, "    %s\n", ins->asm_string ? ins->asm_string : "");
+    break;
+  }
+  case OP_VLA_ALLOC: {
+    ir_asm_load_to_rax(ctx, ins->src[0]);
+    fprintf(f, "    addq $15, %%rax\n");
+    fprintf(f, "    andq $-16, %%rax\n");
+    fprintf(f, "    subq %%rax, %%rsp\n");
+    fprintf(f, "    movq %%rsp, %%rax\n");
+    ir_asm_store_rax_to(ctx, ins->dst);
+    break;
+  }
   case OP_PGO_COUNTER_ADDR: {
     int gbid = ctx->global_block_offset + (int)(uint32_t)ins->imm;
     fprintf(f, "    leaq __zcc_edge_counts(%%rip), %%rax\n");
