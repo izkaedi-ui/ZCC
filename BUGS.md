@@ -15,3 +15,29 @@ Fix: Auto-insert ND_CAST for float args to variadic functions.
 Integer literals passed to double parameters caused System V ABI violation.
 Fix: Auto-insert ND_CAST when arg type != param type in part3.c.
 Impact: Lua 5.4.6 VM fully operational, math.sqrt works correctly.
+
+## CG-IR-016: VLA Stack Overflow
+**Date**: 2026-04-15  
+**Severity**: CRITICAL  
+**Status**: ✅ FIXED  
+
+### Symptom
+Experiments 1 & 2 crash with SIGSEGV immediately on execution
+
+### Root Cause
+VLA framebuffer (921.6 KB) exceeded System V ABI stack red-zone (656 bytes)
+```c
+unsigned char framebuffer[480][640][3];  // Stack overflow!
+```
+
+### Fix
+Migrated to C89 compliant heap allocation:
+```c
+unsigned char (*framebuffer)[640][3] = malloc(480 * 640 * 3);
+// ... use ...
+free(framebuffer);
+```
+
+### Validation
+All experiments execute cleanly with heap-allocated framebuffers ✅
+
