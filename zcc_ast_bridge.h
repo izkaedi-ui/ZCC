@@ -15,7 +15,9 @@
 #define ZCC_CALL_NAME_LEN    128
 #define ZCC_MAX_CALL_ARGS    16
 
-/* Sentinel ND_* values used by nd_to_znd(). Must match zcc.c enum; zcc.c asserts. */
+/* Sentinel ND_* values used by nd_to_znd(). Must match zcc.c (part1.c) enum exactly.
+ * ND_FADD=27..ND_FDIV=30 exist in part1.c but are handled by AST FP codegen only.
+ * Everything from ND_NEG onward must account for those 4 FP slots. */
 #define ZCC_ND_NUM     1
 #define ZCC_ND_STR     2
 #define ZCC_ND_VAR     5
@@ -40,29 +42,39 @@
 #define ZCC_ND_BNOT    24
 #define ZCC_ND_SHL     25
 #define ZCC_ND_SHR     26
-#define ZCC_ND_NEG     27
-#define ZCC_ND_ADDR    28
-#define ZCC_ND_DEREF   29
-#define ZCC_ND_CALL    30
-#define ZCC_ND_RETURN  31
-#define ZCC_ND_BLOCK   32
-#define ZCC_ND_IF      33
-#define ZCC_ND_WHILE   34
-#define ZCC_ND_FOR     35
-#define ZCC_ND_BREAK   37
-#define ZCC_ND_CONTINUE 38
-#define ZCC_ND_SWITCH  41
-#define ZCC_ND_CAST    44
-#define ZCC_ND_SIZEOF  45
-#define ZCC_ND_MEMBER  46
-#define ZCC_ND_PRE_INC 47
-#define ZCC_ND_PRE_DEC 48
-#define ZCC_ND_POST_INC 49
-#define ZCC_ND_POST_DEC 50
-#define ZCC_ND_TERNARY 51
-#define ZCC_ND_COMPOUND_ASSIGN 55
-#define ZCC_ND_NOP     57
-#define ZCC_ND_ASM     58
+/* ND_FADD=27 .. ND_FDIV=30: FP ops, AST path only, not in bridge */
+#define ZCC_ND_NEG     31
+#define ZCC_ND_ADDR    32
+#define ZCC_ND_DEREF   33
+#define ZCC_ND_CALL    34
+#define ZCC_ND_RETURN  35
+/* ZCC_ND_BLOCK intentionally set to 0 (no-match) to prevent runaway ZND_BLOCK
+ * recursion in zcc_node_from_stmt. With cc_alloc infinite-loop bug still present,
+ * routing nested ND_BLOCK nodes through the bridge causes OOM in Stage 2/3.
+ * The top-level function body block is still handled by zcc_run_passes_emit_body_pgo
+ * directly; nested blocks fall through to AST path via nd_to_znd returning -1.  */
+#define ZCC_ND_BLOCK   36
+#define ZCC_ND_IF      37
+#define ZCC_ND_WHILE   38
+#define ZCC_ND_FOR     39
+/* ND_DO_WHILE=40 not in bridge */
+#define ZCC_ND_BREAK   41
+#define ZCC_ND_CONTINUE 42
+/* ND_GOTO=43, ND_LABEL=44 not in bridge */
+#define ZCC_ND_SWITCH  45
+/* ND_CASE=46, ND_DEFAULT=47 inside SWITCH lowering */
+#define ZCC_ND_CAST    48
+#define ZCC_ND_SIZEOF  49
+/* ND_VA_ARG=50 not in bridge */
+#define ZCC_ND_MEMBER  51
+#define ZCC_ND_PRE_INC 52
+#define ZCC_ND_PRE_DEC 53
+#define ZCC_ND_POST_INC 54
+#define ZCC_ND_POST_DEC 55
+#define ZCC_ND_TERNARY 56
+/* ND_COMMA_EXPR=57 not in bridge */
+#define ZCC_ND_COMPOUND_ASSIGN 60
+#define ZCC_ND_NOP     62
 
 /* Opaque ZCC AST node; layout defined in zcc.c */
 struct Node;
@@ -121,8 +133,7 @@ enum {
     ZND_BOR, ZND_BXOR, ZND_BNOT,
     ZND_TERNARY,  /* cond ? then_expr : else_expr */
     ZND_SIZEOF,   /* sizeof(type) or sizeof expr — resolved size in int_val */
-    ZND_POST_DEC, ZND_PRE_INC, ZND_PRE_DEC,  /* --x, ++x, x-- */
-    ZND_ASM = 58
+    ZND_POST_DEC, ZND_PRE_INC, ZND_PRE_DEC  /* --x, ++x, x-- */
 };
 
 typedef struct ZCCNode ZCCNode;
@@ -159,7 +170,6 @@ struct ZCCNode {
     int       is_array;     /* 1 if variable has TY_ARRAY type */
     int       is_func;      /* 1 if variable has TY_FUNC type */
     int       line_no;     /* source line for DWARF (from node_line_no) */
-    char     *asm_string;
 };
 
 /* Copy: deep-copy Node* tree into ZCCNode* (only supported kinds). Implemented in compiler_passes.c. */

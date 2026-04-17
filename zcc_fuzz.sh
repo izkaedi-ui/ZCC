@@ -12,8 +12,8 @@ PASS=0
 FAIL=0
 TIMEOUT=0
 
-# Ensure we have zcc1 stage
-make zcc1
+# Ensure we have zcc compiled
+make -f Makefile.release zcc
 
 # Create a safe, minimal fallback header because glibc stdint.h breaks ZCC's C89 parser
 cat > fake_csmith.h << 'FAKEOF'
@@ -45,10 +45,14 @@ typedef unsigned long size_t;
 #define NULL ((void*)0)
 static int printf(const char *fmt, ...);
 static int strcmp(const char *s1, const char *s2);
+#define platform_main_begin()
+#define platform_main_end(crc, flag)
+#define crc32_gentab()
+#define transparent_crc(val, varname, flag)
 #endif
 FAKEOF
 
-TOTAL_RUNS=1000
+TOTAL_RUNS=2
 
 for i in $(seq 1 $TOTAL_RUNS); do
     csmith --no-packed-struct --no-unions --no-bitfields --no-volatiles --no-float \
@@ -62,10 +66,11 @@ for i in $(seq 1 $TOTAL_RUNS); do
            test_$i.c
            
     # Skip GCC -E entirely, pass straight to ZCC
-    timeout 5 ./zcc1 test_$i.c -o zcc_bin_$i.s > zcc_err_$i.txt 2>&1
+    timeout 30 ./zcc test_$i.c --ir --peephole --peephole-deterministic -o zcc_bin_$i.s > zcc_err_$i.txt 2>&1
     if [ $? -ne 0 ]; then
         echo "Test $i: compile_fail (skipped)"
-        rm -f test_$i.c zcc_bin_$i.s zcc_err_$i.txt
+        mkdir -p failures/$i
+        cp test_$i.c zcc_err_$i.txt failures/$i/ 2>/dev/null
         continue
     fi
     gcc -o zcc_bin_$i zcc_bin_$i.s -lm

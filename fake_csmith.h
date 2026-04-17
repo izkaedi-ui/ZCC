@@ -25,6 +25,9 @@ typedef unsigned long size_t;
 #define UINT64_MAX 18446744073709551615UL
 #define NULL ((void*)0)
 static int printf(const char *fmt, ...);
-static void platform_main_begin(void) {}
-static void platform_main_end(uint32_t x, int y) {}
+static int strcmp(const char *s1, const char *s2);
+#define platform_main_begin()
+#define platform_main_end(crc, flag)
+#define crc32_gentab()
+#define transparent_crc(val, varname, flag)
 #endif

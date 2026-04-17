@@ -1,9 +1,6 @@
 #!/bin/sh
-cd /mnt/h/__DOWNLOADS/selforglinux
-
+cd /mnt/h/agents/selforglinux_build
 echo '=== Apply CG-IR-007 fix ==='
-python3 fix_cgir007.py
-
 echo ''
 echo '=== Rebuild full pipeline ==='
 make clean 2>/dev/null

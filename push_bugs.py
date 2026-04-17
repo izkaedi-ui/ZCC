@@ -119,7 +119,7 @@ with open('/tmp/new_bugs.jsonl', 'w') as f:
         f.write(json.dumps(bug) + '\n')
 
 try:
-    api = HfApi(token="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")
+    api = HfApi(token = os.environ.get("HF_TOKEN", ""))
     ops = [CommitOperationAdd(path_in_repo="bugs_apr11_2026.jsonl", path_or_fileobj="/tmp/new_bugs.jsonl")]
     result = api.create_commit(
         repo_id="zkaedi/zcc-compiler-bug-corpus",
@@ -129,7 +129,7 @@ try:
     )
     print(f"Pushed: {result}")
 except Exception as e:
-    api = HfApi(token="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")
+    api = HfApi(token = os.environ.get("HF_TOKEN", ""))
     ops = [CommitOperationAdd(path_in_repo="bugs_apr11_2026.jsonl", path_or_fileobj="/tmp/new_bugs.jsonl")]
     result = api.create_commit(
         repo_id="zkaedi/zcc-compiler-bug-corpus",

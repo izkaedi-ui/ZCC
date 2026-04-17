@@ -77,6 +77,9 @@ static ir_type_t ir_map_type(Type *ty) {
     case TY_ULONG:      return IR_TY_U64;
     case TY_LONGLONG:   return IR_TY_I64;
     case TY_ULONGLONG:  return IR_TY_U64;
+    case TY_TOFP32:       return IR_TY_TOFP32;
+    case TY_EMFP16_LIVE:  return IR_TY_EMFP16_LIVE;
+    case TY_SPSQ32_DIFF:  return IR_TY_SPSQ32_DIFF;
     default:            break;
     }
 

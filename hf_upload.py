@@ -2,7 +2,7 @@ from huggingface_hub import HfApi
 from huggingface_hub import CommitOperationAdd
 import os
 
-api = HfApi(token="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")
+api = HfApi(token = os.environ.get("HF_TOKEN", ""))
 
 print("Ensuring repo exists...")
 api.create_repo('zkaedi/zcc-ir-prime-v1', repo_type='dataset', exist_ok=True)

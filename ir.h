@@ -126,7 +126,11 @@ typedef enum {
     IR_TY_U64,      /* unsigned 64-bit                                     */
     IR_TY_PTR,      /* generic pointer — 8 bytes LP64                      */
     IR_TY_F32,      /* float   — reserved, not emitted in P1               */
-    IR_TY_F64,      /* double  — reserved, not emitted in P1               */
+    IR_TY_F64,
+    IR_TY_TOFP32,       /* gaming format: Tile-Offset 32-bit                   */
+    IR_TY_EMFP16_LIVE,  /* gaming format: Energy-Modulated FP16 (Live H-field) */
+    IR_TY_SPSQ32_DIFF,  /* gaming format: Stereo-Projective Spherical Quat     */
+    IR_TY_F16,      /* half    — gaming baseline                           */
     IR_TY_COUNT     /* sentinel                                             */
 } ir_type_t;
 

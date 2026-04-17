@@ -7,6 +7,9 @@
  */
 #ifndef ZCC_AST_BRIDGE_ZCC_H
 #define ZCC_AST_BRIDGE_ZCC_H
+/* Also satisfy the original guard name so #ifndef ZCC_AST_BRIDGE_H
+ * blocks in generated zcc_pp.c do not re-include part1.c/part2.c. */
+#define ZCC_AST_BRIDGE_H
 
 typedef long int64_t;
 typedef unsigned int uint32_t;
@@ -16,53 +19,75 @@ typedef unsigned int uint32_t;
 #define ZCC_CALL_NAME_LEN    128
 #define ZCC_MAX_CALL_ARGS    16
 
-/* Sentinel ND_* values used by nd_to_znd(). Must match zcc.c enum; zcc.c asserts. */
+/* Sentinel ND_* values used by nd_to_znd(). Must match zcc.c (part1.c) enum exactly.
+ * Computed from part1.c (ND_NUM=1 start, sequential):
+ *   ND_NUM=1  ND_STR=2  ND_CHAR_LIT=3  ND_FLIT=4  ND_VAR=5  ND_ASSIGN=6
+ *   ND_ADD=7  ND_SUB=8  ND_MUL=9  ND_DIV=10  ND_MOD=11
+ *   ND_EQ=12  ND_NE=13  ND_LT=14  ND_LE=15  ND_GT=16  ND_GE=17
+ *   ND_LAND=18  ND_LOR=19  ND_LNOT=20
+ *   ND_BAND=21  ND_BOR=22  ND_BXOR=23  ND_BNOT=24
+ *   ND_SHL=25  ND_SHR=26
+ *   ND_FADD=27  ND_FSUB=28  ND_FMUL=29  ND_FDIV=30   (FP: AST-only)
+ *   ND_NEG=31  ND_ADDR=32  ND_DEREF=33  ND_CALL=34  ND_RETURN=35  ND_BLOCK=36
+ *   ND_IF=37  ND_WHILE=38  ND_FOR=39  ND_DO_WHILE=40
+ *   ND_BREAK=41  ND_CONTINUE=42  ND_GOTO=43  ND_LABEL=44
+ *   ND_SWITCH=45  ND_CASE=46  ND_DEFAULT=47
+ *   ND_CAST=48  ND_SIZEOF=49  ND_VA_ARG=50  ND_MEMBER=51
+ *   ND_PRE_INC=52  ND_PRE_DEC=53  ND_POST_INC=54  ND_POST_DEC=55
+ *   ND_TERNARY=56  ND_COMMA_EXPR=57  ND_FUNC_DEF=58  ND_GLOBAL_VAR=59
+ *   ND_COMPOUND_ASSIGN=60  ND_INIT_LIST=61  ND_NOP=62 */
 #define ZCC_ND_NUM     1
 #define ZCC_ND_STR     2
-#define ZCC_ND_VAR     4
-#define ZCC_ND_ASSIGN  5
-#define ZCC_ND_ADD     6
-#define ZCC_ND_SUB     7
-#define ZCC_ND_LT     13
-#define ZCC_ND_LE     14
-#define ZCC_ND_GT     15
-#define ZCC_ND_GE     16
-#define ZCC_ND_EQ     11
-#define ZCC_ND_NE     12
-#define ZCC_ND_MOD    10
-#define ZCC_ND_MUL     8
-#define ZCC_ND_BAND   20
-#define ZCC_ND_SHL    24
-#define ZCC_ND_SHR    25
-#define ZCC_ND_FOR    34
-#define ZCC_ND_RETURN 30
-#define ZCC_ND_BLOCK  31
-#define ZCC_ND_IF     32
-#define ZCC_ND_WHILE  33
-#define ZCC_ND_CAST   43
-#define ZCC_ND_CALL   29
-#define ZCC_ND_NOP    56
-#define ZCC_ND_POST_INC 48
-#define ZCC_ND_COMPOUND_ASSIGN 54
-#define ZCC_ND_ADDR   27   /* &expr — must match part1 enum */
-#define ZCC_ND_DEREF  28   /* *expr — must match part1 enum */
-#define ZCC_ND_MEMBER 45   /* struct/ptr member access (-> and .) — stub: lower as base ptr */
-#define ZCC_ND_SWITCH 40   /* switch(expr) { case ... default ... }; must match zcc.c enum (part1: ND_NUM=1) */
-#define ZCC_ND_DIV     9
-#define ZCC_ND_NEG    26
-#define ZCC_ND_LAND   17
-#define ZCC_ND_LOR    18
-#define ZCC_ND_LNOT   19
-#define ZCC_ND_BOR    21
-#define ZCC_ND_BXOR   22
-#define ZCC_ND_BNOT   23
-#define ZCC_ND_TERNARY 50
-#define ZCC_ND_BREAK   36   /* break; — must match zcc.c enum */
-#define ZCC_ND_CONTINUE 37  /* continue; — must match zcc.c enum */
-#define ZCC_ND_SIZEOF  44   /* sizeof — often lowered to ND_NUM at parse; support if present */
-#define ZCC_ND_PRE_INC  46
-#define ZCC_ND_PRE_DEC  47
-#define ZCC_ND_POST_DEC 49
+#define ZCC_ND_VAR     5
+#define ZCC_ND_ASSIGN  6
+#define ZCC_ND_ADD     7
+#define ZCC_ND_SUB     8
+#define ZCC_ND_MUL     9
+#define ZCC_ND_DIV     10
+#define ZCC_ND_MOD     11
+#define ZCC_ND_EQ      12
+#define ZCC_ND_NE      13
+#define ZCC_ND_LT      14
+#define ZCC_ND_LE      15
+#define ZCC_ND_GT      16
+#define ZCC_ND_GE      17
+#define ZCC_ND_LAND    18
+#define ZCC_ND_LOR     19
+#define ZCC_ND_LNOT    20
+#define ZCC_ND_BAND    21
+#define ZCC_ND_BOR     22
+#define ZCC_ND_BXOR    23
+#define ZCC_ND_BNOT    24
+#define ZCC_ND_SHL     25
+#define ZCC_ND_SHR     26
+/* ND_FADD=27 .. ND_FDIV=30 are FP ops handled by AST codegen only */
+#define ZCC_ND_NEG     31
+#define ZCC_ND_ADDR    32
+#define ZCC_ND_DEREF   33
+#define ZCC_ND_CALL    34
+#define ZCC_ND_RETURN  35
+#define ZCC_ND_BLOCK   36
+#define ZCC_ND_IF      37
+#define ZCC_ND_WHILE   38
+#define ZCC_ND_FOR     39
+/* ND_DO_WHILE=40 not in bridge */
+#define ZCC_ND_BREAK   41   /* break; */
+#define ZCC_ND_CONTINUE 42  /* continue; */
+/* ND_GOTO=43, ND_LABEL=44 not in bridge */
+#define ZCC_ND_SWITCH  45
+/* ND_CASE=46, ND_DEFAULT=47 handled inside ZND_SWITCH lowering */
+#define ZCC_ND_CAST    48
+#define ZCC_ND_SIZEOF  49
+/* ND_VA_ARG=50 not in bridge */
+#define ZCC_ND_MEMBER  51
+#define ZCC_ND_PRE_INC  52
+#define ZCC_ND_PRE_DEC  53
+#define ZCC_ND_POST_INC 54
+#define ZCC_ND_POST_DEC 55
+#define ZCC_ND_TERNARY  56
+/* ND_COMMA_EXPR=57 not in bridge */
+#define ZCC_ND_COMPOUND_ASSIGN 60
+#define ZCC_ND_NOP     62
 
 /* Opaque ZCC AST node; layout defined in zcc.c */
 struct Node;

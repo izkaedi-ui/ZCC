@@ -62,6 +62,21 @@ static void ZCC_EMIT_BINARY(ir_op_t op, ir_type_t ty, const char *dst, const cha
     }
 }
 
+extern uint8_t ir_tel_fpx_coerce_query(uint8_t src, uint8_t dst);
+extern uint8_t ir_tel_fpx_coerce_cast_attempt(uint8_t src, uint8_t dst, uint32_t ctx);
+static void ZCC_EMIT_CAST(ir_type_t dst_ty, ir_type_t src_ty, const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        int src_is_novel = (src_ty == IR_TY_TOFP32 || src_ty == IR_TY_EMFP16_LIVE || src_ty == IR_TY_SPSQ32_DIFF);
+        int dst_is_novel = (dst_ty == IR_TY_TOFP32 || dst_ty == IR_TY_EMFP16_LIVE || dst_ty == IR_TY_SPSQ32_DIFF);
+
+        /* v0.10: Record metrics only for novel<->standard edges, preventing novel<->novel casts from polluting heatmap */
+        if ((src_is_novel || dst_is_novel) && !(src_is_novel && dst_is_novel)) {
+            ir_tel_fpx_coerce_cast_attempt((uint8_t)src_ty, (uint8_t)dst_ty, (uint32_t)line);
+        }
+        ir_emit(g_ir_cur_func, IR_CAST, dst_ty, dst, src, 0, 0, 0, line);
+    }
+}
+
 static void ZCC_EMIT_UNARY(ir_op_t op, ir_type_t ty, const char *dst, const char *src, int line) {
     if (g_emit_ir && g_ir_cur_func) {
         ir_emit(g_ir_cur_func, op, ty, dst, src, 0, 0, 0, line);

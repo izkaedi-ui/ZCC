@@ -38,6 +38,7 @@ typedef struct {
     ir_pass_entry_t passes[IR_PM_MAX_PASSES];
     int             count;
     int             verbose;    /* print per-pass metrics to stderr    */
+    struct ir_manifold *manifold; /* NULL when --manifold not active */
 } ir_pass_manager_t;
 
 /* ── API ─────────────────────────────────────────────────────────────── */
