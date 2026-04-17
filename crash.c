@@ -1,0 +1,1 @@
+int f() { return f(); } int main() { return f(); }

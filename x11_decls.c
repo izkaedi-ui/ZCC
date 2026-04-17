@@ -1,0 +1,11 @@
+void* XOpenDisplay(char*);
+void* XCreateColormap(void*, unsigned long, void*, int);
+unsigned long XCreateWindow(void*, unsigned long, int, int, unsigned int, unsigned int, unsigned int, int, unsigned int, void*, unsigned long, void*);
+void* XCreateImage(void*, void*, unsigned int, int, int, char*, unsigned int, unsigned int, int, int);
+void* XShmCreateImage(void*, void*, unsigned int, int, char*, void*, unsigned int, unsigned int);
+void* XCreateGC(void*, unsigned long, unsigned long, void*);
+unsigned long XCreatePixmap(void*, unsigned long, unsigned int, unsigned int, unsigned int);
+unsigned long XCreatePixmapCursor(void*, unsigned long, unsigned long, void*, void*, unsigned int, unsigned int);
+void* shmat(int, void*, int);
+int DefaultScreen(void*);
+unsigned long RootWindow(void*, int);

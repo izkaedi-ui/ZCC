@@ -1,9 +1,14 @@
-int printf(const char *fmt, ...);
+#include <stdio.h>
+static float relu(float x) { return (x > 0.0f) ? x : 0.0f; }
 int main() {
-    int x1 = (int)(0x80000000u);
-    int x2 = 575 - x1;
-    int x3 = x2 < -205;
-    int x_full = (int)((((575) - (((int)(0x80000000u))))) < (-205));
-    printf("x1=%d x2=%d x3=%d full=%d\n", x1, x2, x3, x_full);
+    float features[2];
+    features[0] = 1.5f; features[1] = -2.5f;
+    float w[2];
+    w[0] = 2.0f; w[1] = 3.0f;
+    float sum = 0.5f;
+    int i;
+    for (i = 0; i < 2; i++) sum = sum + features[i] * w[i];
+    float h = relu(sum);
+    printf("sum*1000 = %d, h*1000 = %d\n", (int)(sum*1000.0f), (int)(h*1000.0f));
     return 0;
 }
