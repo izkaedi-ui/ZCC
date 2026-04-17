@@ -1,53 +1,64 @@
-# Binaries & test outputs
+# ============================================
+# ZCC Compiler — .gitignore
+# ============================================
+
+# --- Compiled binaries & objects ---
 *.o
 *.exe
 *.so
 *.out
 *.prof
-*.pt
 *.dump
 *.objdump
+
+# --- Assembly output (build artifacts) ---
+*.s
+# Keep shell scripts
+!*.sh
+
+# --- ELF/firmware binaries ---
+*.elf
+*.bin
+*.uf2
+
+# --- Named compiler binaries ---
 zcc1
 zcc2
 zcc2_*
+zcc3
 zcc3_*
-zcc_*[!.cph]
-gcc_*
+zcc_no_peep
+zcc_peep
+
+# --- Test binaries (extensionless) ---
+# Compiled test outputs: seed*_gcc, seed*_zcc, test_*, etc.
 seed*_gcc
 seed*_zcc
 tmp_gcc
 tmp_zcc
-
-# Build artifacts
-*.s
-!run_tests.sh
-!ztest*.sh
-!run_sqlite_test.sh
-!run_selfhost.sh
-!bootstrap_verify.sh
-*.log
-*.txt
-!README*.txt
-!BUILD.txt
-!COMMANDS.md
-
-# Test binaries (no extension)
-test_*[!.cshpy]
+*_gcc
+*_zcc
+# Named binaries from test files
 alloc
 alloc2
+alloc_ref
 bf
 bst
 bubble
 bubble_ref
+char
+char_gcc
 expr
 fib
 hash
 hello
 hello_out
+hello_test
 ic
 ind
 indirect
 linked
+list2
 mincc
 mincc2
 p2
@@ -63,8 +74,115 @@ struct
 vm
 ztest
 ztest_lit
+limit_test
+log2_test
+via_ir
+stb_ir
+miniz_ir
+stb_test
+float_test
+run_char
+run_mesh
+ta
+h
+mc
+ez
 
-# Python
+# --- Preprocessed intermediates ---
+*.i
+zcc.i
+zcc_preprocessed.c
+zcc_preprocessed_test.c
+
+# --- Old/backup copies of compiler source ---
+zcc (2).c
+compiler_passes (4).c
+compiler_passes (5).c
+compiler_passes (6).c
+compiler_passes - Copy.c
+compiler_passes - Copy (2).c
+compiler_passes.c.with_cgir015
+cp_tmp.c
+cp_PATCHED.c
+cp_SAVE.c
+cp_noopt.c
+*_SAVE.c
+*_BROKEN.c
+*_PATCHED.c
+*.IR_VERIFIED
+*.bak
+*.bak_*
+*.bak.*
+zcc2.s.backup
+
+# --- Third-party vendored source (track selectively) ---
+lua-5.4.6/
+doom_pp.c
+doom_pp_clean.c
+shell.c
+sqlite3.c
+sqlite3.h
+sqlite3_pp.c
+sqlite3_zcc*.c
+cJSON_pp.c
+cJSON_pp2.c
+pp.c
+pp_dump.c
+
+# --- Large data / training artifacts ---
+*.jsonl
+*.json
+!package.json
+!metadata.json
+!uf2families.json
+combined_dataset.jsonl
+sqlite3_scored.jsonl
+prime_training_data.json
+training_corpus.json
+solidity-vulnerability-energy-signatures.json
+B_CATALYZE_*.json
+
+# --- SQLite build artifacts ---
+sqlite3_gcc
+sqlite3_test
+sqlite3_bt.log
+sqlite_functest
+sqlite_test*
+sqlite3_functest_zcc
+sqlite_atof
+
+# --- Image / render output ---
+*.ppm
+*.raw
+pixels.raw
+pixels_gcc.raw
+
+# --- Firmware / hardware test output ---
+*.wad
+tqpu_demo.elf
+hello.bin
+hello.elf
+hello.uf2
+hello_from_uf2.bin
+stress_zcc.bin
+stress_zcc.elf
+stress_zcc.uf2
+stress_from_uf2.bin
+lua_rp2040_qemu.elf
+
+# --- Node.js (should NEVER be in a C compiler repo) ---
+node_modules/
+package.json
+package-lock.json
+tsconfig.json
+*.ts
+*.js
+*.mjs
+*.mts
+*.map
+*.cmd
+
+# --- Python cache ---
 *.pyc
 __pycache__/
 .hypothesis/
@@ -72,21 +190,22 @@ __pycache__/
 venv*/
 *.egg-info/
 
-# IDE & tools
+# --- IDE & tools ---
 .cursor/
 .agents/
+.vscode/
 .env
 .env.example
 .antigravityignore
 
-# Large data
+# --- Misc large/generated ---
 *.zip
 *.pdf
 *.png
 *.sarif
+*.pt
 data/
 assets/
-docs/
 vault/
 contracts/
 mainnet_contracts/
@@ -100,24 +219,31 @@ hardening_results/
 fuzz_*/
 failures/
 harness/
-scripts/
 audit/
 diag_*/
+diag3_*/
+novel_fp_gaming/
+ir_corpus_v2/
+antigravity/
+dreams/
 
-# SQLite build artifacts
-sqlite3_zcc*.c
-sqlite3_zcc*.s
-sqlite3_pp.c
-sqlite3_gcc
-sqlite3_test
-sqlite_functest
-sqlite3_bt.log
+# --- CVE corpus intermediates ---
+cve_corpus/tmp_*.c
+cve_corpus/*.log
+cve_corpus/err.log
 
-# Backup files
-*.bak
-*.bak_*
-*.bak.*
-*_SAVE.c
-*_BROKEN.c
-*_PATCHED.c
-*.IR_VERIFIED
+# --- Logs ---
+*.log
+*.txt
+!README*.txt
+!BUILD.txt
+!COMMANDS.md
+
+# --- GDB scripts (keep .gdb files selectively) ---
+# gdb_defaultscr.gdb and debug scripts are useful
+# but machine-generated diag scripts are not
+gdb_exp.gdb
+
+# --- OS ---
+Thumbs.db
+.DS_Store
