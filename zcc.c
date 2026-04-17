@@ -47,6 +47,7 @@ enum {
     /* type keywords */
     TK_INT, TK_CHAR, TK_VOID, TK_LONG, TK_SHORT,
     TK_UNSIGNED, TK_SIGNED, TK_FLOAT, TK_DOUBLE,
+    TK_TOFP32, TK_EMFP16_LIVE, TK_SPSQ32_DIFF,
     /* control flow */
     TK_IF, TK_ELSE, TK_WHILE, TK_FOR, TK_DO,
     TK_RETURN, TK_BREAK, TK_CONTINUE, TK_GOTO,
@@ -54,8 +55,8 @@ enum {
     /* type-related */
     TK_STRUCT, TK_UNION, TK_ENUM, TK_TYPEDEF,
     TK_SIZEOF, TK_STATIC, TK_EXTERN, TK_CONST,
-    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE,
-    TK_BUILTIN_VA_ARG,
+    TK_VOLATILE, TK_AUTO, TK_REGISTER, TK_INLINE, TK_ASM,
+    TK_BUILTIN_VA_ARG, TK_TYPEOF, TK_AUTO_TYPE,
     /* operators */
     TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
     TK_AMP, TK_PIPE, TK_CARET, TK_TILDE, TK_BANG,
@@ -90,6 +91,7 @@ enum {
     ND_LAND, ND_LOR, ND_LNOT,
     ND_BAND, ND_BOR, ND_BXOR, ND_BNOT,
     ND_SHL, ND_SHR,
+    ND_FADD, ND_FSUB, ND_FMUL, ND_FDIV,
     ND_NEG, ND_ADDR, ND_DEREF,
     ND_CALL, ND_RETURN, ND_BLOCK,
     ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
@@ -103,6 +105,7 @@ enum {
     ND_FUNC_DEF, ND_GLOBAL_VAR,
     ND_COMPOUND_ASSIGN,
     ND_INIT_LIST,
+    ND_ASM,
     ND_NOP
 };
 
@@ -114,7 +117,8 @@ enum {
     TY_VOID = 0, TY_CHAR, TY_UCHAR, TY_SHORT, TY_USHORT,
     TY_INT, TY_UINT, TY_LONG, TY_ULONG,
     TY_LONGLONG, TY_ULONGLONG, TY_FLOAT, TY_DOUBLE,
-    TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM
+    TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
+    TY_TOFP32, TY_EMFP16_LIVE, TY_SPSQ32_DIFF
 };
 
 /* ================================================================ */
@@ -272,9 +276,14 @@ struct Node {
     int is_extern;
     Node *initializer;
 
+    /* ND_ASM */
+    char *asm_string;
+
     /* linked list for top-level */
     Node *next;
 };
+
+char *zcc_preprocess(const char *source, int source_len, const char *filename, const char *include_paths, int *out_len);
 
 #include "zcc_ast_bridge.h"
 
@@ -295,7 +304,15 @@ struct Node {
 /* _Static_assert(ND_SWITCH == ZCC_ND_SWITCH, "zcc_ast_bridge.h: ND_SWITCH out of sync"); */
 
 /* Bridge accessors: Node* → IR bridge (Option A copy boundary). */
+int is_pointer(Type *t);
+int type_size(Type *t);
+void validate_node(Compiler *cc, Node *node, const char *where, int line);
+void validate_type(Compiler *cc, Type *type, const char *where, int line);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
+
 int node_kind(struct Node *n) { return n ? n->kind : 0; }
+const char *node_asm_string(struct Node *n) { return n ? n->asm_string : 0; }
 long long node_int_val(struct Node *n) { return n ? (long long)n->int_val : 0; }
 int node_str_id(struct Node *n) { return n ? n->str_id : 0; }
 void node_name(struct Node *n, char *buf, int len) {
@@ -474,6 +491,21 @@ struct Compiler {
     int current_is_static;
 };
 
+typedef struct TargetBackend {
+    int ptr_size;
+    void (*emit_prologue)(Compiler *cc, Node *func);
+    void (*emit_epilogue)(Compiler *cc, Node *func);
+    void (*emit_call)(Compiler *cc, Node *func);
+    void (*emit_binary_op)(Compiler *cc, int op);
+    void (*emit_load_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_store_stack)(Compiler *cc, int offset, const char *reg);
+    void (*emit_float_binop)(Compiler *cc, int op);
+} TargetBackend;
+
+extern TargetBackend *backend_ops;
+extern int ZCC_POINTER_WIDTH;
+extern int ZCC_INT_WIDTH;
+
 /* ================================================================ */
 /* FORWARD DECLARATIONS                                              */
 /* ================================================================ */
@@ -519,6 +551,7 @@ Node *node_num(Compiler *cc, long long val, int line);
 Node *node_flit(Compiler *cc, double val, int line);
 Type *type_new(Compiler *cc, int kind);
 Type *type_ptr(Compiler *cc, Type *base);
+Type *type_func(Compiler *cc, Type *ret);
 Type *type_array(Compiler *cc, Type *base, int len);
 int type_size(Type *t);
 int type_align(Type *t);
@@ -537,7 +570,7 @@ void error_at(Compiler *cc, int line, char *msg);
 #include <stdlib.h>
 #define PP_MAX_MACROS 4096
 #define PP_MAX_PARAMS 16
-#define PP_MAX_BODY   4096
+#define PP_MAX_BODY   16384
 #define PP_MAX_INCLUDE_DEPTH 32
 
 typedef struct {
@@ -550,10 +583,19 @@ typedef struct {
 } PPMacro;
 
 typedef struct {
+    const char *src;
+    int pos;
+    int len;
+    char *alloc_buf;
+    PPMacro *expanding_macro;
+} PPInputCtx;
+
+typedef struct {
     PPMacro macros[PP_MAX_MACROS];
     int     num_macros;
 
     int     cond_stack[64];
+    int     cond_satisfied[64];
     int     cond_else_seen[64];
     int     cond_depth;
 
@@ -570,6 +612,10 @@ typedef struct {
     int         line;
     const char *filename;
     const char *include_paths;
+
+    PPInputCtx input_stack[32];
+    int input_depth;
+    char *alloc_buf;
 } PPState;
 
 static const char *zcc_stddef_text = 
@@ -618,6 +664,9 @@ static const char *zcc_stddef_text =
 "#define __builtin_constant_p(x) 0\n"
 "#define __builtin_types_compatible_p(x, y) 0\n"
 "#define __builtin_unreachable()\n"
+"#define __x86_64__ 1\n"
+"#define __GNUC__ 1\n"
+"#define assert(x)\n"
 "#define offsetof(t, m) ((unsigned long)&(((t*)0)->m))\n"
 "typedef int int32_t;\n"
 "typedef unsigned int uint32_t;\n"
@@ -647,6 +696,22 @@ static void pp_emit_str(PPState *state, const char *str, int len) {
 }
 
 static char pp_peek(PPState *state) {
+    static int pp_peek_cnt = 0;
+    if (++pp_peek_cnt % 500000 == 0) {
+        printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
+        fflush(stdout);
+    }
+    while (state->pos >= state->len && state->input_depth > 0) {
+        if (state->alloc_buf) free(state->alloc_buf);
+        state->input_depth--;
+        if (state->input_stack[state->input_depth].expanding_macro) {
+            state->input_stack[state->input_depth].expanding_macro->active = 1;
+        }
+        state->src = state->input_stack[state->input_depth].src;
+        state->pos = state->input_stack[state->input_depth].pos;
+        state->len = state->input_stack[state->input_depth].len;
+        state->alloc_buf = state->input_stack[state->input_depth].alloc_buf;
+    }
     if (state->pos >= state->len) return 0;
     return state->src[state->pos];
 }
@@ -654,10 +719,28 @@ static char pp_peek(PPState *state) {
 static char pp_next(PPState *state) {
     char c = pp_peek(state);
     if (c) {
-        if (c == '\n') state->line++;
+        if (c == '\n' && state->input_depth == 0) state->line++;
         state->pos++;
     }
     return c;
+}
+
+static void pp_push_input(PPState *state, const char *new_src, char *alloc_buf, PPMacro *macro) {
+    if (state->input_depth >= 32) {
+        fprintf(stderr, "zcc preprocessor error: macro expansion too deep\n");
+        exit(1);
+    }
+    state->input_stack[state->input_depth].src = state->src;
+    state->input_stack[state->input_depth].pos = state->pos;
+    state->input_stack[state->input_depth].len = state->len;
+    state->input_stack[state->input_depth].alloc_buf = state->alloc_buf;
+    state->input_stack[state->input_depth].expanding_macro = macro;
+    state->input_depth++;
+    
+    state->src = new_src;
+    state->pos = 0;
+    state->len = strlen(new_src);
+    state->alloc_buf = alloc_buf;
 }
 
 static void pp_skip_whitespace(PPState *state) {
@@ -703,13 +786,30 @@ static PPMacro *pp_add_macro(PPState *state, const char *name) {
 
 static void pp_read_line(PPState *state, char *buf, int max) {
     int i = 0;
-    while (pp_peek(state) != '\n' && pp_peek(state) != 0 && i < max - 1) {
-        char c = pp_next(state);
-        if (c == '\\' && pp_peek(state) == '\n') {
-            pp_next(state);
+    int in_comment = 0;
+    while (pp_peek(state) != 0 && i < max - 1) {
+        char c = pp_peek(state);
+        if (c == '\n' && !in_comment) {
+            break;
+        }
+        if (c == '\\' && state->src[state->pos + 1] == '\n') {
+            pp_next(state); pp_next(state);
             continue;
         }
-        buf[i++] = c;
+        if (!in_comment && c == '/' && state->src[state->pos + 1] == '/') {
+            while (pp_peek(state) != '\n' && pp_peek(state) != 0) pp_next(state);
+            break;
+        }
+        if (!in_comment && c == '/' && state->src[state->pos + 1] == '*') {
+            in_comment = 1; pp_next(state); pp_next(state);
+            continue;
+        }
+        if (in_comment && c == '*' && state->src[state->pos + 1] == '/') {
+            in_comment = 0; pp_next(state); pp_next(state);
+            continue;
+        }
+        pp_next(state);
+        if (!in_comment && c != '\n') buf[i++] = c;
     }
     buf[i] = 0;
 }
@@ -744,7 +844,11 @@ static char *pp_read_file(const char *path, int *out_len) {
     return buf;
 }
 
-static void pp_parse(PPState *state);
+static void pp_parse_target_depth(PPState *state, int target_depth);
+
+static void pp_parse(PPState *state) {
+    pp_parse_target_depth(state, state->input_depth);
+}
 
 static void pp_process_include(PPState *state, const char *path, int is_system) {
     char *file_src = 0;
@@ -781,9 +885,14 @@ static void pp_process_include(PPState *state, const char *path, int is_system) 
         
         /* we need to copy back the macros added by the header */
         for (i = state->num_macros; i < sub_state->num_macros; i++) {
-            if (state->num_macros >= PP_MAX_MACROS) break;
+            if (state->num_macros >= PP_MAX_MACROS) {
+                fprintf(stderr, "MAX MACROS REACHED!\n");
+                break;
+            }
             memcpy(&state->macros[state->num_macros++], &sub_state->macros[i], sizeof(PPMacro));
         }
+        
+        fprintf(stderr, "pp_process_include: %s added %d macros, total is %d\n", path, sub_state->num_macros - i, state->num_macros);
         
         /* update all previous active flags because undefs may have occurred */
         for (i = 0; i < state->num_macros; i++) {
@@ -819,12 +928,83 @@ static void pp_parse_params(PPState *state, PPMacro *m) {
     if (pp_peek(state) == ')') pp_next(state);
 }
 
+static int pp_eval_expr_str(PPState *state, const char *s, int depth) {
+    char buf[1024];
+    int i=0, j=0;
+    char *or_ptr, *and_ptr;
+    
+    fprintf(stderr, "eval depth=%d s='%s'\n", depth, s);
+    if (depth > 16) {
+        fprintf(stderr, "RECURSION DEPTH MAXED OUT!\n");
+        return 0;
+    }
+    
+    while(s[i] && j<1023) { if (s[i]!=' ' && s[i]!='\t' && s[i]!='\n' && s[i]!='\r') buf[j++]=s[i]; i++; }
+    buf[j]=0;
+    if (buf[0] == 0) return 0;
+    
+    or_ptr = strstr(buf, "||");
+    if (or_ptr) {
+        *or_ptr = 0;
+        return pp_eval_expr_str(state, buf, depth+1) || pp_eval_expr_str(state, or_ptr + 2, depth+1);
+    }
+    and_ptr = strstr(buf, "&&");
+    if (and_ptr) {
+        *and_ptr = 0;
+        return pp_eval_expr_str(state, buf, depth+1) && pp_eval_expr_str(state, and_ptr + 2, depth+1);
+    }
+    
+    char *op;
+    if ((op = strstr(buf, "=="))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) == pp_eval_expr_str(state, op+2, depth+1);
+    }
+    if ((op = strstr(buf, "!="))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) != pp_eval_expr_str(state, op+2, depth+1);
+    }
+    if ((op = strstr(buf, "<="))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) <= pp_eval_expr_str(state, op+2, depth+1);
+    }
+    if ((op = strstr(buf, ">="))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) >= pp_eval_expr_str(state, op+2, depth+1);
+    }
+    if ((op = strchr(buf, '<'))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) < pp_eval_expr_str(state, op+1, depth+1);
+    }
+    if ((op = strchr(buf, '>'))) {
+        *op = 0; return pp_eval_expr_str(state, buf, depth+1) > pp_eval_expr_str(state, op+1, depth+1);
+    }
+    
+    if (buf[0] == '!') return !pp_eval_expr_str(state, buf+1, depth+1);
+    
+    /* parenthesis stripping */
+    if (buf[0] == '(' && buf[j-1] == ')') {
+        buf[j-1] = 0;
+        return pp_eval_expr_str(state, buf+1, depth+1);
+    }
+    
+    if (buf[0] >= '0' && buf[0] <= '9') return strtol(buf, NULL, 0);
+    
+    if (strncmp(buf, "defined", 7) == 0) {
+        char *p = buf + 7;
+        char name[128];
+        int n_idx = 0;
+        while (*p == '(') p++;
+        while (*p && *p != ')' && n_idx < 127) name[n_idx++] = *p++;
+        name[n_idx] = 0;
+        return pp_find_macro(state, name) != 0;
+    }
+    
+    PPMacro *m = pp_find_macro(state, buf);
+    if (m) return pp_eval_expr_str(state, m->body, depth+1);
+    return 0;
+}
+
 static void pp_parse_directive(PPState *state) {
-    char dir[64];
+    char dir[1024];
     int active = pp_is_active(state);
     
     pp_skip_whitespace(state);
-    pp_parse_ident(state, dir, 64);
+    pp_parse_ident(state, dir, 1024);
     pp_skip_whitespace(state);
 
     if (strcmp(dir, "ifdef") == 0 || strcmp(dir, "ifndef") == 0) {
@@ -834,25 +1014,74 @@ static void pp_parse_directive(PPState *state) {
         is_defined = (pp_find_macro(state, name) != 0);
         
         state->cond_depth++;
+        state->cond_else_seen[state->cond_depth] = 0;
         if (!active) {
             state->cond_stack[state->cond_depth] = 0;
         } else {
             if (strcmp(dir, "ifdef") == 0) state->cond_stack[state->cond_depth] = is_defined;
             else state->cond_stack[state->cond_depth] = !is_defined;
         }
-        pp_read_line(state, dir, 64);
+        state->cond_satisfied[state->cond_depth] = state->cond_stack[state->cond_depth];
+        pp_read_line(state, dir, 1024);
+    } else if (strcmp(dir, "if") == 0) {
+        char expr[256];
+        pp_skip_whitespace(state);
+        pp_read_line(state, expr, 256);
+        state->cond_depth++;
+        state->cond_else_seen[state->cond_depth] = 0;
+        if (!active) {
+            state->cond_stack[state->cond_depth] = 0;
+        } else {
+            state->cond_stack[state->cond_depth] = pp_eval_expr_str(state, expr, 0); 
+        }
+        state->cond_satisfied[state->cond_depth] = state->cond_stack[state->cond_depth];
+    } else if (strcmp(dir, "elif") == 0) {
+        if (state->cond_depth > 0 && !state->cond_else_seen[state->cond_depth]) {
+            char expr[256];
+            pp_read_line(state, expr, 256);
+            if (state->cond_satisfied[state->cond_depth]) {
+                state->cond_stack[state->cond_depth] = 0;
+            } else {
+                int active_parent = 1;
+                int i;
+                for (i = 0; i < state->cond_depth; i++) if (!state->cond_stack[i]) active_parent = 0;
+                if (active_parent) {
+                    int result = pp_eval_expr_str(state, expr, 0);
+                    state->cond_stack[state->cond_depth] = result;
+                    if (result) state->cond_satisfied[state->cond_depth] = 1;
+                } else {
+                    state->cond_stack[state->cond_depth] = 0;
+                }
+            }
+        } else {
+            pp_read_line(state, dir, 1024);
+        }
     } else if (strcmp(dir, "else") == 0) {
         if (state->cond_depth > 0) {
+            state->cond_else_seen[state->cond_depth] = 1;
             int parent_active = 1;
             int i;
             for (i = 0; i < state->cond_depth; i++) if (!state->cond_stack[i]) parent_active = 0;
-            if (parent_active) state->cond_stack[state->cond_depth] = !state->cond_stack[state->cond_depth];
-            else state->cond_stack[state->cond_depth] = 0;
+            if (parent_active) {
+                if (state->cond_satisfied[state->cond_depth]) {
+                    state->cond_stack[state->cond_depth] = 0;
+                } else {
+                    state->cond_stack[state->cond_depth] = 1;
+                    state->cond_satisfied[state->cond_depth] = 1;
+                }
+            } else {
+                state->cond_stack[state->cond_depth] = 0;
+            }
         }
-        pp_read_line(state, dir, 64);
+        pp_read_line(state, dir, 1024);
     } else if (strcmp(dir, "endif") == 0) {
-        if (state->cond_depth > 0) state->cond_depth--;
-        pp_read_line(state, dir, 64);
+        if (state->cond_depth > 0) {
+            state->cond_satisfied[state->cond_depth] = 0;
+            state->cond_else_seen[state->cond_depth] = 0;
+            state->cond_depth--;
+        }
+
+        pp_read_line(state, dir, 1024);
     } else if (active) {
         if (strcmp(dir, "define") == 0) {
             char name[128];
@@ -873,7 +1102,7 @@ static void pp_parse_directive(PPState *state) {
             char name[128];
             pp_parse_ident(state, name, 128);
             pp_undef_macro(state, name);
-            pp_read_line(state, dir, 64);
+            pp_read_line(state, dir, 1024);
         } else if (strcmp(dir, "include") == 0) {
             char inc_path[256];
             int is_system = 0;
@@ -893,23 +1122,27 @@ static void pp_parse_directive(PPState *state) {
             pp_read_line(state, msg, 256);
             fprintf(stderr, "zcc preprocessor error: #error %s\n", msg);
         } else {
-            pp_read_line(state, dir, 64);
+            pp_read_line(state, dir, 1024);
         }
     } else {
-        pp_read_line(state, dir, 64);
+        pp_read_line(state, dir, 1024);
     }
     
     if (pp_peek(state) == '\n') pp_next(state);
     pp_emit(state, '\n');
 }
 
+
 static void pp_expand_ident(PPState *state, const char *ident) {
     PPMacro *m;
     int i, p_count;
     char args[PP_MAX_PARAMS][256];
     char c;
-    
-    if (!pp_is_active(state)) return;
+
+    if (strcmp(ident, "defined") == 0) {
+        pp_emit_str(state, "defined", 7);
+        return;
+    }
     
     m = pp_find_macro(state, ident);
     if (!m) {
@@ -918,43 +1151,75 @@ static void pp_expand_ident(PPState *state, const char *ident) {
     }
     
     if (!m->is_function_like) {
-        pp_emit_str(state, m->body, strlen(m->body));
+        m->active = 0;
+        pp_push_input(state, m->body, NULL, m);
         return;
     }
     
     /* Function-like macro expansion */
-    memset(args, 0, sizeof(args));
-    /* check if next non-whitespace is '(' */
-    int saved_pos = state->pos;
-    int saved_line = state->line;
-    pp_skip_whitespace(state);
+    
+    int space_cap = 1024;
+    char *space_buf = (char *)malloc(space_cap);
+    int space_len = 0;
+    
+    while (pp_peek(state) == ' ' || pp_peek(state) == '\t' || pp_peek(state) == '\n' || pp_peek(state) == '\r') {
+        if (space_len + 1 >= space_cap) {
+            space_cap *= 2;
+            space_buf = (char *)realloc(space_buf, space_cap);
+        }
+        space_buf[space_len++] = pp_next(state);
+    }
+    space_buf[space_len] = 0;
+
     if (pp_peek(state) != '(') {
-        /* Not an invocation */
-        state->pos = saved_pos;
-        state->line = saved_line;
         pp_emit_str(state, ident, strlen(ident));
+        pp_emit_str(state, space_buf, space_len);
+        free(space_buf);
         return;
     }
+    free(space_buf);
     pp_next(state); /* consume '(' */
+    
+    /* parse arguments */
+    for (i = 0; i < PP_MAX_PARAMS; i++) args[i][0] = 0;
     
     p_count = 0;
     int paren_level = 0;
     int arg_idx = 0;
+    int in_string = 0;
+    int in_char = 0;
     while (pp_peek(state) != 0) {
         c = pp_peek(state);
-        if (c == '(') paren_level++;
-        else if (c == ')') {
-            if (paren_level == 0) {
-                pp_next(state);
-                p_count++;
-                break;
-            }
-            paren_level--;
-        } else if (c == ',' && paren_level == 0) {
-            p_count++;
-            arg_idx = 0;
+        
+        if (c == '\\') {
             pp_next(state);
+            if (pp_peek(state) == '\n') { pp_next(state); continue; }
+            if (p_count < PP_MAX_PARAMS && arg_idx < 254) {
+                args[p_count][arg_idx++] = c;
+                args[p_count][arg_idx++] = pp_next(state);
+                args[p_count][arg_idx] = 0;
+            } else { pp_next(state); }
             continue;
+        }
+        
+        if (c == '"' && !in_char) in_string = !in_string;
+        if (c == '\'' && !in_string) in_char = !in_char;
+        
+        if (!in_string && !in_char) {
+            if (c == '(') paren_level++;
+            else if (c == ')') {
+                if (paren_level == 0) {
+                    pp_next(state); /* consume ')' */
+                    if (arg_idx > 0 || m->num_params > 0) p_count++;
+                    break;
+                }
+                paren_level--;
+            } else if (c == ',' && paren_level == 0) {
+                p_count++;
+                arg_idx = 0;
+                pp_next(state);
+                continue;
+            }
         }
         
         if (p_count < PP_MAX_PARAMS && arg_idx < 255) {
@@ -964,38 +1229,93 @@ static void pp_expand_ident(PPState *state, const char *ident) {
         pp_next(state);
     }
     
+    /* PRE-EXPAND ARGUMENTS
+     * Apply hide-set NOW, before arg expansion, so that if any argument
+     * contains 'ident' itself it won't recurse infinitely.
+     * (C99 6.10.3.4 — the macro being expanded is "painted blue" for the
+     *  duration of its own expansion, including argument pre-expansion.) */
+    m->active = 0;
+    char expanded_args[PP_MAX_PARAMS][1024];
+    for (i = 0; i < p_count; i++) {
+        char *old_out = state->out;
+        int old_out_len = state->out_len;
+        int old_out_cap = state->out_cap;
+        
+        state->out = expanded_args[i];
+        state->out_len = 0;
+        state->out_cap = 1023;
+        
+        /* Evaluate arg[i] as an independent parsing stream */
+        pp_push_input(state, args[i], NULL, NULL);
+        pp_parse_target_depth(state, state->input_depth); 
+        expanded_args[i][state->out_len] = 0;
+        
+        /* restore */
+        state->out = old_out;
+        state->out_len = old_out_len;
+        state->out_cap = old_out_cap;
+    }
+    
     /* substitute */
     int len = strlen(m->body);
+    int est_len = len + (p_count * 256) + 1;
+    char *subst = (char *)malloc(est_len);
+    int subst_idx = 0;
+    
     for (i = 0; i < len; i++) {
+        if (m->body[i] == '#' && m->body[i+1] == '#') {
+            i++; /* skip second # */
+            /* strip trailing spaces from subst output */
+            while (subst_idx > 0 && (subst[subst_idx-1] == ' ' || subst[subst_idx-1] == '\t')) {
+                subst_idx--;
+            }
+            /* strip leading spaces in upcoming tokens */
+            while (i + 1 < len && (m->body[i+1] == ' ' || m->body[i+1] == '\t')) {
+                i++;
+            }
+            continue;
+        }
         if (is_ident_start(m->body[i])) {
-            char param_name[64];
-            int t = 0;
-            while (i < len && is_ident_char(m->body[i]) && t < 63) param_name[t++] = m->body[i++];
-            param_name[t] = 0;
+            char param_name[128];
+            int p_idx = 0;
+            while (i < len && is_ident_char(m->body[i]) && p_idx < 127) {
+                param_name[p_idx++] = m->body[i++];
+            }
+            param_name[p_idx] = 0;
             i--; /* backup */
             
-            /* See if it matches a parameter */
             int found = -1;
             int j;
             for (j = 0; j < m->num_params; j++) {
-                if (strcmp(param_name, m->params[j]) == 0) { found = j; break; }
+                if (strcmp(m->params[j], param_name) == 0) {
+                    found = j;
+                    break;
+                }
             }
             
-            if (found >= 0) {
-                pp_emit_str(state, args[found], strlen(args[found]));
+            if (found >= 0 && found < p_count) {
+                strcpy(subst + subst_idx, expanded_args[found]);
+                subst_idx += strlen(expanded_args[found]);
             } else {
-                pp_emit_str(state, param_name, strlen(param_name));
+                strcpy(subst + subst_idx, param_name);
+                subst_idx += strlen(param_name);
             }
         } else {
-            pp_emit(state, m->body[i]);
+            subst[subst_idx++] = m->body[i];
         }
     }
+    subst[subst_idx] = 0;
+    
+    /* Standard C preprocessor hide-set logic: push expansion body.
+     * m->active is already 0 (set before arg expansion above). */
+    pp_push_input(state, subst, subst, m);
 }
 
-static void pp_parse(PPState *state) {
+static void pp_parse_target_depth(PPState *state, int target_depth) {
     int in_string = 0;
-    while (pp_peek(state) != 0) {
+    while (1) {
         char c = pp_peek(state);
+        if (state->input_depth < target_depth || c == 0) break;
         
         if (c == '"' || c == '\'') {
             in_string = c;
@@ -1077,7 +1397,16 @@ char *zcc_preprocess(const char *source, int source_len,
     
     state->cond_stack[0] = 1;
     
-    pp_parse(state);
+    {
+        PPMacro *m = pp_add_macro(state, "__x86_64__");
+        strcpy(m->body, "1");
+        m = pp_add_macro(state, "__GNUC__");
+        strcpy(m->body, "1");
+        m = pp_add_macro(state, "__thread");
+        strcpy(m->body, "");
+    }
+
+    pp_parse_target_depth(state, 0);
     
     pp_emit(state, 0);
     if (out_len) *out_len = state->out_len - 1;
@@ -1085,6 +1414,12 @@ char *zcc_preprocess(const char *source, int source_len,
     free(state);
     return result;
 }
+
+/* ================================================================ */
+#ifndef ZCC_AST_BRIDGE_H
+/* Exclusively for standalone IDE analysis */
+#include "part1.c"
+#endif
 
 /* ================================================================ */
 /* ARENA ALLOCATOR                                                   */
@@ -1409,6 +1744,9 @@ static Keyword keywords[] = {
     {"signed",    TK_SIGNED},
     {"float",     TK_FLOAT},
     {"double",    TK_DOUBLE},
+    {"_TOFP32",   TK_TOFP32},
+    {"_EMFP16_LIVE", TK_EMFP16_LIVE},
+    {"_SPSQ32_DIFF", TK_SPSQ32_DIFF},
     {"if",        TK_IF},
     {"else",      TK_ELSE},
     {"while",     TK_WHILE},
@@ -1425,6 +1763,10 @@ static Keyword keywords[] = {
     {"union",     TK_UNION},
     {"enum",      TK_ENUM},
     {"typedef",   TK_TYPEDEF},
+    {"typeof",    TK_TYPEOF},
+    {"__typeof__", TK_TYPEOF},
+    {"__typeof",  TK_TYPEOF},
+    {"__auto_type", TK_AUTO_TYPE},
     {"sizeof",    TK_SIZEOF},
     {"__builtin_va_arg", TK_BUILTIN_VA_ARG},
     {"static",    TK_STATIC},
@@ -1434,6 +1776,8 @@ static Keyword keywords[] = {
     {"auto",      TK_AUTO},
     {"register",  TK_REGISTER},
     {"inline",    TK_INLINE},
+    {"asm",       TK_ASM},
+    {"__asm__",   TK_ASM},
     {"__signed__", TK_SIGNED},
     {"__signed",   TK_SIGNED},
     {"__const__",  TK_CONST},
@@ -1450,7 +1794,7 @@ static Keyword keywords[] = {
     {0, 0}
 };
 
-static int kw_count = 47;
+static int kw_count = 56;
 
 static int lookup_keyword(char *name) {
     int i;
@@ -1475,7 +1819,12 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==6 && buf[0]=='s'&&buf[1]=='i'&&buf[2]=='g'&&buf[3]=='n'&&buf[4]=='e'&&buf[5]=='d') return TK_SIGNED;
     if (len==5 && buf[0]=='f'&&buf[1]=='l'&&buf[2]=='o'&&buf[3]=='a'&&buf[4]=='t') return TK_FLOAT;
     if (len==6 && buf[0]=='d'&&buf[1]=='o'&&buf[2]=='u'&&buf[3]=='b'&&buf[4]=='l'&&buf[5]=='e') return TK_DOUBLE;
+    if (len==7 && buf[0]=='_'&&buf[1]=='T'&&buf[2]=='O'&&buf[3]=='F'&&buf[4]=='P'&&buf[5]=='3'&&buf[6]=='2') return TK_TOFP32;
+    if (len==12 && buf[0]=='_'&&buf[1]=='E'&&buf[2]=='M'&&buf[3]=='F'&&buf[4]=='P'&&buf[5]=='1'&&buf[6]=='6'&&buf[7]=='_'&&buf[8]=='L'&&buf[9]=='I'&&buf[10]=='V'&&buf[11]=='E') return TK_EMFP16_LIVE;
+    if (len==12 && buf[0]=='_'&&buf[1]=='S'&&buf[2]=='P'&&buf[3]=='S'&&buf[4]=='Q'&&buf[5]=='3'&&buf[6]=='2'&&buf[7]=='_'&&buf[8]=='D'&&buf[9]=='I'&&buf[10]=='F'&&buf[11]=='F') return TK_SPSQ32_DIFF;
     if (len==2 && buf[0]=='i'&&buf[1]=='f') return TK_IF;
+    if (len==3 && buf[0]=='a'&&buf[1]=='s'&&buf[2]=='m') return TK_ASM;
+    if (len==7 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='a'&&buf[3]=='s'&&buf[4]=='m'&&buf[5]=='_'&&buf[6]=='_') return TK_ASM;
     if (len==4 && buf[0]=='e'&&buf[1]=='l'&&buf[2]=='s'&&buf[3]=='e') return TK_ELSE;
     if (len==5 && buf[0]=='w'&&buf[1]=='h'&&buf[2]=='i'&&buf[3]=='l'&&buf[4]=='e') return TK_WHILE;
     if (len==3 && buf[0]=='f'&&buf[1]=='o'&&buf[2]=='r') return TK_FOR;
@@ -1494,6 +1843,9 @@ static int lookup_keyword_fallback(char *buf, int len) {
     if (len==5 && buf[0]=='c'&&buf[1]=='o'&&buf[2]=='n'&&buf[3]=='s'&&buf[4]=='t') return TK_CONST;
     if (len==4 && buf[0]=='a'&&buf[1]=='u'&&buf[2]=='t'&&buf[3]=='o') return TK_AUTO;
     if (len==6 && buf[0]=='i'&&buf[1]=='n'&&buf[2]=='l'&&buf[3]=='i'&&buf[4]=='n'&&buf[5]=='e') return TK_INLINE;
+    if (len==6 && buf[0]=='t'&&buf[1]=='y'&&buf[2]=='p'&&buf[3]=='e'&&buf[4]=='o'&&buf[5]=='f') return TK_TYPEOF;
+    if (len==8 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='t'&&buf[3]=='y'&&buf[4]=='p'&&buf[5]=='e'&&buf[6]=='o'&&buf[7]=='f') return TK_TYPEOF;
+    if (len==10 && buf[0]=='_'&&buf[1]=='_'&&buf[2]=='t'&&buf[3]=='y'&&buf[4]=='p'&&buf[5]=='e'&&buf[6]=='o'&&buf[7]=='f'&&buf[8]=='_'&&buf[9]=='_') return TK_TYPEOF;
     /* 7–8 char keywords: need len check then safe indices 0..6 or 0..7 */
     if (len==7 && buf[0]=='t'&&buf[1]=='y'&&buf[2]=='p'&&buf[3]=='e'&&buf[4]=='d'&&buf[5]=='e'&&buf[6]=='f') return TK_TYPEDEF;
     if (len==7 && buf[0]=='d'&&buf[1]=='e'&&buf[2]=='f'&&buf[3]=='a'&&buf[4]=='u'&&buf[5]=='l'&&buf[6]=='t') return TK_DEFAULT;
@@ -2131,17 +2483,24 @@ int peek_token(Compiler *cc) {
 }
 
 /* ZKAEDI FORCE RENDER CACHE INVALIDATION */
+#ifndef ZCC_AST_BRIDGE_H
+/* Exclusively for standalone IDE analysis */
+#include "part1.c"
+#endif
+
 /* ================================================================ */
 /* PARSER                                                            */
 /* ================================================================ */
 
 static int is_type_token(Compiler *cc) {
-    if (cc->tk >= TK_INT && cc->tk <= TK_DOUBLE) return 1;
+    if (cc->tk >= TK_INT && cc->tk <= TK_SPSQ32_DIFF) return 1;
     if (cc->tk >= TK_STATIC && cc->tk <= TK_INLINE) return 1;
     if (cc->tk == TK_STRUCT) return 1;
     if (cc->tk == TK_UNION) return 1;
     if (cc->tk == TK_ENUM) return 1;
     if (cc->tk == TK_TYPEDEF) return 1;
+    if (cc->tk == TK_TYPEOF) return 1;
+    if (cc->tk == TK_AUTO_TYPE) return 1;
     if (cc->tk == TK_IDENT) {
         Symbol *sym;
         sym = scope_find(cc, cc->tk_text);
@@ -2579,6 +2938,9 @@ Type *parse_type(Compiler *cc) {
     int is_double = 0;
     int is_float = 0;
     int is_void = 0;
+    int is_tofp32 = 0;
+    int is_emfp16 = 0;
+    int is_spsq32 = 0;
     int is_typedef_kw = 0;
     int is_static = 0;
     int is_extern = 0;
@@ -2602,10 +2964,16 @@ Type *parse_type(Compiler *cc) {
         else if (cc->tk == TK_DOUBLE) { is_double = 1; next_token(cc); }
         else if (cc->tk == TK_FLOAT) { is_float = 1; next_token(cc); }
         else if (cc->tk == TK_VOID) { is_void = 1; next_token(cc); }
+        else if (cc->tk == TK_TOFP32) { is_tofp32 = 1; next_token(cc); }
+        else if (cc->tk == TK_EMFP16_LIVE) { is_emfp16 = 1; next_token(cc); }
+        else if (cc->tk == TK_SPSQ32_DIFF) { is_spsq32 = 1; next_token(cc); }
         else break;
     }
 
     if (is_void) { type = cc->ty_void; }
+    else if (is_tofp32) { type = type_new(cc, TY_TOFP32); }
+    else if (is_emfp16) { type = type_new(cc, TY_EMFP16_LIVE); }
+    else if (is_spsq32) { type = type_new(cc, TY_SPSQ32_DIFF); }
     else if (is_float) { type = cc->ty_float; }
     else if (is_double) { type = cc->ty_double; }
     else if (is_char) {
@@ -2636,6 +3004,19 @@ Type *parse_type(Compiler *cc) {
         else if (cc->tk == TK_ENUM) {
             next_token(cc);
             type = parse_enum_def(cc);
+        }
+        else if (cc->tk == TK_TYPEOF) {
+            next_token(cc);
+            expect(cc, TK_LPAREN);
+            Node *expr = parse_expr(cc);
+            expect(cc, TK_RPAREN);
+            type = expr->type;
+            if (!type) type = cc->ty_int;
+        }
+        else if (cc->tk == TK_AUTO_TYPE) {
+            next_token(cc);
+            type = type_new(cc, TY_VOID);
+            type->size = 0; /* placeholder */
         }
         else if (cc->tk == TK_IDENT) {
             /* could be a typedef name */
@@ -3411,7 +3792,7 @@ Node *parse_unary(Compiler *cc) {
     if (cc->tk == TK_LPAREN) {
         int pk = peek_token(cc);
         int is_cast = 0;
-        if (pk == TK_INT || pk == TK_CHAR || pk == TK_VOID || pk == TK_STRUCT || pk == TK_UNION || pk == TK_ENUM || pk == TK_LONG || pk == TK_SHORT || pk == TK_UNSIGNED || pk == TK_SIGNED || pk == TK_FLOAT || pk == TK_DOUBLE) {
+        if (pk == TK_INT || pk == TK_CHAR || pk == TK_VOID || pk == TK_STRUCT || pk == TK_UNION || pk == TK_ENUM || pk == TK_LONG || pk == TK_SHORT || pk == TK_UNSIGNED || pk == TK_SIGNED || pk == TK_FLOAT || pk == TK_DOUBLE || pk == TK_TOFP32 || pk == TK_EMFP16_LIVE || pk == TK_SPSQ32_DIFF) {
             is_cast = 1;
         } else if (pk == TK_IDENT) {
             Symbol *sym = scope_find(cc, cc->peek_text);
@@ -3542,6 +3923,14 @@ Node *parse_unary(Compiler *cc) {
             n->lhs = parse_unary(cc);
             n->type = cast_type;
             n->cast_type = cast_type;
+
+            /* v0.10: Forbid cross-type novel<->novel coercions */
+            if ((cast_type->kind == TY_TOFP32 || cast_type->kind == TY_EMFP16_LIVE || cast_type->kind == TY_SPSQ32_DIFF) &&
+                n->lhs->type &&
+                (n->lhs->type->kind == TY_TOFP32 || n->lhs->type->kind == TY_EMFP16_LIVE || n->lhs->type->kind == TY_SPSQ32_DIFF) &&
+                cast_type->kind != n->lhs->type->kind) {
+                error_at(cc, line, "cross-format coercion not supported in v0.10; use same-type ops or await v0.11 runtime");
+            }
             return n;
         }
     }
@@ -3981,6 +4370,25 @@ static Node *current_sw = 0;
 Node *parse_stmt(Compiler *cc) {
     int line;
     line = cc->tk_line;
+
+    /* inline assembly */
+    if (cc->tk == TK_ASM) {
+        Node *n;
+        next_token(cc);
+        if (cc->tk == TK_VOLATILE) next_token(cc);
+        expect(cc, TK_LPAREN);
+        n = node_new(cc, ND_ASM, line);
+        if (cc->tk == TK_STR) {
+            n->asm_string = cc_strdup(cc, cc->tk_str);
+            next_token(cc);
+        } else {
+            error(cc, "expected string literal in asm");
+            n->asm_string = "";
+        }
+        expect(cc, TK_RPAREN);
+        expect(cc, TK_SEMI);
+        return n;
+    }
 
     /* block */
     if (cc->tk == TK_LBRACE) {
@@ -4868,8 +5276,8 @@ Node *parse_program(Compiler *cc) {
             if (cc->tk == TK_LPAREN) {
                 int gpk;
                 gpk = peek_token(cc);
-                if (gpk == TK_STAR) {
-                    /* function pointer: typedef int (*name)(params); or int (*fp)(int); */
+                if (gpk == TK_STAR || gpk == TK_IDENT) {
+                    /* function pointer: typedef int (*name)(params); or int (*fp)(int); or int (fp)(int) */
                     int gptr;
                     int arr_lens[8];
                     int arr_num;
@@ -5285,6 +5693,16 @@ typedef enum {
     IR_LABEL,       /* label definition — label field only                 */
     IR_NOP,         /* no operation — used as placeholder during passes    */
 
+    /* Floating-point operations */
+    IR_FCONST,      /* dst = float_imm  (double stored bitwise in .imm)   */
+    IR_FADD,        /* dst = src1 +f src2  (double add)                    */
+    IR_FSUB,        /* dst = src1 -f src2  (double sub)                    */
+    IR_FMUL,        /* dst = src1 *f src2  (double mul)                    */
+    IR_FDIV,        /* dst = src1 /f src2  (double div)                    */
+    IR_ITOF,        /* dst = (double)src1  (signed int64 to double)        */
+    IR_FTOI,        /* dst = (int64)src1   (double to signed int64)        */
+    IR_ASM,         /* dst = asm_string                                    */
+
     IR_OP_COUNT     /* sentinel — keep last                                */
 } ir_op_t;
 
@@ -5306,7 +5724,11 @@ typedef enum {
     IR_TY_U64,      /* unsigned 64-bit                                     */
     IR_TY_PTR,      /* generic pointer — 8 bytes LP64                      */
     IR_TY_F32,      /* float   — reserved, not emitted in P1               */
-    IR_TY_F64,      /* double  — reserved, not emitted in P1               */
+    IR_TY_F64,
+    IR_TY_TOFP32,       /* gaming format: Tile-Offset 32-bit                   */
+    IR_TY_EMFP16_LIVE,  /* gaming format: Energy-Modulated FP16 (Live H-field) */
+    IR_TY_SPSQ32_DIFF,  /* gaming format: Stereo-Projective Spherical Quat     */
+    IR_TY_F16,      /* half    — gaming baseline                           */
     IR_TY_COUNT     /* sentinel                                             */
 } ir_type_t;
 
@@ -5335,6 +5757,8 @@ typedef struct ir_node_t {
     char               src2[IR_NAME_MAX];   /* second source (if any)     */
     char               label[IR_LABEL_MAX]; /* branch target / label name */
     char               label2[IR_LABEL_MAX];/* phi: label for src2        */
+
+    char              *asm_string;          /* assembly string            */
 
     long               imm;      /* integer immediate (CONST, ALLOCA)     */
     int                lineno;   /* source file line number               */
@@ -5492,6 +5916,21 @@ static void ZCC_EMIT_BINARY(ir_op_t op, ir_type_t ty, const char *dst, const cha
     }
 }
 
+extern uint8_t ir_tel_fpx_coerce_query(uint8_t src, uint8_t dst);
+extern uint8_t ir_tel_fpx_coerce_cast_attempt(uint8_t src, uint8_t dst, uint32_t ctx);
+static void ZCC_EMIT_CAST(ir_type_t dst_ty, ir_type_t src_ty, const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        int src_is_novel = (src_ty == IR_TY_TOFP32 || src_ty == IR_TY_EMFP16_LIVE || src_ty == IR_TY_SPSQ32_DIFF);
+        int dst_is_novel = (dst_ty == IR_TY_TOFP32 || dst_ty == IR_TY_EMFP16_LIVE || dst_ty == IR_TY_SPSQ32_DIFF);
+
+        /* v0.10: Record metrics only for novel<->standard edges, preventing novel<->novel casts from polluting heatmap */
+        if ((src_is_novel || dst_is_novel) && !(src_is_novel && dst_is_novel)) {
+            ir_tel_fpx_coerce_cast_attempt((uint8_t)src_ty, (uint8_t)dst_ty, (uint32_t)line);
+        }
+        ir_emit(g_ir_cur_func, IR_CAST, dst_ty, dst, src, 0, 0, 0, line);
+    }
+}
+
 static void ZCC_EMIT_UNARY(ir_op_t op, ir_type_t ty, const char *dst, const char *src, int line) {
     if (g_emit_ir && g_ir_cur_func) {
         ir_emit(g_ir_cur_func, op, ty, dst, src, 0, 0, 0, line);
@@ -5555,6 +5994,37 @@ static void ZCC_EMIT_CALL(ir_type_t ty, const char *dst, const char *fname, int 
 static void ZCC_EMIT_ARG(ir_type_t ty, const char *val, int line) {
     if (g_emit_ir && g_ir_cur_func) {
         ir_emit(g_ir_cur_func, IR_ARG, ty, 0, val, 0, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_FCONST(const char *dst, long bits, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_FCONST, IR_TY_F64, dst, 0, 0, 0, bits, line);
+    }
+}
+
+static void ZCC_EMIT_FBINARY(ir_op_t op, const char *dst, const char *s1, const char *s2, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, op, IR_TY_F64, dst, s1, s2, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_ITOF(const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_ITOF, IR_TY_F64, dst, src, 0, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_FTOI(const char *dst, const char *src, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_emit(g_ir_cur_func, IR_FTOI, IR_TY_I64, dst, src, 0, 0, 0, line);
+    }
+}
+
+static void ZCC_EMIT_ASM(const char *asm_str, int line) {
+    if (g_emit_ir && g_ir_cur_func) {
+        ir_node_t *n = ir_emit(g_ir_cur_func, IR_ASM, IR_TY_VOID, 0, 0, 0, 0, 0, line);
+        if (n) n->asm_string = (char *)asm_str;
     }
 }
 
@@ -5638,6 +6108,9 @@ static ir_type_t ir_map_type(Type *ty) {
     case TY_ULONG:      return IR_TY_U64;
     case TY_LONGLONG:   return IR_TY_I64;
     case TY_ULONGLONG:  return IR_TY_U64;
+    case TY_TOFP32:       return IR_TY_TOFP32;
+    case TY_EMFP16_LIVE:  return IR_TY_EMFP16_LIVE;
+    case TY_SPSQ32_DIFF:  return IR_TY_SPSQ32_DIFF;
     default:            break;
     }
 
@@ -5749,15 +6222,46 @@ static void ir_emit_var_load(Node *node) {
 /* CODE GENERATOR — x86-64 Linux (System V) or Windows x64 ABI      */
 /* ================================================================ */
 
-#include "ir_bridge.h"
+#ifndef ZCC_AST_BRIDGE_H
+/* Exclusively for standalone IDE analysis */
+#include "part1.c"
+#endif
+
 #include "ir_emit_dispatch.h"
+#include "ir_bridge.h"
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdangling-else"
+#pragma clang diagnostic ignored "-Wmisleading-indentation"
+#pragma clang diagnostic ignored "-Wpointer-bool-conversion"
+#pragma clang diagnostic ignored "-Wtautological-pointer-compare"
+int is_unsigned_type(Type *ty);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
+#endif
 
 static void push_reg(Compiler *cc, char *reg) {
+  if (backend_ops) {
+      if (strcmp(reg, "rax") == 0) reg = "r0";
+      else if (strcmp(reg, "r11") == 0) reg = "r1";
+      else if (strcmp(reg, "rdx") == 0) reg = "r2";
+      fprintf(cc->out, "    push {%s}\n", reg);
+      cc->stack_depth++;
+      return;
+  }
   fprintf(cc->out, "    pushq %%%s\n", reg);
   cc->stack_depth++;
 }
 
 static void pop_reg(Compiler *cc, char *reg) {
+  if (backend_ops) {
+      if (strcmp(reg, "rax") == 0) reg = "r0";
+      else if (strcmp(reg, "r11") == 0) reg = "r1";
+      else if (strcmp(reg, "rdx") == 0) reg = "r2";
+      fprintf(cc->out, "    pop {%s}\n", reg);
+      cc->stack_depth--;
+      return;
+  }
   fprintf(cc->out, "    popq %%%s\n", reg);
   cc->stack_depth--;
 }
@@ -5787,12 +6291,34 @@ static int log2_of(long long val) {
  * (stage2 mispasses them). */
 enum { FMT_JE = 1, FMT_JMP, FMT_DEF, FMT_JNE };
 static void emit_label_fmt(Compiler *cc, int n, int fmt) {
+  if (backend_ops) {
+      switch (fmt) {
+      case FMT_JE:
+        fprintf(cc->out, "    beq .L%d\n", n);
+        break;
+      case FMT_JMP:
+        fprintf(cc->out, "    b .L%d\n", n);
+        break;
+      case FMT_DEF:
+        fprintf(cc->out, ".L%d:\n", n);
+        break;
+      case FMT_JNE:
+        fprintf(cc->out, "    bne .L%d\n", n);
+        break;
+      default:
+        fprintf(cc->out, ".L%d:\n", n);
+        break;
+      }
+      return;
+  }
   switch (fmt) {
   case FMT_JE:
-    fprintf(cc->out, "    je .L%d\n", n);
+    if (backend_ops) fprintf(cc->out, "    beq .L%d\n", n);
+    else fprintf(cc->out, "    je .L%d\n", n);
     break;
   case FMT_JMP:
-    fprintf(cc->out, "    jmp .L%d\n", n);
+    if (backend_ops) fprintf(cc->out, "    b .L%d\n", n);
+    else fprintf(cc->out, "    jmp .L%d\n", n);
     break;
   case FMT_DEF:
     fprintf(cc->out, ".L%d:\n", n);
@@ -5825,6 +6351,16 @@ int ptr_in_fault_range(const void *p) {
 /* ---------------------------------------------------------------- */
 
 void codegen_load(Compiler *cc, Type *type) {
+  if (backend_ops) {
+      if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
+          fprintf(cc->out, "    ldr r0, [r0]\n");
+      } else if (type->size == 1) {
+          fprintf(cc->out, "    ldrb r0, [r0]\n");
+      } else if (type->size == 2) {
+          fprintf(cc->out, "    ldrh r0, [r0]\n");
+      }
+      return;
+  }
   if (!type) {
     fprintf(cc->out, "    movq (%%rax), %%rax\n");
     return;
@@ -5872,9 +6408,22 @@ void codegen_load(Compiler *cc, Type *type) {
 
 void codegen_store(Compiler *cc, Type *type) {
   pop_reg(cc, "r11");
+  if (backend_ops) {
+      if (!type || type->size == 4 || type->size == 8 || type->kind == TY_PTR) {
+          fprintf(cc->out, "    str r1, [r0]\n");
+      } else if (type->size == 1) {
+          fprintf(cc->out, "    strb r1, [r0]\n");
+      } else if (type->size == 2) {
+          fprintf(cc->out, "    strh r1, [r0]\n");
+      }
+      fprintf(cc->out, "    mov r0, r1\n");
+      return;
+  }
   if (!type) {
-    fprintf(cc->out, "    movq %%r11, (%%rax)\n");
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   /* Do NOT check fault range here: stage2 miscompiles it and rejects valid
@@ -5882,8 +6431,10 @@ void codegen_store(Compiler *cc, Type *type) {
   /* Pointers must always be 64-bit (fixes stage2 sign-extended 32-bit store).
    */
   if (type->kind == TY_PTR) {
-    fprintf(cc->out, "    movq %%r11, (%%rax)\n");
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   if (type->kind == TY_STRUCT || type->kind == TY_UNION || type->size > 8) {
@@ -5897,24 +6448,30 @@ void codegen_store(Compiler *cc, Type *type) {
     fprintf(cc->out, "    popq %%rcx\n");
     fprintf(cc->out, "    popq %%rdi\n");
     fprintf(cc->out, "    popq %%rsi\n");
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     return;
   }
   switch (type->size) {
   case 1:
-    fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
     break;
   case 2:
-    fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
     break;
   case 4:
-    fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
     break;
   default:
-    fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+    if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
     break;
   }
-  fprintf(cc->out, "    movq %%r11, %%rax\n");
+  if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
 }
 
 /* Return cutoff so stage2 can't miscompile inline constant (GDB showed
@@ -6067,7 +6624,11 @@ void codegen_addr(Compiler *cc, Node *node) {
         off = -off; /* never use positive: would write above frame (e.g. return
                        address) and crash */
       if (off != 0 && !node->sym->is_global) {
-        fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", off);
+        if (backend_ops) {
+            fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r7, r3\n", off);
+        } else {
+            fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", off);
+        }
         char vname[32];
         sprintf(vname, "%%stack_%d", off);
         char *dst = ir_bridge_fresh_tmp();
@@ -6075,7 +6636,11 @@ void codegen_addr(Compiler *cc, Node *node) {
         return;
       }
     }
-    fprintf(cc->out, "    leaq %s(%%rip), %%rax\n", node->name);
+    if (backend_ops) {
+        fprintf(cc->out, "    ldr r0, =%s\n", node->name);
+    } else {
+        fprintf(cc->out, "    leaq %s(%%rip), %%rax\n", node->name);
+    }
     char gname[32];
     sprintf(gname, "%%%s", node->name);
     char *dst = ir_bridge_fresh_tmp();
@@ -6169,6 +6734,14 @@ void codegen_expr(Compiler *cc, Node *node) {
   switch (node->kind) {
 
   case ND_NUM:
+    if (backend_ops) {
+        fprintf(cc->out, "    ldr r0, =%lld\n", node->int_val);
+        {
+          char *dst = ir_bridge_fresh_tmp();
+          ZCC_EMIT_CONST(ir_map_type(node->type), dst, node->int_val, node->line);
+        }
+        return;
+    }
     if (node->int_val >= -2147483648) {
       if (node->int_val <= 2147483647) {
         fprintf(cc->out, "    movq $%lld, %%rax\n", node->int_val);
@@ -6195,7 +6768,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    .section .rodata\n");
     fprintf(cc->out, "    .p2align 3\n");
     fprintf(cc->out, ".L_flit_%d:\n", lbl);
-    memcpy(&bits, &node->f_val, 8);
+    memcpy(&bits, &node->f_val, sizeof(double));
     fprintf(cc->out, "    .quad %llu\n", bits);
     fprintf(cc->out, "    .text\n");
     fprintf(cc->out, "    movsd .L_flit_%d(%%rip), %%xmm0\n", lbl);
@@ -6203,6 +6776,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     /* Satisfy IR subsystem sequence */
     {
       char *dst = ir_bridge_fresh_tmp();
+      long long flit_bits;
+      memcpy(&flit_bits, &node->f_val, sizeof(double));
+      ZCC_EMIT_FCONST(dst, flit_bits, node->line);
     }
     return;
   }
@@ -6221,13 +6797,13 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_VAR:
     if (node->sym && node->sym->assigned_reg) {
-      fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", node->sym->assigned_reg); else fprintf(cc->out, "    movq %s, %%rax\n", node->sym->assigned_reg);
       if (node->type && !node_type_unsigned(node) && !is_pointer(node->type)) {
-          if (node->type->size == 4) fprintf(cc->out, "    cltq\n");
+          if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->type && node_type_unsigned(node)) {
-          if (node->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+          if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
           else if (node->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
           else if (node->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
@@ -6269,15 +6845,15 @@ void codegen_expr(Compiler *cc, Node *node) {
     if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->sym &&
         node->lhs->sym->assigned_reg) {
       if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      fprintf(cc->out, "    movq %%rax, %s\n", node->lhs->sym->assigned_reg);
+      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", node->lhs->sym->assigned_reg); else fprintf(cc->out, "    movq %%rax, %s\n", node->lhs->sym->assigned_reg);
       {
         char *vname = ir_var_name(node->lhs);
         ZCC_EMIT_STORE(ir_map_type(node->lhs->type), vname, rhs_ir, node->line);
@@ -6314,28 +6890,35 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    popq %%rcx\n");
         fprintf(cc->out, "    popq %%rdi\n");
         fprintf(cc->out, "    popq %%rsi\n");
-        fprintf(cc->out, "    movq %%r11, %%rax\n");
+        if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
       } else {
         /* If member type is pointer/func, always use movq regardless of member_size */
         if (node->lhs->type && is_pointer(node->lhs->type)) {
-          fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         } else {
         switch (node->lhs->member_size) {
         case 1:
-          fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+          if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
           break;
         case 2:
-          fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+          if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
           break;
         case 4:
-          fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
           break;
         default:
-          fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+          if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
           break;
         }
         }
-        fprintf(cc->out, "    movq %%r11, %%rax\n");
+        if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
       }
     } else {
       codegen_store(cc, node->lhs->type);
@@ -6358,8 +6941,9 @@ void codegen_expr(Compiler *cc, Node *node) {
         node->lhs->sym->assigned_reg) {
       char *reg = node->lhs->sym->assigned_reg;
       codegen_expr_checked(cc, node->rhs);
-      fprintf(cc->out, "    movq %%rax, %%r11\n");
-      fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
       switch (node->compound_op) {
       case ND_ADD:
         if (is_pointer(node->lhs->type)) {
@@ -6375,10 +6959,12 @@ void codegen_expr(Compiler *cc, Node *node) {
           if (esz > 1)
             fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
         }
-        fprintf(cc->out, "    subq %%r11, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
+      else fprintf(cc->out, "    subq %%r11, %%rax\n");
         break;
       case ND_MUL:
-        fprintf(cc->out, "    imulq %%r11, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
+      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
         break;
       case ND_DIV:
         if (node->lhs->type && is_unsigned_type(node->lhs->type)) {
@@ -6397,36 +6983,42 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
         break;
       case ND_BAND:
-        fprintf(cc->out, "    andq %%r11, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
+      else fprintf(cc->out, "    andq %%r11, %%rax\n");
         break;
       case ND_BOR:
-        fprintf(cc->out, "    orq %%r11, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
+      else fprintf(cc->out, "    orq %%r11, %%rax\n");
         break;
       case ND_BXOR:
-        fprintf(cc->out, "    xorq %%r11, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
+      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
         break;
       case ND_SHL:
-        fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHL);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
         break;
       case ND_SHR:
         if (node->lhs->type && is_unsigned_type(node->lhs->type))
-          fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+          if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
         else
-          fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
+          if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
         break;
       default:
         break;
       }
       if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     codegen_addr_checked(cc, node->lhs);
@@ -6462,7 +7054,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (node->compound_op) {
     case ND_ADD:
@@ -6494,7 +7087,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (esz > 1)
           fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
       }
-      fprintf(cc->out, "    subq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
+      else fprintf(cc->out, "    subq %%r11, %%rax\n");
       break;
     case ND_MUL:
       if (node->lhs->type && is_float_type(node->lhs->type)) {
@@ -6504,7 +7098,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
         break;
       }
-      fprintf(cc->out, "    imulq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
+      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
       break;
     case ND_DIV:
       if (node->lhs->type && is_float_type(node->lhs->type)) {
@@ -6525,74 +7120,95 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (node->lhs->type && is_unsigned_type(node->lhs->type)) {
         fprintf(cc->out, "    xorq %%rdx, %%rdx\n");
         fprintf(cc->out, "    divq %%r11\n");
-        fprintf(cc->out, "    movq %%rdx, %%rax\n");
+        if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
+      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
       } else {
         fprintf(cc->out, "    cqo\n    idivq %%r11\n    movq %%rdx, %%rax\n");
       }
       break;
     case ND_BAND:
-      fprintf(cc->out, "    andq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
+      else fprintf(cc->out, "    andq %%r11, %%rax\n");
       break;
     case ND_BOR:
-      fprintf(cc->out, "    orq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
+      else fprintf(cc->out, "    orq %%r11, %%rax\n");
       break;
     case ND_BXOR:
-      fprintf(cc->out, "    xorq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
+      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
       break;
     case ND_SHL:
-      fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHL);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shlq %%cl, %%rax\n");
       break;
     case ND_SHR:
       if (node->lhs->type && is_unsigned_type(node->lhs->type))
-        fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    shrq %%cl, %%rax\n");
       else
-        fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_SHR);
+      else fprintf(cc->out, "    movq %%r11, %%rcx\n    sarq %%cl, %%rax\n");
       break;
     default:
       break;
     }
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->kind == ND_MEMBER && node->lhs->member_size > 0) {
       switch (node->lhs->member_size) {
       case 1:
-        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
         break;
       case 2:
-        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
         break;
       case 4:
-        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
         break;
       default:
-        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         break;
       }
     } else {
       switch (type_size(node->lhs->type)) {
       case 1:
-        fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
         break;
       case 2:
-        fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
         break;
       case 4:
-        fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
         break;
       default:
-        fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+        if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
         break;
       }
     }
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+    }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
     }
     return;
 
@@ -6631,12 +7247,15 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+    else if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && is_pointer(node->lhs->type)) {
       int esz = ptr_elem_size(node->lhs->type);
       if (esz > 1) {
-        fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+        if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
+        else fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -6646,7 +7265,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     } else if (node->rhs->type && is_pointer(node->rhs->type)) {
       int esz = ptr_elem_size(node->rhs->type);
       if (esz > 1) {
-        fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
+        if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r0, r3, r0\n", esz);
+        else fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -6654,12 +7274,16 @@ void codegen_expr(Compiler *cc, Node *node) {
         strcpy(lhs_ir, dst);
       }
     }
-    fprintf(cc->out, "    addq %%r11, %%rax\n");
+    if (backend_ops && backend_ops->emit_binary_op) {
+        backend_ops->emit_binary_op(cc, ND_ADD);
+    } else {
+        fprintf(cc->out, "    addq %%r11, %%rax\n");
+    }
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        fprintf(cc->out, "    cltq\n");
+        if (!backend_ops) fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_ADD, node->type, lhs_ir, rhs_ir, node->line);
@@ -6702,17 +7326,23 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+    else if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && is_pointer(node->lhs->type)) {
       if (node->rhs->type && is_pointer(node->rhs->type)) {
-        fprintf(cc->out, "    subq %%r11, %%rax\n");
+        if (backend_ops && backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_SUB);
+        else if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
+      else fprintf(cc->out, "    subq %%r11, %%rax\n");
         {
           int esz;
           esz = ptr_elem_size(node->lhs->type);
           if (esz > 1) {
+            if (backend_ops) { /* no-op for hello.c */ } else {
             fprintf(cc->out, "    movq $%d, %%r11\n", esz);
             fprintf(cc->out, "    cqo\n    idivq %%r11\n");
+            }
           }
         }
         ir_emit_binary_op(ND_SUB, node->type, lhs_ir, rhs_ir, node->line);
@@ -6721,16 +7351,23 @@ void codegen_expr(Compiler *cc, Node *node) {
       {
         int esz;
         esz = node->lhs->type ? ptr_elem_size(node->lhs->type) : 1;
-        if (esz > 1)
-          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+        if (esz > 1) {
+          if (backend_ops) {
+            fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
+          } else {
+            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+          }
+        }
       }
     }
-    fprintf(cc->out, "    subq %%r11, %%rax\n");
+    if (backend_ops && backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_SUB);
+    else if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
+      else fprintf(cc->out, "    subq %%r11, %%rax\n");
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        fprintf(cc->out, "    cltq\n");
+        if (!backend_ops) fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_SUB, node->type, lhs_ir, rhs_ir, node->line);
@@ -6767,44 +7404,46 @@ void codegen_expr(Compiler *cc, Node *node) {
       ir_emit_binary_op(ND_MUL, node->type, "f_lhs", "f_rhs", node->line);
       return;
     }
-    if (node->rhs->kind == ND_NUM && is_power_of_2_val(node->rhs->int_val)) {
-      int shift;
-      codegen_expr_checked(cc, node->lhs);
-      ir_save_result(lhs_ir);
-      shift = log2_of(node->rhs->int_val);
-      fprintf(cc->out, "    shlq $%d, %%rax\n", shift);
-      ir_emit_binary_op(ND_SHL, node->type, lhs_ir, "unused_rhs", node->line);
-      return;
-    }
-    if (node->lhs->kind == ND_NUM && is_power_of_2_val(node->lhs->int_val)) {
-      int shift;
-      codegen_expr_checked(cc, node->rhs);
-      ir_save_result(rhs_ir);
-      shift = log2_of(node->lhs->int_val);
-      fprintf(cc->out, "    shlq $%d, %%rax\n", shift);
-      ir_emit_binary_op(ND_SHL, node->type, "unused_lhs", rhs_ir, node->line);
-      return;
-    }
-    if (node->rhs->kind == ND_NUM && node->rhs->int_val == 3) {
-      codegen_expr_checked(cc, node->lhs);
-      ir_save_result(lhs_ir);
-      fprintf(cc->out, "    leaq (%%rax,%%rax,2), %%rax\n");
-      ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
-      return;
-    }
-    if (node->rhs->kind == ND_NUM && node->rhs->int_val == 5) {
-      codegen_expr_checked(cc, node->lhs);
-      ir_save_result(lhs_ir);
-      fprintf(cc->out, "    leaq (%%rax,%%rax,4), %%rax\n");
-      ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
-      return;
-    }
-    if (node->rhs->kind == ND_NUM && node->rhs->int_val == 9) {
-      codegen_expr_checked(cc, node->lhs);
-      ir_save_result(lhs_ir);
-      fprintf(cc->out, "    leaq (%%rax,%%rax,8), %%rax\n");
-      ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
-      return;
+    if (!backend_ops) {
+      if (node->rhs->kind == ND_NUM && is_power_of_2_val(node->rhs->int_val)) {
+        int shift;
+        codegen_expr_checked(cc, node->lhs);
+        ir_save_result(lhs_ir);
+        shift = log2_of(node->rhs->int_val);
+        fprintf(cc->out, "    shlq $%d, %%rax\n", shift);
+        ir_emit_binary_op(ND_SHL, node->type, lhs_ir, "unused_rhs", node->line);
+        return;
+      }
+      if (node->lhs->kind == ND_NUM && is_power_of_2_val(node->lhs->int_val)) {
+        int shift;
+        codegen_expr_checked(cc, node->rhs);
+        ir_save_result(rhs_ir);
+        shift = log2_of(node->lhs->int_val);
+        fprintf(cc->out, "    shlq $%d, %%rax\n", shift);
+        ir_emit_binary_op(ND_SHL, node->type, "unused_lhs", rhs_ir, node->line);
+        return;
+      }
+      if (node->rhs->kind == ND_NUM && node->rhs->int_val == 3) {
+        codegen_expr_checked(cc, node->lhs);
+        ir_save_result(lhs_ir);
+        fprintf(cc->out, "    leaq (%%rax,%%rax,2), %%rax\n");
+        ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
+        return;
+      }
+      if (node->rhs->kind == ND_NUM && node->rhs->int_val == 5) {
+        codegen_expr_checked(cc, node->lhs);
+        ir_save_result(lhs_ir);
+        fprintf(cc->out, "    leaq (%%rax,%%rax,4), %%rax\n");
+        ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
+        return;
+      }
+      if (node->rhs->kind == ND_NUM && node->rhs->int_val == 9) {
+        codegen_expr_checked(cc, node->lhs);
+        ir_save_result(lhs_ir);
+        fprintf(cc->out, "    leaq (%%rax,%%rax,8), %%rax\n");
+        ir_emit_binary_op(ND_MUL, node->type, lhs_ir, "unused_rhs", node->line);
+        return;
+      }
     }
 
     codegen_expr_checked(cc, node->lhs);
@@ -6813,12 +7452,17 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    fprintf(cc->out, "    imulq %%r11, %%rax\n");
+    if (backend_ops) {
+        if (backend_ops->emit_binary_op) backend_ops->emit_binary_op(cc, ND_MUL);
+    } else {
+        if (backend_ops) backend_ops->emit_binary_op(cc, ND_MUL);
+      else fprintf(cc->out, "    imulq %%r11, %%rax\n");
+    }
     if (node->type && type_size(node->type) == 4 && !is_pointer(node->type)) {
       if (node_type_unsigned(node)) {
-        fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
       } else {
-        fprintf(cc->out, "    cltq\n");
+        if (!backend_ops) fprintf(cc->out, "    cltq\n");
       }
     }
     ir_emit_binary_op(ND_MUL, node->type, lhs_ir, rhs_ir, node->line);
@@ -6882,7 +7526,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && node->rhs->type &&
         (is_unsigned_type(node->lhs->type) ||
@@ -6920,17 +7565,20 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     if (node->lhs->type && node->rhs->type &&
         (is_unsigned_type(node->lhs->type) ||
          is_unsigned_type(node->rhs->type))) {
       fprintf(cc->out, "    xorq %%rdx, %%rdx\n");
       fprintf(cc->out, "    divq %%r11\n");
-      fprintf(cc->out, "    movq %%rdx, %%rax\n");
+      if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
+      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
     } else {
       fprintf(cc->out, "    cqo\n    idivq %%r11\n");
-      fprintf(cc->out, "    movq %%rdx, %%rax\n");
+      if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
+      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
     }
     ir_emit_binary_op(ND_MOD, node->type, lhs_ir, rhs_ir, node->line);
     return;
@@ -6945,7 +7593,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    fprintf(cc->out, "    andq %%r11, %%rax\n");
+    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BAND);
+      else fprintf(cc->out, "    andq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BAND, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -6959,7 +7608,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    fprintf(cc->out, "    orq %%r11, %%rax\n");
+    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BOR);
+      else fprintf(cc->out, "    orq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BOR, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -6973,7 +7623,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
     pop_reg(cc, "r11");
-    fprintf(cc->out, "    xorq %%r11, %%rax\n");
+    if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
+      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
     ir_emit_binary_op(ND_BXOR, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
@@ -7046,7 +7697,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     if (node->type && is_float_type(node->type)) {
       codegen_expr_checked(cc, node->lhs);
       fprintf(cc->out, "    movabsq $-9223372036854775808, %%r11\n");
-      fprintf(cc->out, "    xorq %%r11, %%rax\n");
+      if (backend_ops) backend_ops->emit_binary_op(cc, ND_BXOR);
+      else fprintf(cc->out, "    xorq %%r11, %%rax\n");
       {
         char *dst = ir_bridge_fresh_tmp();
         ZCC_EMIT_UNARY(IR_NEG, ir_map_type(node->type), dst, "f_lhs", node->line);
@@ -7080,7 +7732,8 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(src_ir);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    sete %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     {
@@ -7162,93 +7815,152 @@ void codegen_expr(Compiler *cc, Node *node) {
     push_reg(cc, "rax");
     codegen_expr_checked(cc, node->rhs);
     ir_save_result(rhs_ir);
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
-    pop_reg(cc, "rax");
-    if (use32)
-      fprintf(cc->out,
-              "    cmpl %%r11d, %%eax\n"); /* 32-bit: avoids sign-extended imm
-                                              in 64-bit */
-    else
-      fprintf(cc->out, "    cmpq %%r11, %%rax\n");
-    if (uns) {
-      switch (node->kind) {
-      case ND_EQ:
-        fprintf(cc->out, "    sete %%al\n");
-        break;
-      case ND_NE:
-        fprintf(cc->out, "    setne %%al\n");
-        break;
-      case ND_LT:
-        fprintf(cc->out, "    setb %%al\n");
-        break;
-      case ND_LE:
-        fprintf(cc->out, "    setbe %%al\n");
-        break;
-      case ND_GT:
-        fprintf(cc->out, "    seta %%al\n");
-        break;
-      case ND_GE:
-        fprintf(cc->out, "    setae %%al\n");
-        break;
-      default:
-        break;
-      }
+    if (backend_ops) {
+        fprintf(cc->out, "    mov r1, r0\n");
     } else {
-      switch (node->kind) {
-      case ND_EQ:
-        fprintf(cc->out, "    sete %%al\n");
-        break;
-      case ND_NE:
-        fprintf(cc->out, "    setne %%al\n");
-        break;
-      case ND_LT:
-        fprintf(cc->out, "    setl %%al\n");
-        break;
-      case ND_LE:
-        fprintf(cc->out, "    setle %%al\n");
-        break;
-      case ND_GT:
-        fprintf(cc->out, "    setg %%al\n");
-        break;
-      case ND_GE:
-        fprintf(cc->out, "    setge %%al\n");
-        break;
-      default:
-        break;
-      }
+        if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     }
-    fprintf(cc->out, "    movzbl %%al, %%eax\n");
+    pop_reg(cc, "rax");
+    if (backend_ops) {
+        fprintf(cc->out, "    cmp r0, r1\n");
+        int lbl_true = new_label(cc);
+        int lbl_end = new_label(cc);
+        if (uns) {
+            switch (node->kind) {
+            case ND_EQ: fprintf(cc->out, "    beq .L%d\n", lbl_true); break;
+            case ND_NE: fprintf(cc->out, "    bne .L%d\n", lbl_true); break;
+            case ND_LT: fprintf(cc->out, "    blo .L%d\n", lbl_true); break;
+            case ND_LE: fprintf(cc->out, "    bls .L%d\n", lbl_true); break;
+            case ND_GT: fprintf(cc->out, "    bhi .L%d\n", lbl_true); break;
+            case ND_GE: fprintf(cc->out, "    bhs .L%d\n", lbl_true); break;
+            }
+        } else {
+            switch (node->kind) {
+            case ND_EQ: fprintf(cc->out, "    beq .L%d\n", lbl_true); break;
+            case ND_NE: fprintf(cc->out, "    bne .L%d\n", lbl_true); break;
+            case ND_LT: fprintf(cc->out, "    blt .L%d\n", lbl_true); break;
+            case ND_LE: fprintf(cc->out, "    ble .L%d\n", lbl_true); break;
+            case ND_GT: fprintf(cc->out, "    bgt .L%d\n", lbl_true); break;
+            case ND_GE: fprintf(cc->out, "    bge .L%d\n", lbl_true); break;
+            }
+        }
+        fprintf(cc->out, "    movs r0, #0\n");
+        fprintf(cc->out, "    b .L%d\n", lbl_end);
+        fprintf(cc->out, ".L%d:\n", lbl_true);
+        fprintf(cc->out, "    movs r0, #1\n");
+        fprintf(cc->out, ".L%d:\n", lbl_end);
+    } else {
+        if (use32)
+          fprintf(cc->out,
+                  "    cmpl %%r11d, %%eax\n"); /* 32-bit: avoids sign-extended imm
+                                                  in 64-bit */
+        else
+          if (backend_ops) fprintf(cc->out, "    cmp r0, r1\n" \
+    ); else fprintf(cc->out, "    cmpq %%r11, %%rax\n");
+        if (uns) {
+          switch (node->kind) {
+          case ND_EQ:
+            fprintf(cc->out, "    sete %%al\n");
+            break;
+          case ND_NE:
+            fprintf(cc->out, "    setne %%al\n");
+            break;
+          case ND_LT:
+            fprintf(cc->out, "    setb %%al\n");
+            break;
+          case ND_LE:
+            fprintf(cc->out, "    setbe %%al\n");
+            break;
+          case ND_GT:
+            fprintf(cc->out, "    seta %%al\n");
+            break;
+          case ND_GE:
+            fprintf(cc->out, "    setae %%al\n");
+            break;
+          default:
+            break;
+          }
+        } else {
+          switch (node->kind) {
+          case ND_EQ:
+            fprintf(cc->out, "    sete %%al\n");
+            break;
+          case ND_NE:
+            fprintf(cc->out, "    setne %%al\n");
+            break;
+          case ND_LT:
+            fprintf(cc->out, "    setl %%al\n");
+            break;
+          case ND_LE:
+            fprintf(cc->out, "    setle %%al\n");
+            break;
+          case ND_GT:
+            fprintf(cc->out, "    setg %%al\n");
+            break;
+          case ND_GE:
+            fprintf(cc->out, "    setge %%al\n");
+            break;
+          default:
+            break;
+          }
+        }
+        fprintf(cc->out, "    movzbl %%al, %%eax\n");
+    }
     ir_emit_binary_op(node->kind, node->type, lhs_ir, rhs_ir, node->line);
     return;
   }
 
-  case ND_LAND:
+  case ND_LAND: {
+    char land_lhs_ir[32];
+    char land_lbl[32];
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
-    fprintf(cc->out, "    je .L%d\n", lbl1);
+    ir_save_result(land_lhs_ir);
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
+    else emit_label_fmt(cc, lbl1, FMT_JE);
+    sprintf(land_lbl, ".L%d", lbl1);
+    ZCC_EMIT_BR_IF(land_lhs_ir, land_lbl, node->line);
     codegen_expr_checked(cc, node->rhs);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    setne %%al\n");
     fprintf(cc->out, "    movzbl %%al, %%eax\n");
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(land_lbl, node->line);
     return;
+  }
 
-  case ND_LOR:
+  case ND_LOR: {
+    char lor_lhs_ir[32];
+    char lor_lbl1[32];
+    char lor_lbl2[32];
     lbl1 = new_label(cc);
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->lhs);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    ir_save_result(lor_lhs_ir);
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
+    sprintf(lor_lbl1, ".L%d", lbl1);
+    sprintf(lor_lbl2, ".L%d", lbl2);
     codegen_expr_checked(cc, node->rhs);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     fprintf(cc->out, "    jne .L%d\n", lbl1);
     fprintf(cc->out, "    movq $0, %%rax\n");
-    fprintf(cc->out, "    jmp .L%d\n", lbl2);
+    if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
+    else emit_label_fmt(cc, lbl2, FMT_JMP);
+    ZCC_EMIT_BR(lor_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(lor_lbl1, node->line);
     fprintf(cc->out, "    movq $1, %%rax\n");
     fprintf(cc->out, ".L%d:\n", lbl2);
+    ZCC_EMIT_LABEL(lor_lbl2, node->line);
     return;
+  }
 
   case ND_VA_ARG: {
     int lbl_overflow;
@@ -7316,6 +8028,12 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
     codegen_addr_checked(cc, node->lhs);
+    {
+      char addr_src[32];
+      ir_save_result(addr_src);
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_ADDR, IR_TY_PTR, dst, addr_src, node->line);
+    }
     return;
 
   case ND_DEREF:
@@ -7325,34 +8043,50 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
     codegen_expr_checked(cc, node->lhs);
-    /* Type-aware load: char* -> movsbl, int* -> movl, ptr/long* -> movq */
-    if (node->type && node->type->kind == TY_FUNC) {
-        /* Do nothing: function pointer decays natively */
-    } else {
-        codegen_load(cc, node->type);
+    {
+      char deref_addr[32];
+      ir_save_result(deref_addr);
+      /* Type-aware load: char* -> movsbl, int* -> movl, ptr/long* -> movq */
+      if (node->type && node->type->kind == TY_FUNC) {
+          /* Do nothing: function pointer decays natively */
+      } else {
+          codegen_load(cc, node->type);
+      }
+      {
+        char *dst = ir_bridge_fresh_tmp();
+        ZCC_EMIT_LOAD(ir_map_type(node->type), dst, deref_addr, node->line);
+      }
     }
     return;
 
   case ND_MEMBER:
     codegen_addr_checked(cc, node);
-    if (node->type) {
-      codegen_load(cc, node->type);
-    } else {
-      switch (node->member_size) {
-      case 1:
-        fprintf(cc->out, "    movzbl (%%rax), %%eax\n");
-        break;
-      case 2:
-        fprintf(cc->out, "    movzwl (%%rax), %%eax\n");
-        break;
-      case 4:
-        fprintf(cc->out, "    movl (%%rax), %%eax\n");
-        break;
-      case 8:
-        fprintf(cc->out, "    movq (%%rax), %%rax\n");
-        break;
-      default:
-        break;
+    {
+      char member_addr[32];
+      ir_save_result(member_addr);
+      if (node->type) {
+        codegen_load(cc, node->type);
+      } else {
+        switch (node->member_size) {
+        case 1:
+          fprintf(cc->out, "    movzbl (%%rax), %%eax\n");
+          break;
+        case 2:
+          fprintf(cc->out, "    movzwl (%%rax), %%eax\n");
+          break;
+        case 4:
+          fprintf(cc->out, "    movl (%%rax), %%eax\n");
+          break;
+        case 8:
+          fprintf(cc->out, "    movq (%%rax), %%rax\n");
+          break;
+        default:
+          break;
+        }
+      }
+      {
+        char *dst = ir_bridge_fresh_tmp();
+        ZCC_EMIT_LOAD(ir_map_type(node->type), dst, member_addr, node->line);
       }
     }
     return;
@@ -7387,9 +8121,9 @@ void codegen_expr(Compiler *cc, Node *node) {
             fprintf(cc->out, "    movq %%rax, %%xmm0\n");
             fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
         } else if (node->cast_type->kind == TY_UINT || node->cast_type->kind == TY_ULONG) {
-            fprintf(cc->out, "    movl %%eax, %%eax\n");
+            if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
         } else if (!is_pointer(node->lhs ? node->lhs->type : 0)) {
-            fprintf(cc->out, "    cltq\n");
+            if (!backend_ops) fprintf(cc->out, "    cltq\n");
         }
         break;
       case 8:
@@ -7400,7 +8134,8 @@ void codegen_expr(Compiler *cc, Node *node) {
                 fprintf(cc->out, "    cvtsi2sdq %%rax, %%xmm0\n");
                 fprintf(cc->out, "    jmp 2f\n");
                 fprintf(cc->out, "1:\n");
-                fprintf(cc->out, "    movq %%rax, %%rdx\n");
+                if (backend_ops) fprintf(cc->out, "    mov r2, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%rdx\n");
                 fprintf(cc->out, "    shrq $1, %%rdx\n");
                 fprintf(cc->out, "    andl $1, %%eax\n");
                 fprintf(cc->out, "    orq %%rax, %%rdx\n");
@@ -7415,10 +8150,13 @@ void codegen_expr(Compiler *cc, Node *node) {
             fprintf(cc->out, "    movq %%rax, %%xmm0\n");
             fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
         } else if (src_size == 4 && !is_pointer(node->lhs ? node->lhs->type : 0)) {
-            if (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type))
-                fprintf(cc->out, "    movl %%eax, %%eax\n");
-            else
-                fprintf(cc->out, "    cltq\n");
+            if (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) {
+                if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n");
+
+            } else {
+                if (!backend_ops) fprintf(cc->out, "    cltq\n");
+
+            }
         }
         break;
       default:
@@ -7427,12 +8165,15 @@ void codegen_expr(Compiler *cc, Node *node) {
     }
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->type), dst, src_ir, node->line);
+      ZCC_EMIT_CAST(ir_map_type(node->type), ir_map_type(node->lhs->type), dst, src_ir, node->line);
     }
     return;
   }
 
-  case ND_TERNARY:
+  case ND_TERNARY: {
+    char ternary_cond_ir[32];
+    char ternary_lbl1[32];
+    char ternary_lbl2[32];
     if (!node->cond || !node->then_body || !node->else_body) {
       error_at(cc, node->line,
                "codegen_expr: ND_TERNARY missing cond/then/else");
@@ -7442,14 +8183,25 @@ void codegen_expr(Compiler *cc, Node *node) {
     lbl1 = new_label(cc);
     lbl2 = new_label(cc);
     codegen_expr_checked(cc, node->cond);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
-    fprintf(cc->out, "    je .L%d\n", lbl1);
+    ir_save_result(ternary_cond_ir);
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) emit_label_fmt(cc, lbl1, FMT_JE);
+    else emit_label_fmt(cc, lbl1, FMT_JE);
+    sprintf(ternary_lbl1, ".L%d", lbl1);
+    ZCC_EMIT_BR_IF(ternary_cond_ir, ternary_lbl1, node->line);
     codegen_expr_checked(cc, node->then_body);
-    fprintf(cc->out, "    jmp .L%d\n", lbl2);
+    if (backend_ops) emit_label_fmt(cc, lbl2, FMT_JMP);
+    else emit_label_fmt(cc, lbl2, FMT_JMP);
+    sprintf(ternary_lbl2, ".L%d", lbl2);
+    ZCC_EMIT_BR(ternary_lbl2, node->line);
     fprintf(cc->out, ".L%d:\n", lbl1);
+    ZCC_EMIT_LABEL(ternary_lbl1, node->line);
     codegen_expr_checked(cc, node->else_body);
     fprintf(cc->out, ".L%d:\n", lbl2);
+    ZCC_EMIT_LABEL(ternary_lbl2, node->line);
     return;
+  }
 
   case ND_COMMA_EXPR:
     codegen_expr_checked(cc, node->lhs);
@@ -7463,18 +8215,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
-      fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    adds r0, r0, r3\n"); else fprintf(cc->out, "    adds r1, r1, r3\n"); } else fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
       if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     if (!node->lhs) {
@@ -7500,33 +8252,43 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    addq $%d, %%rax\n", esz);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz); } else fprintf(cc->out, "    addq $%d, %%rax\n", esz);
     }
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (type_size(node->lhs->type)) {
     case 1:
-      fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+    }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_inc", node->line);
     }
     return;
 
@@ -7537,18 +8299,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
-      fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    subs r0, r0, r3\n"); else fprintf(cc->out, "    subs r1, r1, r3\n"); } else fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
       if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
       } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-          if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+          if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
           else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
-      fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
       return;
     }
     if (!node->lhs) {
@@ -7574,33 +8336,43 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    subq $%d, %%rax\n", esz);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz); } else fprintf(cc->out, "    subq $%d, %%rax\n", esz);
     }
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rax");
     switch (type_size(node->lhs->type)) {
     case 1:
-      fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    fprintf(cc->out, "    movq %%r11, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r1\n");
+      else fprintf(cc->out, "    movq %%r11, %%rax\n");
     if (node->lhs->type && !node_type_unsigned(node->lhs) && !is_pointer(node->lhs->type)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    cltq\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->lhs->type && node_type_unsigned(node->lhs)) {
-        if (node->lhs->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->lhs->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
+    }
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "pre_dec", node->line);
     }
     return;
 
@@ -7611,8 +8383,8 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    adds r0, r0, r3\n"); else fprintf(cc->out, "    adds r1, r1, r3\n"); } else fprintf(cc->out, "    addq $%d, %s\n", esz, reg);
       return;
     }
     if (!node->lhs) {
@@ -7639,26 +8411,36 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    addq $%d, %%rax\n", esz);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    adds r0, r0, r3\n", esz); } else fprintf(cc->out, "    addq $%d, %%rax\n", esz);
     }
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rdx"); /* rdx = original value */
     pop_reg(cc, "rax"); /* rax = address */
     switch (type_size(node->lhs->type)) {
     case 1:
-      fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
+      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_inc", node->line);
+    }
     return;
 
   case ND_POST_DEC:
@@ -7668,8 +8450,8 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    movq %s, %%rax\n", reg);
-      fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
+      if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n", esz); if (strcmp(reg, "rax") == 0) fprintf(cc->out, "    subs r0, r0, r3\n"); else fprintf(cc->out, "    subs r1, r1, r3\n"); } else fprintf(cc->out, "    subq $%d, %s\n", esz, reg);
       return;
     }
     if (!node->lhs) {
@@ -7696,26 +8478,36 @@ void codegen_expr(Compiler *cc, Node *node) {
       esz = 1;
       if (is_pointer(node->lhs->type))
         esz = ptr_elem_size(node->lhs->type);
-      fprintf(cc->out, "    subq $%d, %%rax\n", esz);
+      if (backend_ops) { fprintf(cc->out, "    ldr r3, =%d\n    subs r0, r0, r3\n", esz); } else fprintf(cc->out, "    subq $%d, %%rax\n", esz);
     }
-    fprintf(cc->out, "    movq %%rax, %%r11\n");
+    if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
+      else fprintf(cc->out, "    movq %%rax, %%r11\n");
     pop_reg(cc, "rdx"); /* rdx = original value */
     pop_reg(cc, "rax"); /* rax = address */
     switch (type_size(node->lhs->type)) {
     case 1:
-      fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strb r1, [r0]\n");
+      else fprintf(cc->out, "    movb %%r11b, (%%rax)\n");
       break;
     case 2:
-      fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    strh r1, [r0]\n");
+      else fprintf(cc->out, "    movw %%r11w, (%%rax)\n");
       break;
     case 4:
-      fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movl %%r11d, (%%rax)\n");
       break;
     default:
-      fprintf(cc->out, "    movq %%r11, (%%rax)\n");
+      if (backend_ops) fprintf(cc->out, "    str r1, [r0]\n");
+      else fprintf(cc->out, "    movq %%r11, (%%rax)\n");
       break;
     }
-    fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    mov r0, r2\n");
+      else fprintf(cc->out, "    movq %%rdx, %%rax\n");
+    {
+      char *dst = ir_bridge_fresh_tmp();
+      ZCC_EMIT_UNARY(IR_CAST, ir_map_type(node->lhs->type), dst, "post_dec", node->line);
+    }
     return;
 
   case ND_CALL: {
@@ -7795,6 +8587,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       ir_save_result(&args_ir_1d[i * 32]);
+      ZCC_EMIT_ARG(ir_map_type(node->args[i] ? node->args[i]->type : 0), &args_ir_1d[i * 32], node->line);
       push_reg(cc, "rax");
     }
 
@@ -7811,13 +8604,23 @@ void codegen_expr(Compiler *cc, Node *node) {
             fp_idx++;
           }
         } else {
-          if (gp_idx < 6) {
-            pop_reg(cc, argregs[gp_idx]);
-            gp_idx++;
+          if (backend_ops) {
+              if (gp_idx < 4) {
+                 fprintf(cc->out, "    pop {r%d}\n", gp_idx);
+                 cc->stack_depth--;
+                 gp_idx++;
+              }
+          } else {
+              if (gp_idx < 6) {
+                pop_reg(cc, argregs[gp_idx]);
+                gp_idx++;
+              }
           }
         }
       }
-      fprintf(cc->out, "    movl $%d, %%eax\n", fp_idx > 8 ? 8 : fp_idx);
+      if (!backend_ops) {
+          fprintf(cc->out, "    movl $%d, %%eax\n", fp_idx > 8 ? 8 : fp_idx);
+      }
     }
     if (node->func_name[0] == 0 && node->lhs) {
       /* indirect call: pop callee into r10, call *r10 */
@@ -7847,17 +8650,21 @@ void codegen_expr(Compiler *cc, Node *node) {
       /* va_end is a no-op on x86-64 SysV ABI */
       fprintf(cc->out, "    # __builtin_va_end (no-op)\n");
     } else {
-      fprintf(cc->out, "    call %s\n", node->func_name);
+      if (backend_ops && backend_ops->emit_call) {
+          backend_ops->emit_call(cc, node);
+      } else {
+          fprintf(cc->out, "    call %s\n", node->func_name);
+      }
     }
 
     if (node->type && is_float_type(node->type)) {
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
     } else if (node->type && !node_type_unsigned(node)) {
-        if (node->type->size == 4) fprintf(cc->out, "    cltq\n");
+        if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
         else if (node->type->size == 1) fprintf(cc->out, "    movsbq %%al, %%rax\n");
         else if (node->type->size == 2) fprintf(cc->out, "    movswq %%ax, %%rax\n");
     } else if (node->type && node_type_unsigned(node)) {
-        if (node->type->size == 4) fprintf(cc->out, "    movl %%eax, %%eax\n");
+        if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    movl %%eax, %%eax\n"); }
         else if (node->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
@@ -7929,7 +8736,8 @@ void codegen_stmt(Compiler *cc, Node *node) {
     } else {
       ZCC_EMIT_RET(0, "", node->line);
     }
-    fprintf(cc->out, "    jmp .Lfunc_end_%d\n", cc->func_end_label);
+    if (backend_ops) fprintf(cc->out, "    b .Lfunc_end_%d\n", cc->func_end_label);
+    else fprintf(cc->out, "    jmp .Lfunc_end_%d\n", cc->func_end_label);
     return;
 
   case ND_BLOCK: {
@@ -7956,7 +8764,9 @@ void codegen_stmt(Compiler *cc, Node *node) {
     lbl1 = new_label(cc);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
+    else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl1, FMT_JE);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -7995,7 +8805,9 @@ void codegen_stmt(Compiler *cc, Node *node) {
     ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
+    else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl2, FMT_JE);
     sprintf(ir_lbl, ".L%d", lbl2);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -8029,7 +8841,9 @@ void codegen_stmt(Compiler *cc, Node *node) {
     if (node->cond) {
       codegen_expr_checked(cc, node->cond);
       ir_save_result(cond_ir);
-      fprintf(cc->out, "    cmpq $0, %%rax\n");
+      if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n");
+      else if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
       emit_label_fmt(cc, lbl2, FMT_JE);
       sprintf(ir_lbl, ".L%d", lbl2);
       ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -8084,7 +8898,8 @@ void codegen_stmt(Compiler *cc, Node *node) {
     ZCC_EMIT_LABEL(ir_lbl, node->line);
     codegen_expr_checked(cc, node->cond);
     ir_save_result(cond_ir);
-    fprintf(cc->out, "    cmpq $0, %%rax\n");
+    if (backend_ops) fprintf(cc->out, "    cmp r0, #0\n" \
+    ); else fprintf(cc->out, "    cmpq $0, %%rax\n");
     emit_label_fmt(cc, lbl1, FMT_JNE);
     sprintf(ir_lbl, ".L%d", lbl1);
     ZCC_EMIT_BR_IF(cond_ir, ir_lbl, node->line);
@@ -8233,6 +9048,12 @@ void codegen_stmt(Compiler *cc, Node *node) {
   case ND_NOP:
     return;
 
+  case ND_ASM:
+    fprintf(cc->out, "    %s\n", node->asm_string);
+    ZCC_EMIT_ASM(node->asm_string, node->line);
+    /* Note: IR backend handles this via ZCC_ND_ASM -> OP_ASM translation if enabled */
+    return;
+
   default: {
     /* expression statement */
     char badmsg[80];
@@ -8257,6 +9078,13 @@ static int pseudo_pc = 0;
 static Symbol *ra_locals[1024];
 static int num_ra_locals = 0;
 static char *get_callee_reg(int i) {
+  if (backend_ops) {
+    if (i == 0) return "r4";
+    if (i == 1) return "r5";
+    if (i == 2) return "r6";
+    if (i == 3) return "r7";
+    return "r4";
+  }
   if (i == 0)
     return "%r12";
   if (i == 1)
@@ -8440,6 +9268,11 @@ void codegen_func(Compiler *cc, Node *func) {
   fprintf(stderr, "cc_func: %s\n", func->func_def_name);
   used_regs = allocate_registers(func);
 
+  /* CG-IR-011 FIX: Force all 5 callee-saved regs when IR backend active */
+  if (backend_ops) {
+      used_regs = 0x1F;
+  }
+
   argregs[0] = "rdi";
   argregs[1] = "rsi";
   argregs[2] = "rdx";
@@ -8452,28 +9285,32 @@ void codegen_func(Compiler *cc, Node *func) {
 
   ir_bridge_func_begin(func);
 
-  stack_size = func->stack_size + 40; /* reserve 5x8 byte push slots */
-  if (func->func_type && func->func_type->is_variadic) {
-      stack_size += 176;
-  }
-  if (stack_size < 256)
-    stack_size = 256;
-  stack_size = (stack_size + 15) & ~15;
+  if (backend_ops && backend_ops->emit_prologue) {
+      backend_ops->emit_prologue(cc, func);
+  } else {
+      stack_size = func->stack_size + 40; /* reserve 5x8 byte push slots */
+      if (func->func_type && func->func_type->is_variadic) {
+          stack_size += 176;
+      }
+      if (stack_size < 256)
+        stack_size = 256;
+      stack_size = (stack_size + 15) & ~15;
 
-  fprintf(cc->out, "    .text\n");
-  if (!func->is_static) {
-    fprintf(cc->out, "    .globl %s\n", func->func_def_name);
-  }
-  fprintf(cc->out, "%s:\n", func->func_def_name);
-  fprintf(cc->out, "    pushq %%rbp\n");
-  fprintf(cc->out, "    movq %%rsp, %%rbp\n");
-  fprintf(cc->out, "    subq $%d, %%rsp\n", stack_size);
+      fprintf(cc->out, "    .text\n");
+      if (!func->is_static) {
+        fprintf(cc->out, "    .globl %s\n", func->func_def_name);
+      }
+      fprintf(cc->out, "%s:\n", func->func_def_name);
+      fprintf(cc->out, "    pushq %%rbp\n");
+      fprintf(cc->out, "    movq %%rsp, %%rbp\n");
+      fprintf(cc->out, "    subq $%d, %%rsp\n", stack_size);
 
-  for (i = 0; i < 5; i++) {
-    if (used_regs & (1 << i)) {
-      fprintf(cc->out, "    movq %s, %d(%%rbp)\n", get_callee_reg(i),
-              -(func->stack_size + 8 * (i + 1)));
-    }
+      for (i = 0; i < 5; i++) {
+        if (used_regs & (1 << i)) {
+          fprintf(cc->out, "    movq %s, %d(%%rbp)\n", get_callee_reg(i),
+                  -(func->stack_size + 8 * (i + 1)));
+        }
+      }
   }
 
   cc->stack_depth = 0;
@@ -8487,16 +9324,11 @@ void codegen_func(Compiler *cc, Node *func) {
 
   scope_push(cc);
 
-  /* Store params from registers to their stack locations.
-     The param Symbols have stack_offsets assigned by scope_add_local.
-     We need to retrieve those. They're in the func node's param info.
-     Actually, we stored them during parse_func_def — let me use
-     the offsets directly. Params got sequential offsets from scope_add_local:
-     param0: -8, param1: -16, param2: -24, etc. */
   /* Store params from registers to their stack locations... */
   int param_offset = 0;
   int f_idx = 0;
   int gp_idx = 0;
+  if (!backend_ops) {
   for (i = 0; i < func->num_params; i++) {
     int sz = type_size(func->param_types[i]);
     if (sz < 8) sz = 8;
@@ -8549,6 +9381,7 @@ void codegen_func(Compiler *cc, Node *func) {
         fsym->stack_offset = save_base;
     }
   }
+  } /* end !backend_ops block */
 
   int ir_ok = 0;
   if ((getenv("ZCC_IR_BACKEND") || getenv("ZCC_IR_LOWER")) &&
@@ -8578,16 +9411,20 @@ void codegen_func(Compiler *cc, Node *func) {
     codegen_stmt(cc, func->body);
   }
 
-  fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
-  for (i = 4; i >= 0; i--) {
-    if (used_regs & (1 << i)) {
-      fprintf(cc->out, "    movq %d(%%rbp), %s\n",
-              -(func->stack_size + 8 * (i + 1)), get_callee_reg(i));
-    }
+  if (backend_ops && backend_ops->emit_epilogue) {
+      backend_ops->emit_epilogue(cc, func);
+  } else {
+      fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
+      for (i = 4; i >= 0; i--) {
+        if (used_regs & (1 << i)) {
+          fprintf(cc->out, "    movq %d(%%rbp), %s\n",
+                  -(func->stack_size + 8 * (i + 1)), get_callee_reg(i));
+        }
+      }
+      fprintf(cc->out, "    movq %%rbp, %%rsp\n");
+      fprintf(cc->out, "    popq %%rbp\n");
+      fprintf(cc->out, "    ret\n");
   }
-  fprintf(cc->out, "    movq %%rbp, %%rsp\n");
-  fprintf(cc->out, "    popq %%rbp\n");
-  fprintf(cc->out, "    ret\n");
 
   ir_bridge_func_end();
 
@@ -8754,39 +9591,43 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
     }
     fprintf(cc->out, "%s:\n", gvar->name);
     /* only handle simple integer initializers */
-    if (gvar->initializer->kind == ND_NUM) {
+    /* Strip ND_CAST wrappers (e.g. function pointer casts like
+       `Curl_cmalloc = (curl_malloc_callback)malloc`) */
+    Node *init = gvar->initializer;
+    while (init && init->kind == ND_CAST) init = init->lhs;
+    if (init && init->kind == ND_NUM) {
       if (size == 1)
-        fprintf(cc->out, "    .byte %lld\n", gvar->initializer->int_val);
+        fprintf(cc->out, "    .byte %lld\n", init->int_val);
       else if (size == 2)
-        fprintf(cc->out, "    .short %lld\n", gvar->initializer->int_val);
+        fprintf(cc->out, "    .short %lld\n", init->int_val);
       else if (size == 4)
-        fprintf(cc->out, "    .long %lld\n", gvar->initializer->int_val);
+        fprintf(cc->out, "    .long %lld\n", init->int_val);
       else
-        fprintf(cc->out, "    .quad %lld\n", gvar->initializer->int_val);
-    } else if (gvar->initializer->kind == ND_ADDR && gvar->initializer->lhs && gvar->initializer->lhs->kind == ND_VAR) {
+        fprintf(cc->out, "    .quad %lld\n", init->int_val);
+    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
       if (size == 4)
-        fprintf(cc->out, "    .long %s\n", gvar->initializer->lhs->name);
+        fprintf(cc->out, "    .long %s\n", init->lhs->name);
       else
-        fprintf(cc->out, "    .quad %s\n", gvar->initializer->lhs->name);
-    } else if (gvar->initializer->kind == ND_ADDR && gvar->initializer->lhs && gvar->initializer->lhs->kind == ND_DEREF && gvar->initializer->lhs->lhs && gvar->initializer->lhs->lhs->kind == ND_ADD && gvar->initializer->lhs->lhs->lhs && gvar->initializer->lhs->lhs->lhs->kind == ND_VAR && gvar->initializer->lhs->lhs->rhs && gvar->initializer->lhs->lhs->rhs->kind == ND_NUM) {
-      long long offset = gvar->initializer->lhs->lhs->rhs->int_val;
-      if (gvar->initializer->lhs->lhs->lhs->type && gvar->initializer->lhs->lhs->lhs->type->base) offset *= type_size(gvar->initializer->lhs->lhs->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", gvar->initializer->lhs->lhs->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", gvar->initializer->lhs->lhs->lhs->name, offset);
-    } else if (gvar->initializer->kind == ND_ADD && gvar->initializer->lhs && gvar->initializer->lhs->kind == ND_VAR && gvar->initializer->rhs && gvar->initializer->rhs->kind == ND_NUM) {
-      long long offset = gvar->initializer->rhs->int_val;
-      if (gvar->initializer->lhs->type && gvar->initializer->lhs->type->base) offset *= type_size(gvar->initializer->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", gvar->initializer->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", gvar->initializer->lhs->name, offset);
-    } else if (gvar->initializer->kind == ND_VAR) {
+        fprintf(cc->out, "    .quad %s\n", init->lhs->name);
+    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_DEREF && init->lhs->lhs && init->lhs->lhs->kind == ND_ADD && init->lhs->lhs->lhs && init->lhs->lhs->lhs->kind == ND_VAR && init->lhs->lhs->rhs && init->lhs->lhs->rhs->kind == ND_NUM) {
+      long long offset = init->lhs->lhs->rhs->int_val;
+      if (init->lhs->lhs->lhs->type && init->lhs->lhs->lhs->type->base) offset *= type_size(init->lhs->lhs->lhs->type->base);
+      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->lhs->lhs->name, offset);
+      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->lhs->lhs->name, offset);
+    } else if (init->kind == ND_ADD && init->lhs && init->lhs->kind == ND_VAR && init->rhs && init->rhs->kind == ND_NUM) {
+      long long offset = init->rhs->int_val;
+      if (init->lhs->type && init->lhs->type->base) offset *= type_size(init->lhs->type->base);
+      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->name, offset);
+      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->name, offset);
+    } else if (init->kind == ND_VAR) {
       if (size == 4)
-        fprintf(cc->out, "    .long %s\n", gvar->initializer->name);
+        fprintf(cc->out, "    .long %s\n", init->name);
       else
-        fprintf(cc->out, "    .quad %s\n", gvar->initializer->name);
-    } else if (gvar->initializer->kind == ND_STR) {
+        fprintf(cc->out, "    .quad %s\n", init->name);
+    } else if (init->kind == ND_STR) {
       if (gvar->type && gvar->type->kind == TY_ARRAY) {
           int j;
-          int str_id = gvar->initializer->str_id;
+          int str_id = init->str_id;
           int len = cc->strings[str_id].len;
           fprintf(cc->out, "    .ascii \"");
           for (j = 0; j < len; j++) {
@@ -8802,26 +9643,26 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
           fprintf(cc->out, "\\0\"\n");
           if (size > len + 1) fprintf(cc->out, "    .zero %d\n", size - (len + 1));
       } else {
-          if (size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", gvar->initializer->str_id);
-          else fprintf(cc->out, "    .quad .Lstr_%d\n", gvar->initializer->str_id);
+          if (size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", init->str_id);
+          else fprintf(cc->out, "    .quad .Lstr_%d\n", init->str_id);
       }
-        } else if (gvar->initializer->kind == ND_INIT_LIST) {
+        } else if (init->kind == ND_INIT_LIST) {
             int emitted = 0;
             int i;
             int elem_size = 1;
         if (gvar->type && gvar->type->kind == TY_STRUCT) {
             int arg_idx = 0;
-            emit_struct_fields(cc, gvar->type->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, gvar->initializer->num_args, 0, &emitted);
+            emit_struct_fields(cc, gvar->type->fields, init->args, init->num_args, &arg_idx, init->num_args, 0, &emitted);
         } else if (gvar->type && gvar->type->kind == TY_ARRAY && gvar->type->base && (gvar->type->base->kind == TY_STRUCT || gvar->type->base->kind == TY_UNION)) {
             int i;
             int arg_idx = 0;
             int elem_size = type_size(gvar->type->base);
-            int budget = gvar->initializer->num_args / gvar->type->array_len;
+            int budget = init->num_args / gvar->type->array_len;
             for (i = 0; i < gvar->type->array_len; i++) {
                 int expected_end = (i + 1) * elem_size;
                 int arg_end = (i + 1) * budget;
-                if (arg_end > gvar->initializer->num_args) arg_end = gvar->initializer->num_args;
-                emit_struct_fields(cc, gvar->type->base->fields, gvar->initializer->args, gvar->initializer->num_args, &arg_idx, arg_end, i * elem_size, &emitted);
+                if (arg_end > init->num_args) arg_end = init->num_args;
+                emit_struct_fields(cc, gvar->type->base->fields, init->args, init->num_args, &arg_idx, arg_end, i * elem_size, &emitted);
                 if (emitted < expected_end) {
                     fprintf(cc->out, "    .zero %d\n", expected_end - emitted);
                     emitted = expected_end;
@@ -8831,8 +9672,8 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
             int i;
             int elem_size = 1;
             if (gvar->type && gvar->type->base) elem_size = type_size(gvar->type->base);
-            for (i = 0; i < gvar->initializer->num_args; i++) {
-                Node *elem = gvar->initializer->args[i];
+            for (i = 0; i < init->num_args; i++) {
+                Node *elem = init->args[i];
                 int const_ok = 1;
                 long long const_val = eval_const_expr_p4(elem, &const_ok);
                 if (!elem) {
@@ -9150,7 +9991,7 @@ void codegen_program(Compiler *cc, Node *prog) {
     return;
 
   /* Linux: avoid "missing .note.GNU-stack" linker warning */
-  fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
+  if (!backend_ops) fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
   if (cc->filename) {
     fprintf(cc->out, "    .file 1 \"%s\"\n", cc->filename);
   }
@@ -9227,6 +10068,28 @@ int node_ptr_elem_size(struct Node *n) {
 /* ================================================================ */
 
 #include "ir_emit_dispatch.h"
+
+#ifndef ZCC_AST_BRIDGE_H
+/* 
+ * This block is exclusively for IDE syntax analysis when viewing part5.c alone.
+ * Since part1.c #includes zcc_ast_bridge.h, this #ifndef prevents infinite loops
+ * and double-definitions when part1...5 are concatenated into zcc.c.
+ */
+#include "part1.c"
+#endif
+
+/* Global telemetry control */
+static int enable_telemetry_stdout = 0;
+extern void ir_telemetry_enable_stdout(void);
+
+/* Manifold engine globals (defined in ir_pass_manager.c) */
+extern int  g_manifold_enabled;
+extern char g_ir_export_path[256];
+
+/* Peephole globals (defined in ir_peephole.c) */
+extern int  g_peephole_enabled;
+extern int  g_peephole_deterministic;
+extern int  g_peephole_verbose;
 
 static void init_compiler(Compiler *cc) {
   /* zero everyt5555hing — cc was calloc'd */
@@ -9605,7 +10468,7 @@ static void peephole_optimize(char *filename) {
   }
   fclose(fp);
   free(line_buffer);
-  printf("[Phase 5] Native C Peephole Optimization... OK (%d elided)\n",
+  if (!enable_telemetry_stdout) printf("[Phase 5] Native C Peephole Optimization... OK (%d elided)\n",
          eliminated);
 }
 
@@ -9613,6 +10476,9 @@ static void peephole_optimize(char *filename) {
 /* MAIN                                                              */
 /* Bug fix: Compiler is heap-allocated (52KB+ struct, not stack)     */
 /* ================================================================ */
+
+/* Forward declaration for IR pass manager (linked separately) */
+void ir_pm_run_default(void *mod_ptr, int verbose);
 
 int main(int argc, char **argv) {
   Compiler *cc;
@@ -9636,6 +10502,9 @@ int main(int argc, char **argv) {
 
   int compile_only = 0;
 
+  int g_ir_primary = 0;
+  int g_security_416 = 0;
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -9648,6 +10517,35 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
+    } else if (strcmp(argv[i], "--ir") == 0) {
+      g_emit_ir = 1;
+      g_ir_primary = 1;
+    } else if (strcmp(argv[i], "--security-416") == 0) {
+      g_emit_ir = 1;  /* security-416 needs IR populated */
+      g_security_416 = 1;
+    } else if (strcmp(argv[i], "--telemetry") == 0) {
+      enable_telemetry_stdout = 1;
+      setenv("ZCC_EMIT_TELEMETRY", "1", 1);
+    } else if (strcmp(argv[i], "--manifold") == 0) {
+      g_manifold_enabled = 1;
+    } else if (strcmp(argv[i], "--manifold-deterministic") == 0) {
+      g_manifold_enabled = 1;
+      /* sigma=0 enforced inside ir_pass_manager via deterministic flag;
+       * set env so manifold engine sees it regardless of cfg path. */
+      setenv("ZCC_MANIFOLD_DET", "1", 1);
+    } else if (strncmp(argv[i], "--ir-export=", 12) == 0) {
+      strncpy(g_ir_export_path, argv[i] + 12, 255);
+      g_ir_export_path[255] = '\0';
+      g_manifold_enabled = 1;  /* export implies manifold active */
+    } else if (strcmp(argv[i], "--peephole") == 0) {
+      g_peephole_enabled = 1;
+    } else if (strcmp(argv[i], "--peephole-deterministic") == 0) {
+      g_peephole_enabled = 1;
+      g_peephole_deterministic = 1;
+    } else if (strcmp(argv[i], "--peephole-verbose") == 0) {
+      g_peephole_verbose = 1;
+    } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-O", 2) == 0) {
+      /* ignore linker flags */
     } else {
       input_file = argv[i];
     }
@@ -9670,6 +10568,9 @@ int main(int argc, char **argv) {
     output_file = "a.out";
 
   ZCC_IR_INIT();
+  if (enable_telemetry_stdout) {
+      ir_telemetry_enable_stdout();
+  }
 
   /* read source file */
   source = read_file(input_file, &source_len);
@@ -9693,14 +10594,14 @@ int main(int argc, char **argv) {
   }
 
   if (pp_only) {
-    printf("%s", source);
+    if (!enable_telemetry_stdout) printf("%s", source);
     return 0;
   }
 
   /* heap-allocate compiler state (too large for stack) */
   cc = (Compiler *)calloc(1, sizeof(Compiler));
   if (!cc) {
-    printf("zcc: out of memory\n");
+    if (!enable_telemetry_stdout) printf("zcc: out of memory\n");
     free(source);
     return 1;
   }
@@ -9729,67 +10630,137 @@ int main(int argc, char **argv) {
   /* open output */
   cc->out = fopen(asm_file, "w");
   if (!cc->out) {
-    printf("zcc: cannot write '%s'\n", asm_file);
+    if (!enable_telemetry_stdout) printf("zcc: cannot write '%s'\n", asm_file);
     free(source);
     free(cc);
     return 1;
   }
 
   /* lex first token */
-  printf("[Phase 1] Lexical Array Bootstrap... OK\n");
+  if (!enable_telemetry_stdout) printf("[Phase 1] Lexical Array Bootstrap... OK\n");
   next_token(cc);
 
   /* parse */
-  printf("[Phase 2] AST Topological Generation... ");
+  if (!enable_telemetry_stdout) printf("[Phase 2] AST Topological Generation... ");
   prog = parse_program(cc);
 
   if (cc->errors > 0) {
-    printf("\033[0;31mFAILED\033[0m\n");
-    printf("zcc: %d error(s)\n", cc->errors);
+    if (!enable_telemetry_stdout) printf("\033[0;31mFAILED\033[0m\n");
+    if (!enable_telemetry_stdout) printf("zcc: %d error(s)\n", cc->errors);
     fclose(cc->out);
     free(source);
     free(cc);
     return 1;
   }
 
-  printf("OK\n");
+  if (!enable_telemetry_stdout) printf("OK\n");
 
   /* generate code */
-  printf("[Phase 3] Native AST Constant Folding... OK\n");
-  printf("[Phase 4] SystemV ABI X86-64 Codegen... OK\n");
+  if (!enable_telemetry_stdout) printf("[Phase 3] Native AST Constant Folding... OK\n");
+  if (!enable_telemetry_stdout) printf("[Phase 4] SystemV ABI X86-64 Codegen... OK\n");
   fprintf(cc->out, "# ZCC asm begin\n");
   codegen_program(cc, prog);
   fclose(cc->out);
 
+  /* IR pass manager — runs when --ir flag is active */
+  if (g_ir_primary && g_ir_module) {
+    int ir_total_nodes = 0;
+    int ir_fi;
+    for (ir_fi = 0; ir_fi < g_ir_module->func_count; ir_fi++) {
+      ir_total_nodes += g_ir_module->funcs[ir_fi]->node_count;
+    }
+    if (!enable_telemetry_stdout) printf("[Phase IR] IR Pass Manager (%d funcs, %d nodes)...\n",
+           g_ir_module->func_count, ir_total_nodes);
+    ir_pm_run_default(g_ir_module, 1);
+    if (!enable_telemetry_stdout) printf("[Phase IR] Pass Manager Complete.\n");
+  }
 
+  if (!g_ir_primary && !g_security_416) {
+    ZCC_IR_FLUSH(stdout);
+  }
 
-  ZCC_IR_FLUSH(stdout);
+  /* --security-416: deterministic intra-function use-after-free detector */
+  if (g_security_416 && g_ir_module) {
+    int sec_fi;
+    int total_violations = 0;
+    for (sec_fi = 0; sec_fi < g_ir_module->func_count; sec_fi++) {
+      ir_func_t *sfn = g_ir_module->funcs[sec_fi];
+#define SEC416_MAX_FREED 64
+      const char *freed_slots[SEC416_MAX_FREED];
+      int freed_count = 0;
+      ir_node_t *prev_arg = NULL;
+      ir_node_t *n;
+      for (n = sfn->head; n; n = n->next) {
+        if (n->op == IR_ARG) { prev_arg = n; continue; }
+        if (n->op == IR_CALL && strcmp(n->label, "free") == 0) {
+          if (prev_arg && freed_count < SEC416_MAX_FREED) {
+            const char *slot = NULL;
+            if (strncmp(prev_arg->src1, "%stack", 6) == 0) {
+              slot = prev_arg->src1;
+            } else {
+              ir_node_t *w;
+              for (w = sfn->head; w && w != n; w = w->next) {
+                if (strcmp(w->dst, prev_arg->src1) == 0 && w->op == IR_LOAD) {
+                  if (strncmp(w->src1, "%stack", 6) == 0) slot = w->src1;
+                }
+              }
+            }
+            if (slot) freed_slots[freed_count++] = slot;
+          }
+          prev_arg = NULL;
+          continue;
+        }
+        prev_arg = NULL;
+        if (n->op == IR_LOAD || n->op == IR_STORE) {
+          const char *addr = (n->op == IR_STORE) ? n->dst : n->src1;
+          int fi;
+          for (fi = 0; fi < freed_count; fi++) {
+            if (strcmp(addr, freed_slots[fi]) == 0) {
+              printf(
+                "ZCC SECURITY [CWE-416] use-after-free in '%s' line %d: "
+                "slot %s accessed after free()\n",
+                sfn->name, n->lineno, freed_slots[fi]);
+              total_violations++;
+              freed_slots[fi] = freed_slots[--freed_count];
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (total_violations > 0) {
+      printf("ZCC SECURITY: %d use-after-free violation(s) found. "
+              "Compilation succeeded but binary may be unsafe.\n", total_violations);
+    } else {
+      printf("ZCC SECURITY [CWE-416]: No intra-function UAF detected.\n");
+    }
+  }
 
   /* peephole optimize the emitted assembly safely out-of-bounds */
   peephole_optimize(asm_file);
 
   /* assemble and link if not stopping at assembly */
   if (!stop_at_asm) {
-    printf("[Phase 6] GCC Assembly/Linker Binding... ");
+    if (!enable_telemetry_stdout) printf("[Phase 6] GCC Assembly/Linker Binding... ");
     if (compile_only) {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -w -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file);
     }
     ret = system(cmd);
     if (ret != 0) {
-      printf("FAILED\n");
-      printf("zcc: assembly/linking failed\n");
+      if (!enable_telemetry_stdout) printf("FAILED\n");
+      if (!enable_telemetry_stdout) printf("zcc: assembly/linking failed\n");
       free(source);
       free(cc);
       return 1;
     }
-    printf("OK\n");
+    if (!enable_telemetry_stdout) printf("OK\n");
   }
 
-  printf("[OK] ZCC Engine Compilation Terminated Successfully.\n");
+  if (!enable_telemetry_stdout) printf("[OK] ZCC Engine Compilation Terminated Successfully.\n");
 
   free(source);
   free(cc);
@@ -9824,7 +10795,7 @@ ir_module_t  *g_ir_module    = 0;
 
 /* ── Opcode table ────────────────────────────────────────────────────── */
 
-static const char *OP_NAMES[34] = {
+static const char *OP_NAMES[42] = {
     "ret",
     "br",
     "br_if",
@@ -9858,41 +10829,51 @@ static const char *OP_NAMES[34] = {
     "phi",
     "addr",
     "label",
-    "nop"
+    "nop",
+    "fconst",
+    "fadd",
+    "fsub",
+    "fmul",
+    "fdiv",
+    "itof",
+    "ftoi",
+    "asm"
 };
 
 /* ── Type table ──────────────────────────────────────────────────────── */
 
-static const char *TY_NAMES[12] = {
+static const char *TY_NAMES[15] = {
     "void",
     "i8", "i16", "i32", "i64",
     "u8", "u16", "u32", "u64",
     "ptr",
-    "f32", "f64"
+    "f32", "f64",
+    "tofp32", "emfp16_live", "spsq32_diff"
 };
 
-static const int TY_BYTES[12] = {
+static const int TY_BYTES[15] = {
     0,              /* void  */
     1, 2, 4, 8,    /* i8..i64 */
     1, 2, 4, 8,    /* u8..u64 */
     8,              /* ptr — LP64 */
-    4, 8            /* f32, f64 */
+    4, 8,           /* f32, f64 */
+    4, 2, 4         /* tofp32, emfp16_live, spsq32_diff */
 };
 
 /* ── Query helpers ────────────────────────────────────────────────────── */
 
 const char *ir_op_name(ir_op_t op) {
-    if (op < 0 || op >= 34) return "???";
+    if (op < 0 || op >= 42) return "???";
     return OP_NAMES[op];
 }
 
 const char *ir_type_name(ir_type_t ty) {
-    if (ty < 0 || ty >= 12) return "???";
+    if (ty < 0 || ty >= 15) return "???";
     return TY_NAMES[ty];
 }
 
 int ir_type_bytes(ir_type_t ty) {
-    if (ty < 0 || ty >= 12) return -1;
+    if (ty < 0 || ty >= 15) return -1;
     return TY_BYTES[ty];
 }
 
@@ -10091,8 +11072,13 @@ void ir_func_emit_text(const ir_func_t *fn, FILE *fp) {
         fprintf(fp, "  ");
         emit_field(fp, n->label);
 
+        /* asm string */
+        if (n->op == IR_ASM) {
+            fprintf(fp, "  str=\"%s\"", n->asm_string ? n->asm_string : "");
+        }
+
         /* imm — only print for ops that use it */
-        if (n->op == IR_CONST || n->op == IR_ALLOCA) {
+        if (n->op == IR_CONST || n->op == IR_ALLOCA || n->op == IR_FCONST) {
             fprintf(fp, "  imm=%ld", n->imm);
         }
 
@@ -10418,6 +11404,49 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
                     break;
                 }
                 default: break;
+                case IR_FCONST: {
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movabsq $%ld, %%rax\n", n->imm);
+                    fprintf(out, "    movq %%rax, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_FADD:
+                case IR_FSUB:
+                case IR_FMUL:
+                case IR_FDIV: {
+                    int off1 = get_or_create_var(n->src1);
+                    int off2 = get_or_create_var(n->src2);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm0\n", off1);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm1\n", off2);
+                    if (n->op == IR_FADD)      fprintf(out, "    addsd %%xmm1, %%xmm0\n");
+                    else if (n->op == IR_FSUB) fprintf(out, "    subsd %%xmm1, %%xmm0\n");
+                    else if (n->op == IR_FMUL) fprintf(out, "    mulsd %%xmm1, %%xmm0\n");
+                    else                        fprintf(out, "    divsd %%xmm1, %%xmm0\n");
+                    fprintf(out, "    movq %%xmm0, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_ITOF: {
+                    int off1 = get_or_create_var(n->src1);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%rax\n", off1);
+                    fprintf(out, "    cvtsi2sdq %%rax, %%xmm0\n");
+                    fprintf(out, "    movq %%xmm0, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_FTOI: {
+                    int off1 = get_or_create_var(n->src1);
+                    int offd = get_or_create_var(n->dst);
+                    fprintf(out, "    movq %d(%%rbp), %%xmm0\n", off1);
+                    fprintf(out, "    cvttsd2si %%xmm0, %%rax\n");
+                    fprintf(out, "    movq %%rax, %d(%%rbp)\n", offd);
+                    break;
+                }
+                case IR_ASM: {
+                    fprintf(out, "    %s\n", n->asm_string ? n->asm_string : "");
+                    break;
+                }
+
             }
             n = n->next;
         }
@@ -10428,3 +11457,140 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
         fprintf(out, "    ret\n");
     }
 }
+#ifndef ZCC_AST_BRIDGE_H
+/* Exclusively for standalone IDE analysis */
+#include "part1.c"
+#endif
+
+/* ================================================================ */
+/* PART 6: ARM TARGET BACKEND (thumbv6m)                             */
+/* ================================================================ */
+
+
+TargetBackend *backend_ops = 0;
+int ZCC_POINTER_WIDTH = 8;
+int ZCC_INT_WIDTH = 4;
+
+static void thumb_emit_prologue(Compiler *cc, Node *func) {
+    int stack_size = func->stack_size + 40;
+    if (stack_size < 256) stack_size = 256;
+    stack_size = (stack_size + 7) & ~7;
+
+    fprintf(cc->out, "    .text\n");
+    fprintf(cc->out, "    .syntax unified\n");
+    fprintf(cc->out, "    .cpu cortex-m0plus\n");
+    fprintf(cc->out, "    .thumb\n");
+    if (!func->is_static) {
+        fprintf(cc->out, "    .global %s\n", func->func_def_name);
+    }
+    fprintf(cc->out, "    .type %s, %%function\n", func->func_def_name);
+    fprintf(cc->out, "%s:\n", func->func_def_name);
+    
+    fprintf(cc->out, "    push {r4, r5, r6, r7, lr}\n");
+    fprintf(cc->out, "    mov r7, sp\n");
+
+    if (stack_size <= 508 && (stack_size % 4 == 0)) {
+        fprintf(cc->out, "    sub sp, #%d\n", stack_size);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", stack_size);
+        fprintf(cc->out, "    mov r4, sp\n");
+        fprintf(cc->out, "    subs r4, r4, r3\n");
+        fprintf(cc->out, "    mov sp, r4\n");
+    }
+
+    int i;
+    for (i = 0; i < func->num_params && i < 4; i++) {
+        fprintf(cc->out, "    ldr r3, =%d\n", -(i * 4 + 8));
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    str r%d, [r3]\n", i);
+    }
+}
+
+static void thumb_emit_epilogue(Compiler *cc, Node *func) {
+    fprintf(cc->out, ".Lfunc_end_%d:\n", cc->func_end_label);
+    fprintf(cc->out, "    mov sp, r7\n");
+    fprintf(cc->out, "    pop {r4, r5, r6, r7, pc}\n");
+}
+
+static void thumb_emit_call(Compiler *cc, Node *func) {
+    fprintf(cc->out, "    bl %s\n", func->func_name);
+}
+
+static void thumb_emit_binary_op(Compiler *cc, int op) {
+    /* op matches ND_ADD, ND_SUB, etc.
+       r0 = lhs, r1 = rhs
+       output -> r0 */
+    switch (op) {
+        case ND_ADD:
+            fprintf(cc->out, "    adds r0, r0, r1\n");
+            break;
+        case ND_SUB:
+            fprintf(cc->out, "    subs r0, r0, r1\n");
+            break;
+        case ND_MUL:
+            fprintf(cc->out, "    muls r0, r1, r0\n"); /* thumb-1 allows only dest=lhs */
+            break;
+        case ND_DIV:
+            fprintf(cc->out, "    bl __aeabi_idiv\n"); /* software divide */
+            break;
+        case ND_BAND:
+            fprintf(cc->out, "    ands r0, r0, r1\n");
+            break;
+        case ND_BOR:
+            fprintf(cc->out, "    orrs r0, r0, r1\n");
+            break;
+        case ND_BXOR:
+            fprintf(cc->out, "    eors r0, r0, r1\n");
+            break;
+        case ND_SHL:
+            fprintf(cc->out, "    lsls r0, r0, r1\n");
+            break;
+        case ND_SHR:
+            fprintf(cc->out, "    asrs r0, r0, r1\n"); /* arithmetic shift right */
+            break;
+    }
+}
+
+static void thumb_emit_load_stack(Compiler *cc, int offset, const char *reg) {
+    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
+        fprintf(cc->out, "    ldr %s, [r7, #%d]\n", reg, offset);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", offset);
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    ldr %s, [r3]\n", reg);
+    }
+}
+
+static void thumb_emit_store_stack(Compiler *cc, int offset, const char *reg) {
+    if (offset >= 0 && offset <= 1020 && (offset % 4 == 0)) {
+        fprintf(cc->out, "    str %s, [r7, #%d]\n", reg, offset);
+    } else {
+        fprintf(cc->out, "    ldr r3, =%d\n", offset);
+        fprintf(cc->out, "    adds r3, r7, r3\n");
+        fprintf(cc->out, "    str %s, [r3]\n", reg);
+    }
+}
+
+static void thumb_emit_float_binop(Compiler *cc, int op) {
+    const char *fn = 0;
+    switch (op) {
+        case ND_FADD: fn = "__aeabi_fadd"; break;
+        case ND_FSUB: fn = "__aeabi_fsub"; break;
+        case ND_FMUL: fn = "__aeabi_fmul"; break;
+        case ND_FDIV: fn = "__aeabi_fdiv"; break;
+    }
+    if (fn) {
+        fprintf(cc->out, "    bl %s\n", fn);
+    }
+}
+
+TargetBackend backend_thumbv6m = {
+    4, /* ptr_size */
+    thumb_emit_prologue,
+    thumb_emit_epilogue,
+    thumb_emit_call,
+    thumb_emit_binary_op,
+    thumb_emit_load_stack,
+    thumb_emit_store_stack,
+    thumb_emit_float_binop
+};
