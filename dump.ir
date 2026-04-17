@@ -1,0 +1,23 @@
+[Phase 1] Lexical Array Bootstrap... OK
+[Phase 2] AST Topological Generation... cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:88: error: expected ? (89), got TILDE (48)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:89: error: expected ? (89), got TILDE (48)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:99: error: expected ? (89), got IDENT (4)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:99: error: unexpected token 87 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:99: error: expected ? (89), got NUM (1)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:99: error: unexpected token 88 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:100: error: expected ? (89), got IDENT (4)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:100: error: unexpected token 87 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:100: error: expected ? (89), got NUM (1)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:100: error: expected ? (89), got ? (88)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:104: error: expected ? (89), got CHAR_LIT (3)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:120: error: expected ? (89), got IDENT (4)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:120: error: unexpected token 87 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:120: error: expected ? (89), got NUM (1)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:120: error: unexpected token 88 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:121: error: expected ? (89), got IDENT (4)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:121: error: unexpected token 87 in expression
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:121: error: expected ? (89), got NUM (1)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:121: error: expected ? (89), got ? (88)
+cve_corpus/juliet_subset/CWE121_Stack_Based_Buffer_Overflow/CWE121_Stack_Based_Buffer_Overflow__CWE193_wchar_t_declare_ncpy_68a.c:125: error: expected ? (89), got CHAR_LIT (3)
+[0;31mFAILED[0m
+zcc: 20 error(s)

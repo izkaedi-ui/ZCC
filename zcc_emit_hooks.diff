@@ -1,0 +1,299 @@
+--- a/zcc.c  (after post-mortem P1-IR integration)
++++ b/zcc.c  (with per-instruction emit hooks wired)
+
+CONTEXT: codegen_func() already has ZCC_IR_FUNC_BEGIN/END.
+         This diff wires ZCC_EMIT_* at each x86 emit site
+         so IR nodes are actually populated.
+
+All changes are ADDITIVE — the x86 fprintf paths are untouched.
+stage2 == stage3 must still pass after this patch.
+
+═══════════════════════════════════════════════════════════════
+SECTION 1 — Binary arithmetic (ADD, SUB, MUL, DIV, MOD)
+═══════════════════════════════════════════════════════════════
+
+Find the block that emits x86 addq/subq/imulq for ND_ADD/ND_SUB/ND_MUL.
+It will look something like:
+
+    case ND_ADD:
+        gen_expr(node->lhs);
+        gen_expr(node->rhs);
+        fprintf(output, "    popq %%rdi\n");
+        fprintf(output, "    addq %%rdi, %%rax\n");
+        break;
+
+Patch each case:
+
+    case ND_ADD: {
++       char _ir_dst[IR_NAME_MAX], _ir_s1[IR_NAME_MAX], _ir_s2[IR_NAME_MAX];
++       ir_type_t _ir_ty = zcc_type_to_ir(node->ty->kind);
+        gen_expr(node->lhs);
++       if (g_emit_ir) ir_fresh_tmp(g_ir_cur_func, _ir_s1);
+        gen_expr(node->rhs);
++       if (g_emit_ir) ir_fresh_tmp(g_ir_cur_func, _ir_s2);
+        fprintf(output, "    popq %%rdi\n");
+        fprintf(output, "    addq %%rdi, %%rax\n");
++       if (g_emit_ir) {
++           ir_fresh_tmp(g_ir_cur_func, _ir_dst);
++           ZCC_EMIT_BINARY(IR_ADD, _ir_ty, _ir_dst, _ir_s1, _ir_s2, node->tok->line);
++       }
+        break;
+    }
+
+Apply the same pattern for:
+    ND_SUB  → ZCC_EMIT_BINARY(IR_SUB, ...)
+    ND_MUL  → ZCC_EMIT_BINARY(IR_MUL, ...)
+    ND_DIV  → ZCC_EMIT_BINARY(IR_DIV, ...)
+    ND_MOD  → ZCC_EMIT_BINARY(IR_MOD, ...)
+    ND_NEG  → ZCC_EMIT_UNARY(IR_NEG, ...)
+
+═══════════════════════════════════════════════════════════════
+SECTION 2 — Comparison operators (EQ, NE, LT, LE, GT, GE)
+═══════════════════════════════════════════════════════════════
+
+Find the block emitting cmpq / sete / setne / setl etc:
+
+    case ND_EQ:
+        gen_expr(node->lhs);
+        gen_expr(node->rhs);
+        fprintf(output, "    popq %%rdi\n");
+        fprintf(output, "    cmpq %%rdi, %%rax\n");
+        fprintf(output, "    sete %%al\n");
+        fprintf(output, "    movzbl %%al, %%eax\n");
+        break;
+
+Patch:
+
+    case ND_EQ: {
++       char _ir_dst[IR_NAME_MAX], _ir_s1[IR_NAME_MAX], _ir_s2[IR_NAME_MAX];
+        gen_expr(node->lhs);
++       if (g_emit_ir) ir_fresh_tmp(g_ir_cur_func, _ir_s1);
+        gen_expr(node->rhs);
++       if (g_emit_ir) ir_fresh_tmp(g_ir_cur_func, _ir_s2);
+        fprintf(output, "    popq %%rdi\n");
+        fprintf(output, "    cmpq %%rdi, %%rax\n");
+        fprintf(output, "    sete %%al\n");
+        fprintf(output, "    movzbl %%al, %%eax\n");
++       if (g_emit_ir) {
++           ir_fresh_tmp(g_ir_cur_func, _ir_dst);
++           ZCC_EMIT_BINARY(IR_EQ, IR_TY_I32, _ir_dst, _ir_s1, _ir_s2, node->tok->line);
++       }
+        break;
+    }
+
+Apply same pattern for ND_NE→IR_NE, ND_LT→IR_LT, ND_LE→IR_LE,
+ND_GT→IR_GT, ND_GE→IR_GE.
+
+═══════════════════════════════════════════════════════════════
+SECTION 3 — Variable load / store (ND_VAR, ND_ASSIGN)
+═══════════════════════════════════════════════════════════════
+
+Variable read (lvalue → rvalue load):
+
+    case ND_VAR:
+        gen_addr(node);
+        load(node->ty);
+        break;
+
+Patch:
+
+    case ND_VAR: {
++       char _ir_dst[IR_NAME_MAX], _ir_addr[IR_NAME_MAX];
+        gen_addr(node);
++       if (g_emit_ir && node->var) {
++           /* addr temp: use the variable's own name as the address ref */
++           safe_ir_name(_ir_addr, node->var->name);
++           ir_fresh_tmp(g_ir_cur_func, _ir_dst);
++           ZCC_EMIT_LOAD(zcc_type_to_ir(node->ty->kind), _ir_dst, _ir_addr,
++                         node->tok->line);
++       }
+        load(node->ty);
+        break;
+    }
+
+Assignment (ND_ASSIGN):
+
+    case ND_ASSIGN:
+        gen_addr(node->lhs);
+        gen_expr(node->rhs);
+        store(node->ty);
+        break;
+
+Patch:
+
+    case ND_ASSIGN: {
++       char _ir_addr[IR_NAME_MAX], _ir_val[IR_NAME_MAX];
+        gen_addr(node->lhs);
++       if (g_emit_ir && node->lhs->var) {
++           safe_ir_name(_ir_addr, node->lhs->var->name);
++           ir_fresh_tmp(g_ir_cur_func, _ir_val);
++       }
+        gen_expr(node->rhs);
+        store(node->ty);
++       if (g_emit_ir && node->lhs->var) {
++           ZCC_EMIT_STORE(zcc_type_to_ir(node->ty->kind), _ir_addr, _ir_val,
++                          node->tok->line);
++       }
+        break;
+    }
+
+═══════════════════════════════════════════════════════════════
+SECTION 4 — Integer constant (ND_NUM)
+═══════════════════════════════════════════════════════════════
+
+    case ND_NUM:
+        fprintf(output, "    movq $%ld, %%rax\n", node->val);
+        break;
+
+Patch:
+
+    case ND_NUM: {
++       char _ir_dst[IR_NAME_MAX];
+        fprintf(output, "    movq $%ld, %%rax\n", node->val);
++       if (g_emit_ir) {
++           ir_fresh_tmp(g_ir_cur_func, _ir_dst);
++           ZCC_EMIT_CONST(zcc_type_to_ir(node->ty->kind), _ir_dst,
++                          node->val, node->tok->line);
++       }
+        break;
+    }
+
+═══════════════════════════════════════════════════════════════
+SECTION 5 — Return statement (ND_RETURN)
+═══════════════════════════════════════════════════════════════
+
+    case ND_RETURN:
+        gen_expr(node->lhs);
+        fprintf(output, "    jmp .L.return.%s\n", current_fn->name);
+        break;
+
+Patch:
+
+    case ND_RETURN: {
++       char _ir_val[IR_NAME_MAX];
+        gen_expr(node->lhs);
++       if (g_emit_ir) {
++           ir_fresh_tmp(g_ir_cur_func, _ir_val);
++           ZCC_EMIT_RET(zcc_type_to_ir(node->ty->kind), _ir_val,
++                        node->tok->line);
++       }
+        fprintf(output, "    jmp .L.return.%s\n", current_fn->name);
+        break;
+    }
+
+═══════════════════════════════════════════════════════════════
+SECTION 6 — Branch / if / loop (ND_IF, ND_FOR, ND_WHILE)
+═══════════════════════════════════════════════════════════════
+
+ND_IF typically emits a je/jne pair to a label counter.
+Mirror the label counter into IR:
+
+    case ND_IF: {
+        int c = count();   /* ZCC's internal label counter */
++       char _ir_lbl_else[IR_LABEL_MAX], _ir_lbl_end[IR_LABEL_MAX];
++       char _ir_cond[IR_NAME_MAX];
++       /* Mirror the same counter into IR labels */
++       if (g_emit_ir) {
++           snprintf(_ir_lbl_else, IR_LABEL_MAX, ".Lir_else_%d", c);
++           snprintf(_ir_lbl_end,  IR_LABEL_MAX, ".Lir_end_%d",  c);
++       }
+        gen_expr(node->cond);
++       if (g_emit_ir) {
++           ir_fresh_tmp(g_ir_cur_func, _ir_cond);
++           ZCC_EMIT_BR_IF(_ir_cond, _ir_lbl_else, node->tok->line);
++       }
+        fprintf(output, "    cmpq $0, %%rax\n");
+        fprintf(output, "    je  .L.else.%d\n", c);
+        gen_stmt(node->then);
+        ...
+        /* at the else label: */
+        fprintf(output, ".L.else.%d:\n", c);
++       if (g_emit_ir) ZCC_EMIT_LABEL(_ir_lbl_else, node->tok->line);
+        ...
+    }
+
+═══════════════════════════════════════════════════════════════
+SECTION 7 — Function call (ND_FUNCALL)
+═══════════════════════════════════════════════════════════════
+
+    case ND_FUNCALL: {
+        /* push args, call, restore */
+        ...
+        fprintf(output, "    call %s\n", node->funcname);
+        ...
+    }
+
+Patch after the call:
+
++       if (g_emit_ir) {
++           char _ir_rv[IR_NAME_MAX];
++           ir_fresh_tmp(g_ir_cur_func, _ir_rv);
++           ZCC_EMIT_CALL(zcc_type_to_ir(node->ty->kind), _ir_rv,
++                         node->funcname, node->tok->line);
++           /* emit IR_ARG for each argument (walk node->args) */
++           Node *_a;
++           for (_a = node->args; _a; _a = _a->next) {
++               char _ir_arg[IR_NAME_MAX];
++               ir_fresh_tmp(g_ir_cur_func, _ir_arg);
++               ZCC_EMIT_ARG(zcc_type_to_ir(_a->ty->kind), _ir_arg,
++                            node->tok->line);
++           }
++       }
+
+═══════════════════════════════════════════════════════════════
+NEW HELPER — safe_ir_name()  (add near top of zcc.c, after includes)
+═══════════════════════════════════════════════════════════════
+
+/* Sanitize a C variable name for use as an IR temp name.
+ * IR_NAME_MAX = 64.  Replaces characters illegal in IR names with '_'. */
+static void safe_ir_name(char *buf, const char *cname) {
+    int i = 0;
+    if (!cname) { buf[0] = '\0'; return; }
+    while (i < IR_NAME_MAX - 1 && cname[i]) {
+        char c = cname[i];
+        buf[i] = (c == '.' || c == '-' || c == '$') ? '_' : c;
+        i++;
+    }
+    buf[i] = '\0';
+}
+
+═══════════════════════════════════════════════════════════════
+BUILD + VERIFY
+═══════════════════════════════════════════════════════════════
+
+# 1. Rebuild with ir.c in the link
+gcc -o zcc zcc.c ir.c compiler_passes.c -lm
+
+# 2. Smoke test — must emit non-zero nodes
+ZCC_EMIT_IR=1 ./zcc zcc_pp.c ir.c 2>/dev/null | head -30
+
+# Expected output contains instruction lines, e.g.:
+#   ; func codegen_func -> void
+#     CONST   i32  t0  -  -  -  imm=0  ; line 42
+#     CALL    i32  t1  -  -  printf  ; line 43
+#     ...
+
+# 3. Stage2 == Stage3 — must still pass (the emit hooks are additive)
+./run_selfhost.sh        # or: make selfhost_ir
+cmp zcc_stage2 zcc_stage3 && echo "SELF-HOST OK"
+
+# 4. Re-run the forge
+ZCC_EMIT_IR=1 ./zcc zcc_pp.c ir.c > /tmp/zcc_ir.txt
+python zcc_ir_forge.py --ir-file /tmp/zcc_ir.txt --top-n 10 --score-only
+
+# Expected: node_count > 0 for codegen_func, parse_expr, gen_expr, etc.
+═══════════════════════════════════════════════════════════════
+PRIORITY ORDER for wiring hooks
+═══════════════════════════════════════════════════════════════
+
+Wire in this order — each unlocks more meaningful PRIME scores:
+
+1. ND_NUM  (CONST)       — trivial, zero risk, immediately adds nodes
+2. ND_RETURN             — every function gets a terminal node
+3. ND_ADD/SUB/MUL        — arithmetic shows up in most functions
+4. ND_VAR (LOAD)         — variable reads, very common
+5. ND_ASSIGN (STORE)     — variable writes
+6. ND_EQ/NE/LT/LE/GT/GE  — comparisons, needed for branch scoring
+7. ND_IF / ND_WHILE      — branch labels, unlocks branch_count > 0
+8. ND_FUNCALL            — call chain, unlocks call_count > 0
+9. ND_DIV/MOD            — signed/unsigned correctness matters here

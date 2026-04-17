@@ -1,0 +1,218 @@
+diff --git a/part3.c b/part3.c
+index b463e27..7df3bf0 100644
+--- a/part3.c
++++ b/part3.c
+@@ -38,6 +38,114 @@ static void register_struct(Compiler *cc, Type *t) {
+ /* Parse struct/union body                                           */
+ /* ---------------------------------------------------------------- */
+ 
++Type *parse_type(Compiler *cc);
++Type *parse_declarator(Compiler *cc, Type *base, char *name_out);
++static long long parse_const_expr_bor(Compiler *cc);
++static long long parse_const_expr_bxor(Compiler *cc);
++static long long parse_const_expr_band(Compiler *cc);
++static long long parse_const_expr_shift(Compiler *cc);
++static long long parse_const_expr_add(Compiler *cc);
++static long long parse_const_expr_mul(Compiler *cc);
++static long long parse_const_expr_unary(Compiler *cc);
++static long long parse_const_expr_primary(Compiler *cc);
++
++static long long parse_const_expr(Compiler *cc) { return parse_const_expr_bor(cc); }
++static long long parse_const_expr_bor(Compiler *cc) {
++    long long val = parse_const_expr_bxor(cc);
++    while (cc->tk == TK_PIPE) { next_token(cc); val |= parse_const_expr_bxor(cc); }
++    return val;
++}
++static long long parse_const_expr_bxor(Compiler *cc) {
++    long long val = parse_const_expr_band(cc);
++    while (cc->tk == TK_CARET) { next_token(cc); val ^= parse_const_expr_band(cc); }
++    return val;
++}
++static long long parse_const_expr_band(Compiler *cc) {
++    long long val = parse_const_expr_shift(cc);
++    while (cc->tk == TK_AMP) { next_token(cc); val &= parse_const_expr_shift(cc); }
++    return val;
++}
++static long long parse_const_expr_shift(Compiler *cc) {
++    long long val = parse_const_expr_add(cc);
++    while (cc->tk == TK_SHL || cc->tk == TK_SHR) {
++        int tk = cc->tk; next_token(cc);
++        if (tk == TK_SHL) val <<= parse_const_expr_add(cc);
++        else val >>= parse_const_expr_add(cc);
++    }
++    return val;
++}
++static long long parse_const_expr_add(Compiler *cc) {
++    long long val = parse_const_expr_mul(cc);
++    while (cc->tk == TK_PLUS || cc->tk == TK_MINUS) {
++        int tk = cc->tk; next_token(cc);
++        if (tk == TK_PLUS) val += parse_const_expr_mul(cc);
++        else val -= parse_const_expr_mul(cc);
++    }
++    return val;
++}
++static long long parse_const_expr_mul(Compiler *cc) {
++    long long val = parse_const_expr_unary(cc);
++    while (cc->tk == TK_STAR || cc->tk == TK_SLASH || cc->tk == TK_PERCENT) {
++        int tk = cc->tk; next_token(cc);
++        long long rhs = parse_const_expr_unary(cc);
++        if (tk == TK_STAR) val *= rhs;
++        else if (tk == TK_SLASH) { if (rhs) val /= rhs; }
++        else if (tk == TK_PERCENT) { if (rhs) val %= rhs; }
++    }
++    return val;
++}
++static long long parse_const_expr_unary(Compiler *cc) {
++    if (cc->tk == TK_MINUS) { next_token(cc); return -parse_const_expr_unary(cc); }
++    if (cc->tk == TK_PLUS) { next_token(cc); return parse_const_expr_unary(cc); }
++    if (cc->tk == TK_TILDE) { next_token(cc); return ~parse_const_expr_unary(cc); }
++    if (cc->tk == TK_BANG) { next_token(cc); return !parse_const_expr_unary(cc); }
++    if (cc->tk == TK_SIZEOF) {
++        next_token(cc);
++        if (cc->tk == TK_LPAREN) {
++            next_token(cc);
++            if (is_type_token(cc)) {
++                Type *st = parse_type(cc);
++                char dummy[128];
++                st = parse_declarator(cc, st, dummy);
++                expect(cc, TK_RPAREN);
++                return type_size(st);
++            }
++            long long v = parse_const_expr(cc);
++            expect(cc, TK_RPAREN);
++            return v;
++        } else {
++            return 8;
++        }
++    }
++    return parse_const_expr_primary(cc);
++}
++static long long parse_const_expr_primary(Compiler *cc) {
++    if (cc->tk == TK_LPAREN) {
++        long long val;
++        next_token(cc);
++        val = parse_const_expr(cc);
++        expect(cc, TK_RPAREN);
++        return val;
++    }
++    if (cc->tk == TK_NUM) {
++        long long val = cc->tk_val;
++        next_token(cc);
++        return val;
++    }
++    if (cc->tk == TK_IDENT) {
++        Symbol *sym = scope_find(cc, cc->tk_text);
++        if (sym && sym->is_enum_const) {
++            long long val = sym->enum_val;
++            next_token(cc);
++            return val;
++        }
++        next_token(cc);
++        return 0;
++    }
++    next_token(cc);
++    return 0;
++}
++
+ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
+     Type *stype;
+     char tag[MAX_IDENT];
+@@ -109,7 +217,7 @@ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
+             /* Ignore bitfield size since ZCC allocates full integers for them */
+             if (cc->tk == TK_COLON) {
+                 next_token(cc);
+-                if (cc->tk == TK_NUM) next_token(cc);
++                parse_const_expr(cc);
+             }
+ 
+             field = (StructField *)cc_alloc(cc, sizeof(StructField));
+@@ -151,7 +259,7 @@ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
+                 /* Ignore bitfield size since ZCC allocates full integers */
+                 if (cc->tk == TK_COLON) {
+                     next_token(cc);
+-                    if (cc->tk == TK_NUM) next_token(cc);
++                    parse_const_expr(cc);
+                 }
+ 
+                 field2 = (StructField *)cc_alloc(cc, sizeof(StructField));
+@@ -236,19 +344,7 @@ static Type *parse_enum_def(Compiler *cc) {
+ 
+             if (cc->tk == TK_ASSIGN) {
+                 next_token(cc);
+-                /* parse constant expression — skip complex AST logic, fast forward to next enum delimiter */
+-                int is_neg = 0;
+-                while (cc->tk != TK_COMMA && cc->tk != TK_RBRACE && cc->tk != TK_EOF) {
+-                    if (cc->tk == TK_MINUS) {
+-                        is_neg = 1;
+-                    } else if (cc->tk == TK_NUM) {
+-                        val = is_neg ? -cc->tk_val : cc->tk_val;
+-                        is_neg = 0;
+-                    } else {
+-                        is_neg = 0; /* Reset if other tokens like variables appear */
+-                    }
+-                    next_token(cc);
+-                }
++                val = parse_const_expr(cc);
+             }
+ 
+             sym = scope_add(cc, name, etype);
+@@ -2619,24 +2715,7 @@ Node *parse_program(Compiler *cc) {
+                     while (cc->tk == TK_LBRACKET) {
+                         int alen = 0;
+                         next_token(cc);
+-                        if (cc->tk == TK_NUM) { alen = cc->tk_val; next_token(cc); }
+-                        else if (cc->tk == TK_IDENT) {
+-                            Symbol *sym = scope_find(cc, cc->tk_text);
+-                            if (sym && sym->is_enum_const) alen = (int)sym->enum_val;
+-                            next_token(cc);
+-                        } else if (cc->tk == TK_SIZEOF) {
+-                            next_token(cc);
+-                            if (cc->tk == TK_LPAREN) {
+-                                next_token(cc);
+-                                if (is_type_token(cc)) {
+-                                    Type *st = parse_type(cc);
+-                                    char dummy[128];
+-                                    st = parse_declarator(cc, st, dummy);
+-                                    alen = type_size(st);
+-                                }
+-                                expect(cc, TK_RPAREN);
+-                            }
+-                        }
++                        if (cc->tk != TK_RBRACKET) alen = (int)parse_const_expr(cc);
+                         expect(cc, TK_RBRACKET);
+                         if (arr_num < 8) arr_lens[arr_num++] = alen;
+                     }
+@@ -2753,32 +2832,7 @@ Node *parse_program(Compiler *cc) {
+                 int alen;
+                 next_token(cc);
+                 alen = 0;
+-                if (cc->tk == TK_NUM) {
+-                    alen = cc->tk_val;
+-                    next_token(cc);
+-                } else if (cc->tk == TK_IDENT) {
+-                    Symbol *sym;
+-                    sym = scope_find(cc, cc->tk_text);
+-                    if (sym) {
+-                        if (sym->is_enum_const) {
+-                            alen = (int)sym->enum_val;
+-                        }
+-                    }
+-                    next_token(cc);
+-                } else if (cc->tk == TK_SIZEOF) {
+-                    next_token(cc);
+-                    if (cc->tk == TK_LPAREN) {
+-                        next_token(cc);
+-                        if (is_type_token(cc)) {
+-                            Type *st;
+-                            char dummy[128];
+-                            st = parse_type(cc);
+-                            st = parse_declarator(cc, st, dummy);
+-                            alen = type_size(st);
+-                        }
+-                        expect(cc, TK_RPAREN);
+-                    }
+-                }
++                if (cc->tk != TK_RBRACKET) alen = (int)parse_const_expr(cc);
+                 expect(cc, TK_RBRACKET);
+                 dtype = type_array(cc, dtype, alen);
+             }

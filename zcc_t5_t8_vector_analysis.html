@@ -1,0 +1,187 @@
+
+<style>
+*{box-sizing:border-box}
+.wrap{padding:.75rem 0;font-size:13px}
+.grid4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:1rem}
+@media(max-width:500px){.grid4{grid-template-columns:1fr}}
+.vcard{background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:.9rem 1rem;cursor:pointer;transition:border-color .15s}
+.vcard:hover,.vcard.sel{border:.5px solid var(--color-border-info)}
+.vcard.sel{background:var(--color-background-info)}
+.vtag{font-size:10px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--color-text-secondary);margin-bottom:4px}
+.vname{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px}
+.vbars{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
+.brow{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
+.btrack{flex:1;background:var(--color-background-tertiary);border-radius:2px;height:4px;overflow:hidden}
+.bfill{height:100%;border-radius:2px}
+.bf-imp{background:var(--color-text-success)}
+.bf-cmp{background:var(--color-text-warning)}
+.bf-rsk{background:var(--color-text-danger)}
+.vtrap{font-size:11px;color:var(--color-text-secondary);line-height:1.55;border-top:.5px solid var(--color-border-tertiary);padding-top:6px;margin-top:4px}
+.detail{background:var(--color-background-primary);border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-lg);padding:1rem 1.1rem;margin-bottom:1rem}
+.dhead{font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:.65rem;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.dbadge{font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:3px}
+.db-lo{background:var(--color-background-success);color:var(--color-text-success)}
+.db-md{background:var(--color-background-warning);color:var(--color-text-warning)}
+.db-hi{background:var(--color-background-danger);color:var(--color-text-danger)}
+.drow{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:12px;margin-bottom:5px;align-items:start}
+.dlbl{color:var(--color-text-secondary);padding-top:1px}
+.dval{color:var(--color-text-primary);line-height:1.55;font-family:var(--font-mono);font-size:11.5px}
+.asm{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:.6rem .75rem;font-family:var(--font-mono);font-size:11px;line-height:1.8;margin:.5rem 0;white-space:pre}
+.a-cm{color:var(--color-text-tertiary)}.a-op{color:var(--color-text-info)}.a-rg{color:var(--color-text-warning)}.a-nm{color:var(--color-text-success)}.a-lb{color:var(--color-text-primary)}
+.prime-bar{margin:.75rem 0 .25rem}
+.pb-row{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:5px}
+.pb-lbl{width:90px;color:var(--color-text-secondary);flex-shrink:0}
+.pb-track{flex:1;background:var(--color-background-tertiary);border-radius:2px;height:5px}
+.pb-fill{height:100%;border-radius:2px;transition:width .4s ease}
+.pb-val{width:36px;text-align:right;font-family:var(--font-mono);color:var(--color-text-primary)}
+.seq-btn{background:none;border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:4px 10px;font-size:11px;font-family:var(--font-mono);cursor:pointer;color:var(--color-text-secondary);margin-right:4px}
+.seq-btn:hover,.seq-btn.a{background:var(--color-background-secondary);color:var(--color-text-primary)}
+.rec-box{background:var(--color-background-success);border:.5px solid var(--color-border-success);border-radius:var(--border-radius-md);padding:.6rem .85rem;font-size:12px;color:var(--color-text-success);line-height:1.6;margin-top:.75rem}
+</style>
+<div class="wrap">
+<div class="grid4" id="cards"></div>
+<div id="detail"></div>
+<div id="rec"></div>
+</div>
+<script>
+const VS=[
+  {
+    id:'t5',tag:'T5',name:'Dead code elimination',
+    impact:72,complexity:35,golden:25,
+    badge:'lo',badgeLabel:'safe',
+    trap:'Condition must be const-folded before pruning — needs mini-evaluator for compound exprs.',
+    files:['part4.c codegen_stmt()'],
+    mechanism:'If condition node is ND_NUM and int_val == 0, skip true-branch pointer entirely. If int_val != 0, skip false-branch.',
+    payoff:'Macro-heavy code: assembly footprint shrinks. No runtime cost, only compile-time gain.',
+    prime:'H₀=0.42 — low cascade. Pure structural drop with no register or stack involvement. Self-hosting risk is minimal: ZCC itself has few dead branches.',
+    seqs:[
+      {label:'DCE intercept',code:`<span class="a-cm">; codegen_stmt() — if statement</span>
+<span class="a-cm">; BEFORE: emits cmp + branch over dead block</span>
+<span class="a-op">if</span> (node->cond->kind == <span class="a-lb">ND_NUM</span>) {
+    <span class="a-op">if</span> (node->cond->int_val == <span class="a-nm">0</span>)
+        <span class="a-op">return</span>; <span class="a-cm">// drop true-branch entirely</span>
+    <span class="a-op">else</span>
+        <span class="a-op">codegen_stmt</span>(cc, node->then); <span class="a-cm">// skip cmp, emit directly</span>
+}`},
+    ]
+  },
+  {
+    id:'t6',tag:'T6',name:'Tail call optimization',
+    impact:85,complexity:88,golden:82,
+    badge:'hi',badgeLabel:'high risk',
+    trap:'Must align args into correct registers IN-PLACE without corrupting live values during rewrite. Self-hosting trap: codegen_expr is itself recursive — TCO there rewrites the optimizer itself.',
+    files:['part4.c codegen_stmt() ND_RETURN','part4.c codegen_call()'],
+    mechanism:'Detect ND_RETURN containing ND_CALL to same function. Eval args into temp regs, move to arg regs, emit jmp to function prologue label instead of call+ret.',
+    payoff:'O(1) stack depth for tail-recursive functions. ZCC\'s own recursive descent runs without stack thrash on deeply nested expressions.',
+    prime:'H₀=0.88 — highest cascade of T5–T8. Arg register rewrite is a B6-class perturbation: wrong register mapping → silent semantic corruption → stage2 divergence.',
+    seqs:[
+      {label:'TCO jmp',code:`<span class="a-cm">; BEFORE: tail call x + call + ret = 3 stack ops</span>
+<span class="a-op">call</span>  <span class="a-lb">codegen_expr</span>
+<span class="a-op">retq</span>
+
+<span class="a-cm">; AFTER: T6 TCO — jmp to entry, stack unchanged</span>
+<span class="a-cm">; (args already in correct regs from in-place rewrite)</span>
+<span class="a-op">jmp</span>   <span class="a-lb">.codegen_expr_entry</span>`},
+    ]
+  },
+  {
+    id:'t7',tag:'T7',name:'Register harvesting',
+    impact:95,complexity:92,golden:78,
+    badge:'hi',badgeLabel:'high risk',
+    trap:'Requires live-variable analysis to know when %r12/%r13 are safe to hold across calls. Callee-save: must push in prologue, pop before every retq — or stage3 corrupts caller\'s values.',
+    files:['part4.c codegen_func()','part4.c codegen_expr() local var emit'],
+    mechanism:'Sliding register window: first 4 active scalars bound to %r10,%r11,%r12,%r13. Spill to stack only when window is full. Load/store of array index i drops from movq -8(%rbp),%rax to movq %r10,%rax.',
+    payoff:'Array indexing: 1-cycle register read vs 3-5 cycle L1 load. Loop bodies with 2-4 live scalars become register-resident — no memory traffic per iteration.',
+    prime:'H₀=0.91 — near-catastrophic cascade. Missed callee-save push/pop is a time-bomb: works until called function overwrites %r12, then silent data corruption in stage2.',
+    seqs:[
+      {label:'Register vs memory',code:`<span class="a-cm">; BEFORE: buf[i]  — i lives on stack</span>
+<span class="a-op">movq</span>  <span class="a-rg">-8</span>(<span class="a-rg">%rbp</span>), <span class="a-rg">%rax</span>   <span class="a-cm">; load i (3-5cy L1)</span>
+<span class="a-op">imulq</span> <span class="a-nm">$8</span>, <span class="a-rg">%rax</span>         <span class="a-cm">; scale</span>
+<span class="a-op">addq</span>  <span class="a-rg">%rcx</span>, <span class="a-rg">%rax</span>        <span class="a-cm">; + base ptr</span>
+
+<span class="a-cm">; AFTER: T7 — i lives in %r10</span>
+<span class="a-op">shlq</span>  <span class="a-nm">$3</span>, <span class="a-rg">%r10</span>          <span class="a-cm">; scale i (1cy reg)</span>
+<span class="a-op">addq</span>  <span class="a-rg">%rcx</span>, <span class="a-rg">%r10</span>        <span class="a-cm">; + base ptr</span>`},
+    ]
+  },
+  {
+    id:'t8',tag:'T8',name:'Micro-ASAN (-fsanitize=zcc)',
+    impact:60,complexity:30,golden:18,
+    badge:'lo',badgeLabel:'orthogonal',
+    trap:'Arena limit must be computed at function entry and stored somewhere accessible. Stack pointer drift is the only tricky part — must account for alloca-style patterns.',
+    files:['part4.c codegen_expr() ND_ASSIGN / ND_DEREF','part1.c flag parsing'],
+    mechanism:'Add -fsanitize=zcc flag. When enabled, inject before every write: cmpq %rax, ARENA_HI; jae .sanitize_trap. Arena bounds stored in a hidden .zcc_arena_hi symbol.',
+    payoff:'Every compiled binary gets bounds-checked writes at near-zero engineering cost. ZCC becomes a hardened development compiler. The -fsanitize flag keeps it opt-in — zero impact on production builds.',
+    prime:'H₀=0.28 — lowest cascade. The injected instructions are dead-simple cmpq/jae sequences. They cannot corrupt the compiler\'s own state. The only self-hosting risk: injecting checks INTO zcc_pp.c compilation — easily guarded with a compile-time flag.',
+    seqs:[
+      {label:'Bounds inject',code:`<span class="a-cm">; T8: injected before every ND_ASSIGN write</span>
+<span class="a-op">cmpq</span>  <span class="a-lb">.zcc_arena_hi</span>(<span class="a-rg">%rip</span>), <span class="a-rg">%rax</span>
+<span class="a-op">jae</span>   <span class="a-lb">.sanitize_trap</span>    <span class="a-cm">; OOB → abort</span>
+<span class="a-op">movq</span>  <span class="a-rg">%rcx</span>, (<span class="a-rg">%rax</span>)       <span class="a-cm">; safe write</span>`},
+    ]
+  }
+];
+
+let sel='t5',seqSel={t5:0,t6:0,t7:0,t8:0};
+
+function bar(v,cls){return`<div class="btrack"><div class="bfill ${cls}" style="width:${v}%"></div></div>`;}
+
+function renderCards(){
+  document.getElementById('cards').innerHTML=VS.map(v=>`
+    <div class="vcard${sel===v.id?' sel':''}" onclick="pick('${v.id}')">
+      <div class="vtag">${v.tag}</div>
+      <div class="vname">${v.name}</div>
+      <div class="vbars">
+        <div class="brow">${bar(v.impact,'bf-imp')}<span style="width:52px;flex-shrink:0">impact ${v.impact}</span></div>
+        <div class="brow">${bar(v.complexity,'bf-cmp')}<span style="width:52px;flex-shrink:0">effort ${v.complexity}</span></div>
+        <div class="brow">${bar(v.golden,'bf-rsk')}<span style="width:52px;flex-shrink:0">golden ${v.golden}</span></div>
+      </div>
+      <div class="vtrap">${v.trap.slice(0,80)}…</div>
+    </div>`).join('');
+}
+
+function renderDetail(){
+  const v=VS.find(x=>x.id===sel);
+  const si=seqSel[v.id]||0;
+  const seq=v.seqs[si];
+  document.getElementById('detail').innerHTML=`
+    <div class="detail">
+      <div class="dhead">
+        <span>${v.tag} — ${v.name}</span>
+        <span class="dbadge db-${v.badge}">${v.badgeLabel}</span>
+      </div>
+      <div class="drow"><div class="dlbl">files</div><div class="dval">${v.files.join('<br>')}</div></div>
+      <div class="drow"><div class="dlbl">mechanism</div><div class="dval" style="font-family:var(--font-sans);font-size:12px;line-height:1.55">${v.mechanism}</div></div>
+      <div class="drow"><div class="dlbl">payoff</div><div class="dval" style="font-family:var(--font-sans);font-size:12px;line-height:1.55">${v.payoff}</div></div>
+      <div class="prime-bar">
+        <div class="pb-row"><div class="pb-lbl">impact</div><div class="pb-track"><div class="pb-fill" style="width:${v.impact}%;background:var(--color-text-success)"></div></div><div class="pb-val">${v.impact}</div></div>
+        <div class="pb-row"><div class="pb-lbl">effort</div><div class="pb-track"><div class="pb-fill" style="width:${v.complexity}%;background:var(--color-text-warning)"></div></div><div class="pb-val">${v.complexity}</div></div>
+        <div class="pb-row"><div class="pb-lbl">golden risk</div><div class="pb-track"><div class="pb-fill" style="width:${v.golden}%;background:var(--color-text-danger)"></div></div><div class="pb-val">${v.golden}</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:.5rem;line-height:1.55">${v.prime}</div>
+      <div>${v.seqs.map((s,i)=>`<button class="seq-btn${i===si?' a':''}" onclick="seqPick('${v.id}',${i})">${s.label}</button>`).join('')}</div>
+      <div class="asm">${seq.code}</div>
+      <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:.25rem">trap: ${v.trap}</div>
+    </div>`;
+}
+
+function renderRec(){
+  const order=['t5','t8','t6','t7'];
+  const labels={t5:'T5 (DCE)',t8:'T8 (micro-ASAN)',t6:'T6 (TCO)',t7:'T7 (registers)'};
+  const why={
+    t5:'Pure AST drop. No register involvement. Golden risk score 25/100. Ships in codegen_stmt() with ~15 lines.',
+    t8:'Orthogonal flag. Cannot corrupt optimizer state. Golden risk 18/100. Best ROI: transforms every compiled binary.',
+    t6:'Highest payoff but requires arg-register rewrite. Golden risk 82/100. Needs a separate test harness before touching self-hosting.',
+    t7:'Maximum runtime speed but live-variable analysis is new infrastructure. Golden risk 78/100. Build T6 first — TCO reduces the very recursion T7 would register-optimize.'
+  };
+  document.getElementById('rec').innerHTML=`
+    <div class="rec-box">
+      Recommended sequence: ${order.map((id,i)=>`<strong>${i+1}. ${labels[id]}</strong> — ${why[id]}`).join('<br>')}
+    </div>`;
+}
+
+function pick(id){sel=id;renderCards();renderDetail();}
+function seqPick(id,i){seqSel[id]=i;renderDetail();}
+
+renderCards();renderDetail();renderRec();
+</script>

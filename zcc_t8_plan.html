@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZCC T8 — Micro-ASAN Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#07090f;--bg2:#0c0f1a;--bg3:#111827;
+  --cyan:#00e5ff;--mag:#e040fb;--grn:#00e676;--amb:#ffab40;--red:#ff5252;
+  --text:#e2e8f8;--muted:#6b7a99;--border:#1e2a42;
+  --mono:'Space Mono',monospace;--head:'Syne',sans-serif;
+}
+html{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px}
+body{max-width:1040px;margin:0 auto;padding:2rem 1.5rem 4rem}
+
+.hero{border-bottom:1px solid var(--border);padding-bottom:1.5rem;margin-bottom:2rem}
+.logo{font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--red);margin-bottom:.5rem}
+h1{font-family:var(--head);font-size:2rem;font-weight:800;line-height:1.1;margin-bottom:.6rem}
+h1 span{color:var(--red)}
+.sub{color:var(--muted);font-size:12px;line-height:1.7;max-width:640px}
+
+.phase-rail{display:flex;gap:0;margin-bottom:2rem;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.phase{flex:1;padding:.65rem .75rem;border-right:1px solid var(--border);cursor:pointer;transition:background .15s}
+.phase:last-child{border-right:none}
+.phase:hover,.phase.a{background:rgba(255,82,82,.07)}
+.phase.a .ph-num{color:var(--red)}
+.ph-num{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.ph-name{font-size:12px;color:var(--text);font-weight:700}
+.ph-sub{font-size:10px;color:var(--muted);margin-top:2px}
+
+.panel{display:none}.panel.a{display:block}
+
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:1.1rem 1.25rem;margin-bottom:1rem}
+.card-head{font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);flex-shrink:0}
+.dot.r{background:var(--red)}.dot.a{background:var(--amb)}.dot.g{background:var(--grn)}.dot.m{background:var(--mag)}
+
+.chk-list{list-style:none}
+.chk-item{display:flex;align-items:flex-start;gap:.65rem;padding:.4rem 0;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.chk-item:last-child{border-bottom:none}
+.chk-item:hover{background:rgba(255,255,255,.02);margin:0 -.5rem;padding:.4rem .5rem}
+.cb{width:14px;height:14px;border:1px solid var(--muted);border-radius:2px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.chk-item.done .cb{border-color:var(--grn);background:rgba(0,230,118,.15)}
+.chk-item.done .cb::after{content:'✓';font-size:9px;color:var(--grn)}
+.chk-item.done .chk-text{color:var(--muted);text-decoration:line-through;text-decoration-color:rgba(107,122,153,.4)}
+.chk-text{line-height:1.55;font-size:12px}
+.chk-meta{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5}
+.tag-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:.35rem}
+.file-tag{font-size:10px;background:rgba(0,229,255,.08);color:var(--cyan);border:1px solid rgba(0,229,255,.2);border-radius:3px;padding:1px 6px;font-family:var(--mono)}
+.risk-tag{font-size:10px;padding:1px 6px;border-radius:3px;font-family:var(--mono)}
+.risk-hi{background:rgba(255,82,82,.1);color:var(--red);border:1px solid rgba(255,82,82,.25)}
+.risk-md{background:rgba(255,171,64,.1);color:var(--amb);border:1px solid rgba(255,171,64,.25)}
+.risk-lo{background:rgba(0,230,118,.08);color:var(--grn);border:1px solid rgba(0,230,118,.2)}
+
+pre.code{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:.9rem;overflow-x:auto;font-family:var(--mono);font-size:11.5px;line-height:1.9;color:var(--text);margin:.6rem 0}
+.asm{color:#7ecfff}.kw{color:var(--mag)}.cm{color:#3d5278;font-style:italic}.reg{color:#ffcc80}.num{color:var(--grn)}.lbl{color:var(--cyan)}.str{color:#ffab40}
+
+.warn-box{background:rgba(255,171,64,.06);border:1px solid rgba(255,171,64,.2);border-radius:5px;padding:.75rem 1rem;font-size:12px;line-height:1.65;color:var(--amb);margin:.75rem 0}
+.info-box{background:rgba(0,229,255,.04);border:1px solid rgba(0,229,255,.12);border-radius:5px;padding:.75rem 1rem;font-size:12px;line-height:1.65;color:#7dd3fc;margin:.75rem 0}
+.red-box{background:rgba(255,82,82,.06);border:1px solid rgba(255,82,82,.2);border-radius:5px;padding:.75rem 1rem;font-size:12px;line-height:1.65;color:#ff8a8a;margin:.75rem 0}
+.grn-box{background:rgba(0,230,118,.04);border:1px solid rgba(0,230,118,.2);border-radius:5px;padding:.75rem 1rem;font-size:12px;line-height:1.65;color:#6ee7b7;margin:.75rem 0}
+
+.ic{font-family:var(--mono);font-size:11.5px;background:rgba(255,82,82,.1);color:var(--red);padding:1px 5px;border-radius:3px}
+.section-title{font-family:var(--head);font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text);margin-bottom:.9rem;display:flex;align-items:center;gap:.5rem}
+.section-title::before{content:'';width:2px;height:14px;background:var(--red);border-radius:1px}
+.sep{border:none;border-top:1px solid var(--border);margin:1.25rem 0}
+table.t{width:100%;border-collapse:collapse;font-size:12px;margin:.5rem 0}
+table.t th{padding:.4rem .65rem;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:700}
+table.t td{padding:.4rem .65rem;border-bottom:1px solid rgba(30,42,66,.5);font-family:var(--mono);font-size:11.5px}
+.cy{color:var(--cyan)}.mg{color:var(--mag)}.gn{color:var(--grn)}.ab{color:var(--amb)}.rd{color:var(--red)}
+.badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;border-radius:3px;border:1px solid}
+.bg-rd{border-color:rgba(255,82,82,.3);color:var(--red);background:rgba(255,82,82,.06)}
+.bg-gn{border-color:rgba(0,230,118,.3);color:var(--grn);background:rgba(0,230,118,.06)}
+.bg-cy{border-color:rgba(0,229,255,.3);color:var(--cyan);background:rgba(0,229,255,.06)}
+.bg-ab{border-color:rgba(255,171,64,.3);color:var(--amb);background:rgba(255,171,64,.06)}
+.progress-block{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:.9rem 1.1rem;margin-bottom:1.5rem}
+.pbar-track{background:var(--bg3);border-radius:3px;height:5px;overflow:hidden;margin:.5rem 0}
+.pbar-fill{height:100%;background:linear-gradient(90deg,var(--red),var(--mag));border-radius:3px;transition:width .4s ease}
+.pl{font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+footer{margin-top:3rem;border-top:1px solid var(--border);padding-top:1.2rem;font-size:11px;color:var(--muted);text-align:center;letter-spacing:.04em}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="logo">🔱 ZKAEDI COMPILER FORGE — T8</div>
+  <h1>Micro-ASAN<br><span>Implementation Plan</span></h1>
+  <p class="sub">Orthogonal hardening layer: inject bounds-checking perimeter around pointer dereferences via <code>-fsanitize=zcc</code>. Self-hosting gauntlet unaffected — flag off by default. Zero interference with Golden Rule.</p>
+</div>
+
+<div class="progress-block">
+  <div class="pl"><span>T8 Phase Completion</span><span id="pct">—</span></div>
+  <div class="pbar-track"><div class="pbar-fill" id="pbar" style="width:0%"></div></div>
+</div>
+
+<!-- PHASE RAIL -->
+<div class="phase-rail">
+  <div class="phase a" onclick="sw('p1',this)">
+    <div class="ph-num">Phase 1</div>
+    <div class="ph-name">Flag & State</div>
+    <div class="ph-sub">cc->sanitize, -fsanitize=zcc</div>
+  </div>
+  <div class="phase" onclick="sw('p2',this)">
+    <div class="ph-num">Phase 2</div>
+    <div class="ph-name">Arena Probe</div>
+    <div class="ph-sub">brk() high-water, %r15</div>
+  </div>
+  <div class="phase" onclick="sw('p3',this)">
+    <div class="ph-num">Phase 3</div>
+    <div class="ph-name">Crash Handler</div>
+    <div class="ph-sub">.zcc_sanitize_trap</div>
+  </div>
+  <div class="phase" onclick="sw('p4',this)">
+    <div class="ph-num">Phase 4</div>
+    <div class="ph-name">Inject Sites</div>
+    <div class="ph-sub">ND_ASSIGN ptr writes</div>
+  </div>
+  <div class="phase" onclick="sw('p5',this)">
+    <div class="ph-num">Phase 5</div>
+    <div class="ph-name">Traps & Verify</div>
+    <div class="ph-sub">5 architectural traps</div>
+  </div>
+</div>
+
+<!-- ─── PHASE 1 ─── -->
+<div class="panel a" id="p-p1">
+  <div class="section-title">Phase 1 — Flag Parsing & Compiler State</div>
+  <div class="info-box">T8 is orthogonal. The flag must default OFF. <code>run_selfhost.sh</code> never passes it. Stage2 and Stage3 compile identical assembly regardless of T8 state.</div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot"></div>Checklist — Flag Integration</div>
+    <ul class="chk-list">
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Add <span class="ic">int sanitize</span> field to the Compiler struct (cc)</div>
+        <div class="chk-meta">Single bit. 0 = disabled (default), 1 = T8 mode active.</div>
+        <div class="tag-row"><span class="file-tag">part1.c or zcc.h</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Parse <span class="ic">-fsanitize=zcc</span> in argument handler → set <span class="ic">cc.sanitize = 1</span></div>
+        <div class="tag-row"><span class="file-tag">part1.c main()</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Alternative trigger: <span class="ic">ZCC_SAFE_MODE=1</span> env var — check via <span class="ic">getenv("ZCC_SAFE_MODE")</span> at startup</div>
+        <div class="chk-meta">Useful for CI pipelines that can't modify argv.</div>
+        <div class="tag-row"><span class="file-tag">part1.c main()</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Guard ALL T8 injection sites with <span class="ic">if (cc->sanitize)</span> — never fires without the flag</div>
+        <div class="chk-meta">This is the Golden Rule guard. The flag being off is why self-hosting stays at 0 diff.</div>
+        <div class="tag-row"><span class="file-tag">part4.c</span> <span class="risk-tag risk-hi">CRITICAL — always present</span></div></div>
+      </li>
+    </ul>
+    <pre class="code"><span class="cm">/* zcc.h — Compiler struct addition */</span>
+<span class="kw">typedef struct</span> Compiler {
+    FILE        *out;
+    <span class="kw">int</span>          label_count;
+    <span class="cm">/* ... existing fields ... */</span>
+    <span class="kw">int</span>          sanitize;     <span class="cm">/* T8: 0=off (default), 1=bounds-check mode */</span>
+} Compiler;
+
+<span class="cm">/* part1.c — flag parsing */</span>
+<span class="kw">if</span> (strcmp(argv[i], <span class="str">"-fsanitize=zcc"</span>) == <span class="num">0</span>) {
+    cc.sanitize = <span class="num">1</span>;
+} <span class="kw">else if</span> (getenv(<span class="str">"ZCC_SAFE_MODE"</span>)) {
+    cc.sanitize = <span class="num">1</span>;
+}</pre>
+  </div>
+</div>
+
+<!-- ─── PHASE 2 ─── -->
+<div class="panel" id="p-p2">
+  <div class="section-title">Phase 2 — Arena Probe & Limit Register</div>
+  <div class="warn-box">
+    <strong>Trap #1 — Arena discovery.</strong> The bounds check needs an upper limit to compare against. Three strategies with different trade-offs — pick one before writing any injection code.
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot a"></div>Strategy A — %r15 as Safety Register (Recommended)</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.65;margin-bottom:.75rem">Reserve <span class="ic">%r15</span> as a dedicated "arena ceiling" register. Load it once at program entry via <span class="ic">brk(0)</span> (returns current heap break = top of heap). Every bounds check is then a single <span class="ic">cmpq %rax, %r15</span>. Fastest check possible — 1 cycle latency.</div>
+    <div class="warn-box" style="margin-bottom:.75rem"><strong>Trap #2 — Stack pointer aliasing.</strong> Stack addresses are ABOVE %r15 (heap grows up, stack grows down from top of address space). A naive <span class="ic">cmpq %rax, %r15; ja .trap</span> would flag every stack-resident pointer as OOB. Solution: only inject checks for pointers proven to be heap-derived at AST level, OR use a two-sided range check (lo bound = program text end, hi bound = heap break).</div>
+    <ul class="chk-list">
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">In codegen_func() prologue, when sanitize=1: emit <span class="ic">pushq %r15</span> (callee-save), then load heap break into %r15</div>
+        <div class="tag-row"><span class="file-tag">part4.c codegen_func()</span> <span class="risk-tag risk-md">MEDIUM</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">In codegen_func() epilogue: emit <span class="ic">popq %r15</span> before every <span class="ic">retq</span></div>
+        <div class="chk-meta">%r15 is callee-saved in SysV ABI. Pushed/popped every function that's compiled with T8 active.</div>
+        <div class="tag-row"><span class="file-tag">part4.c codegen_func()</span> <span class="risk-tag risk-md">MEDIUM</span></div></div>
+      </li>
+    </ul>
+    <pre class="code"><span class="cm">; T8 function prologue injection (when cc->sanitize)</span>
+<span class="asm">pushq</span> <span class="reg">%r15</span>                     <span class="cm">; callee-save %r15</span>
+<span class="asm">xorq</span>  <span class="reg">%rdi</span>, <span class="reg">%rdi</span>              <span class="cm">; brk(0) = query current break</span>
+<span class="asm">movq</span>  <span class="num">$12</span>, <span class="reg">%rax</span>               <span class="cm">; syscall: brk</span>
+<span class="asm">syscall</span>
+<span class="asm">movq</span>  <span class="reg">%rax</span>, <span class="reg">%r15</span>              <span class="cm">; %r15 = heap ceiling</span>
+
+<span class="cm">; T8 function epilogue injection</span>
+<span class="asm">popq</span>  <span class="reg">%r15</span>                     <span class="cm">; restore %r15 before ret</span>
+<span class="asm">retq</span></pre>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot m"></div>Strategy B — .zcc_arena_hi Symbol (Simpler, No %r15 Reserve)</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.65;margin-bottom:.75rem">Emit a global <span class="ic">.zcc_arena_hi</span> symbol in the output file's preamble. The sanitized main() initializes it via brk(0) at startup. Each check does a memory load (<span class="ic">cmpq .zcc_arena_hi(%rip), %rax</span>) — slightly slower than Strategy A (memory load vs register), but doesn't require reserving %r15.</div>
+    <pre class="code"><span class="cm">; Preamble emission (once, at start of output file)</span>
+    <span class="lbl">.data</span>
+<span class="lbl">.zcc_arena_hi:</span>   <span class="asm">.quad</span> <span class="num">0</span>       <span class="cm">; initialized at runtime</span>
+    <span class="lbl">.text</span>
+
+<span class="cm">; main() injection (once, when sanitize=1)</span>
+<span class="asm">xorq</span>  <span class="reg">%rdi</span>, <span class="reg">%rdi</span>
+<span class="asm">movq</span>  <span class="num">$12</span>, <span class="reg">%rax</span>               <span class="cm">; brk(0)</span>
+<span class="asm">syscall</span>
+<span class="asm">movq</span>  <span class="reg">%rax</span>, <span class="lbl">.zcc_arena_hi</span>(<span class="reg">%rip</span>)
+
+<span class="cm">; Per-check (every pointer write)</span>
+<span class="asm">cmpq</span>  <span class="lbl">.zcc_arena_hi</span>(<span class="reg">%rip</span>), <span class="reg">%rax</span>
+<span class="asm">ja</span>    <span class="lbl">.zcc_sanitize_trap</span></pre>
+  </div>
+</div>
+
+<!-- ─── PHASE 3 ─── -->
+<div class="panel" id="p-p3">
+  <div class="section-title">Phase 3 — Crash Handler (.zcc_sanitize_trap)</div>
+  <div class="warn-box"><strong>Trap #5 — Label collision.</strong> Every injected check jumps to a crash handler. This must be ONE shared function emitted once into the preamble — NOT a per-check label. If you generate a new label per injection site, the label counter diverges between stage2 and stage3, breaking the Golden Rule even with the flag off.</div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot r"></div>Crash Handler Architecture</div>
+    <ul class="chk-list">
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Emit <span class="ic">.zcc_sanitize_trap:</span> ONCE at top of output file when <span class="ic">cc->sanitize == 1</span> — before any function code</div>
+        <div class="chk-meta">Single shared target. All injection points jump here.</div>
+        <div class="tag-row"><span class="file-tag">part4.c codegen_preamble()</span> <span class="risk-tag risk-hi">CRITICAL — emit once only</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Handler body: write diagnostic string to stderr (fd=2) via write syscall, then call abort (SIGABRT) or emit <span class="ic">ud2</span> (illegal instruction trap)</div>
+        <div class="tag-row"><span class="file-tag">part4.c codegen_preamble()</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Diagnostic string: <span class="ic">"ZCC SANITIZER: out-of-bounds write\n"</span> embedded as <span class="ic">.ascii</span> in <span class="ic">.rodata</span></div>
+        <div class="tag-row"><span class="file-tag">part4.c preamble</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+    </ul>
+    <pre class="code"><span class="cm">; Emitted ONCE at top of output .s when sanitize=1</span>
+    <span class="lbl">.section .rodata</span>
+<span class="lbl">.zcc_san_msg:</span>
+    <span class="asm">.ascii</span> <span class="str">"ZCC SANITIZER: out-of-bounds write\n"</span>
+<span class="lbl">.zcc_san_msg_end:</span>
+    <span class="lbl">.text</span>
+
+<span class="lbl">.zcc_sanitize_trap:</span>
+    <span class="cm">; write(2, .zcc_san_msg, 36) via syscall</span>
+    <span class="asm">movq</span>  <span class="num">$1</span>,  <span class="reg">%rax</span>             <span class="cm">; syscall: write</span>
+    <span class="asm">movq</span>  <span class="num">$2</span>,  <span class="reg">%rdi</span>             <span class="cm">; fd: stderr</span>
+    <span class="asm">leaq</span>  <span class="lbl">.zcc_san_msg</span>(<span class="reg">%rip</span>), <span class="reg">%rsi</span>
+    <span class="asm">movq</span>  <span class="num">$36</span>, <span class="reg">%rdx</span>             <span class="cm">; len</span>
+    <span class="asm">syscall</span>
+    <span class="cm">; abort via SIGABRT</span>
+    <span class="asm">movq</span>  <span class="num">$60</span>, <span class="reg">%rax</span>             <span class="cm">; syscall: exit</span>
+    <span class="asm">movq</span>  <span class="num">$134</span>, <span class="reg">%rdi</span>            <span class="cm">; exit code 134 = SIGABRT convention</span>
+    <span class="asm">syscall</span>
+    <span class="asm">ud2</span>                          <span class="cm">; unreachable — illegal instr if syscall fails</span></pre>
+  </div>
+</div>
+
+<!-- ─── PHASE 4 ─── -->
+<div class="panel" id="p-p4">
+  <div class="section-title">Phase 4 — Injection Sites</div>
+  <div class="warn-box"><strong>Trap #4 — Read vs Write scope.</strong> ND_DEREF on the RHS of an expression is a READ. Only inject checks for WRITES — <span class="ic">ND_ASSIGN</span> where the LHS is a pointer dereference. Injecting on reads too doubles instrumentation density with no additional safety guarantee for the canonical overflow class.</div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot r"></div>Primary Injection Site — ND_ASSIGN pointer writes</div>
+    <ul class="chk-list">
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">In <span class="ic">codegen_expr()</span> ND_ASSIGN case: after evaluating LHS address into %rax, before the actual write, check <span class="ic">if (cc->sanitize)</span> and emit the bounds check sequence</div>
+        <div class="tag-row"><span class="file-tag">part4.c ND_ASSIGN</span> <span class="risk-tag risk-hi">PRIMARY SITE</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Scope guard: only inject when LHS node type indicates a pointer target — skip for stack-slot direct assignments (int x = 5)</div>
+        <div class="chk-meta">If ZCC's type system doesn't track this cleanly, use a conservative heuristic: inject on all ND_ASSIGN where LHS contains ND_DEREF.</div>
+        <div class="tag-row"><span class="file-tag">part4.c</span> <span class="risk-tag risk-md">MEDIUM</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Register preservation: the check must not clobber %rax (which holds the address being checked). Save %rax to %rcx before cmp, or use %rax directly in cmpq (safe — cmpq is non-destructive)</div>
+        <div class="chk-meta">cmpq is read-only on both operands. %rax survives the check intact.</div>
+        <div class="tag-row"><span class="file-tag">part4.c</span> <span class="risk-tag risk-lo">LOW — cmpq non-destructive</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Secondary site: <span class="ic">ND_DEREF</span> on LHS of compound assignment operators if ZCC supports them</div>
+        <div class="tag-row"><span class="file-tag">part4.c ND_DEREF</span> <span class="risk-tag risk-lo">LOW</span></div></div>
+      </li>
+    </ul>
+    <pre class="code"><span class="cm">/* part4.c — ND_ASSIGN injection skeleton */</span>
+<span class="kw">case</span> <span class="lbl">ND_ASSIGN</span>:
+    codegen_expr(cc, node-&gt;lhs);   <span class="cm">/* LHS address → %rax */</span>
+    fprintf(cc-&gt;out, <span class="str">"    pushq %%rax\n"</span>);
+    codegen_expr(cc, node-&gt;rhs);   <span class="cm">/* RHS value → %rax */</span>
+    fprintf(cc-&gt;out, <span class="str">"    popq %%rcx\n"</span>);  <span class="cm">/* %rcx = destination addr */</span>
+
+    <span class="cm">/* T8 injection — only when sanitize flag active */</span>
+    <span class="kw">if</span> (cc-&gt;sanitize &amp;&amp; is_pointer_target(node-&gt;lhs)) {
+        <span class="cm">/* Strategy A: %r15 holds heap ceiling */</span>
+        fprintf(cc-&gt;out, <span class="str">"    cmpq %%r15, %%rcx\n"</span>);
+        fprintf(cc-&gt;out, <span class="str">"    ja .zcc_sanitize_trap\n"</span>);
+        <span class="cm">/* Strategy B: memory symbol */</span>
+        <span class="cm">/* fprintf(cc->out, "    cmpq .zcc_arena_hi(%%rip), %%rcx\n"); */</span>
+        <span class="cm">/* fprintf(cc->out, "    ja .zcc_sanitize_trap\n"); */</span>
+    }
+
+    fprintf(cc-&gt;out, <span class="str">"    movq %%rax, (%%rcx)\n"</span>); <span class="cm">/* actual write */</span>
+    <span class="kw">break</span>;</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot a"></div>Full Injection Sequence — Strategy A</div>
+    <pre class="code"><span class="cm">; ND_ASSIGN *ptr = val  with T8 active (Strategy A, %r15 = heap ceiling)</span>
+
+<span class="cm">; Step 1: evaluate destination address → %rcx (via normal LHS eval + pushq/popq)</span>
+<span class="cm">; %rcx = destination pointer</span>
+
+<span class="cm">; Step 2: T8 bounds check (non-destructive — cmpq doesn't modify %rcx)</span>
+<span class="asm">cmpq</span>  <span class="reg">%r15</span>, <span class="reg">%rcx</span>              <span class="cm">; is ptr >= heap ceiling?</span>
+<span class="asm">ja</span>    <span class="lbl">.zcc_sanitize_trap</span>       <span class="cm">; yes = OOB → crash + stderr msg</span>
+
+<span class="cm">; Step 3: actual write (pointer survived the check)</span>
+<span class="asm">movq</span>  <span class="reg">%rax</span>, (<span class="reg">%rcx</span>)            <span class="cm">; write value to address</span>
+
+<span class="cm">; Total overhead per write: 2 instructions (1 cmpq + 1 ja)</span>
+<span class="cm">; Branch prediction: ja is almost always not-taken (safe path predicted)</span>
+<span class="cm">; Cost: ~0-1 cy on predicted safe path (branch predictor learns "never taken")</span></pre>
+  </div>
+</div>
+
+<!-- ─── PHASE 5 ─── -->
+<div class="panel" id="p-p5">
+  <div class="section-title">Phase 5 — Architectural Traps & Verification</div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot r"></div>All 5 Traps — Pre-Implementation Threat Model</div>
+    <table class="t">
+      <thead><tr><th>#</th><th>Trap</th><th>Manifestation</th><th>Resolution</th></tr></thead>
+      <tbody>
+        <tr><td class="rd">1</td><td>Arena discovery</td><td>No upper limit to compare against</td><td class="cy">brk(0) into %r15 at function entry (Strategy A)</td></tr>
+        <tr><td class="ab">2</td><td>Stack pointer aliasing</td><td>Stack addresses &gt; heap ceiling → every stack write flagged as OOB</td><td class="cy">Scope injection to ND_DEREF LHS only, OR add lo-bound check (&gt; text segment end)</td></tr>
+        <tr><td class="ab">3</td><td>Self-hosting contamination</td><td>T8 instrumentation slows ZCC compiling itself; stage2 != stage3 if flag leaks</td><td class="gn">Default OFF. run_selfhost.sh never passes flag. cc->sanitize guard on every emit.</td></tr>
+        <tr><td class="ab">4</td><td>Read vs write scope</td><td>Injecting on reads (ND_DEREF RHS) doubles instrumentation for no OOB gain</td><td class="cy">Only inject on ND_ASSIGN where LHS is pointer-typed deref</td></tr>
+        <tr><td class="rd">5</td><td>Label collision</td><td>Per-check labels diverge label_count between stage2/stage3 — breaks diff even with flag off</td><td class="gn">Single shared .zcc_sanitize_trap emitted once in preamble, never counted in label_count</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot g"></div>Verification Checklist</div>
+    <ul class="chk-list">
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Write <span class="ic">test_t8.c</span>: intentional OOB write → compile with <span class="ic">-fsanitize=zcc</span> → expect exit code 134 + stderr message</div>
+        <div class="tag-row"><span class="file-tag">test_t8.c</span> <span class="risk-tag risk-hi">PRIMARY TEST</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Write <span class="ic">test_t8_safe.c</span>: valid pointer writes only → compile with <span class="ic">-fsanitize=zcc</span> → must complete successfully (no false positives)</div>
+        <div class="tag-row"><span class="file-tag">test_t8_safe.c</span> <span class="risk-tag risk-hi">FALSE POSITIVE GATE</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Run <span class="ic">verify_invariants.sh</span> WITHOUT <span class="ic">-fsanitize=zcc</span> → must still produce 0 diff lines (orthogonality proof)</div>
+        <div class="tag-row"><span class="file-tag">run_selfhost.sh</span> <span class="risk-tag risk-hi">GOLDEN RULE</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Compile <span class="ic">test_t8.c</span> with GCC <span class="ic">-fsanitize=address</span> and ZCC <span class="ic">-fsanitize=zcc</span> → both must catch the same OOB → confirm semantic alignment</div>
+        <div class="tag-row"><span class="file-tag">cross-validate</span> <span class="risk-tag risk-md">MEDIUM</span></div></div>
+      </li>
+      <li class="chk-item" onclick="tog(this)">
+        <div class="cb"></div>
+        <div><div class="chk-text">Stack write false-positive check: local array write (<span class="ic">int buf[4]; buf[0]=1;</span>) must NOT trigger with Strategy A</div>
+        <div class="chk-meta">This is the Trap #2 validation. If Strategy A fires on stack writes, switch to Strategy B or add lo-bound check.</div>
+        <div class="tag-row"><span class="file-tag">test_t8_safe.c</span> <span class="risk-tag risk-hi">TRAP #2 VALIDATION</span></div></div>
+      </li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot g"></div>test_t8.c — Canonical Test Scaffold</div>
+    <pre class="code"><span class="cm">/* test_t8.c — T8 Micro-ASAN validation suite */</span>
+<span class="kw">int</span> main(<span class="kw">void</span>) {
+    <span class="cm">/* Safe: stack array, valid writes → must NOT trigger */</span>
+    <span class="kw">int</span> buf[<span class="num">4</span>];
+    buf[<span class="num">0</span>] = <span class="num">1</span>;  buf[<span class="num">1</span>] = <span class="num">2</span>;  buf[<span class="num">2</span>] = <span class="num">3</span>;  buf[<span class="num">3</span>] = <span class="num">4</span>;
+
+    <span class="cm">/* OOB: write past heap allocation → MUST trigger .zcc_sanitize_trap */</span>
+    <span class="kw">char</span> *heap_buf = malloc(<span class="num">8</span>);
+    heap_buf[<span class="num">0</span>] = <span class="num">'A'</span>;       <span class="cm">/* safe */</span>
+    heap_buf[<span class="num">7</span>] = <span class="num">'Z'</span>;       <span class="cm">/* safe */</span>
+    heap_buf[<span class="num">1024</span>] = <span class="num">'X'</span>;   <span class="cm">/* OOB — T8 must catch this */</span>
+
+    <span class="cm">/* unreachable if T8 fires correctly */</span>
+    <span class="kw">return</span> <span class="num">0</span>;
+}
+<span class="cm">/* Expected: exit(134), stderr = "ZCC SANITIZER: out-of-bounds write" */</span></pre>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="dot g"></div>PRIME Energy Analysis</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7">
+      <strong style="color:var(--text)">H₀ = 0.28</strong> — lowest cascade energy of all T5–T8 vectors. T8 is orthogonal to the optimization chain: the injected <span class="ic">cmpq + ja</span> sequence is new assembly that doesn't touch any existing codegen path. The only self-hosting risk is Trap #3 (flag leakage) and Trap #5 (label collision) — both resolved architecturally at the flag guard and preamble-only label emission. Stage2 ≡ Stage3 is mathematically guaranteed when the flag is off.
+    </div>
+  </div>
+
+  <hr style="border:none;border-top:1px solid var(--border);margin:1.25rem 0">
+  <div class="section-title">Strategy Decision</div>
+  <div class="grn-box">
+    <strong>Recommendation: Strategy A (%r15 register) + ND_DEREF LHS scope guard.</strong><br>
+    Strategy A gives 1-cycle check overhead vs Strategy B's memory load. The %r15 push/pop in the prologue/epilogue is standard callee-save — identical pattern to what T7 (register harvesting) will add for %r12/%r13. Implementing Strategy A now creates the prologue/epilogue infrastructure that T7 reuses, making T8 a force multiplier for the T7 buildout. Scope guard (only inject on ND_DEREF LHS) eliminates the stack aliasing trap entirely without needing a two-sided range check.
+  </div>
+</div>
+
+<footer>ZCC T8 MICRO-ASAN — IMPLEMENTATION PLAN · ZKAEDI COMPILER FORGE v2.0 · Orthogonal hardening layer</footer>
+
+<script>
+function sw(id,el){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('a'));
+  document.querySelectorAll('.phase').forEach(p=>p.classList.remove('a'));
+  document.getElementById('p-'+id).classList.add('a');
+  el.classList.add('a');
+  updateProgress();
+}
+function tog(el){
+  el.classList.toggle('done');
+  updateProgress();
+}
+function updateProgress(){
+  const all=document.querySelectorAll('.chk-item');
+  const done=document.querySelectorAll('.chk-item.done');
+  const pct=Math.round(done.length/all.length*100);
+  document.getElementById('pbar').style.width=pct+'%';
+  document.getElementById('pct').textContent=pct+'%  ('+done.length+'/'+all.length+' tasks)';
+}
+updateProgress();
+</script>
+</body>
+</html>

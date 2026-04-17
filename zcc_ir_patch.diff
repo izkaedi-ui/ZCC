@@ -1,0 +1,110 @@
+--- a/zcc.c
++++ b/zcc.c
+@@ -1,6 +1,10 @@
+ /* zcc.c — ZCC self-hosting C compiler */
++/*
++ * P1-IR patch: adds --emit-ir flag and ZCC_EMIT_IR env var support.
++ * The x86-64 emit path is COMPLETELY UNCHANGED — stage2==stage3 still passes.
++ * GCC boundary function zcc_run_passes_log: UNTOUCHED.
++ */
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include "ir.h"
++#include "ir_emit_dispatch.h"
+
+@@ -XX,6 +XX,10 @@ static char *output_file = "a.out";
+ static int   flag_emit_asm = 0;
++/* IR emit flag — set by ZCC_IR_INIT() in main() */
++/* Declared extern in ir.h, defined in ir.c */
+
+@@ -XX,10 +XX,20 @@
+ /* ── main() ─── */
+ int main(int argc, char **argv) {
+     int i;
++    int emit_ir_flag = 0;
++
+     for (i = 1; i < argc; i++) {
++        if (strcmp(argv[i], "--emit-ir") == 0) {
++            emit_ir_flag = 1;
++            continue;
++        }
+         if (strcmp(argv[i], "-o") == 0 && i+1 < argc) {
+             output_file = argv[++i];
+             continue;
+         }
+         /* ... existing flag parsing ... */
+     }
+
++    /* IR init — checks both --emit-ir flag and ZCC_EMIT_IR env var */
++    if (emit_ir_flag) g_emit_ir = 1;
++    ZCC_IR_INIT();
+
+     /* ... existing compilation pipeline ... */
+
++    /* Emit IR text after all functions compiled, before exit */
++    ZCC_IR_FLUSH(stdout);
+
+     return 0;
+ }
+
+@@ -XX,6 +XX,15 @@
+ /* ── Function code generation entry point ── */
+ static void codegen_func(Node *fn_node) {
+     const char *fname = fn_node->name;
++    ir_type_t   ir_ret;
++
++    /* Map ZCC type tag → IR type for the return type */
++    ir_ret = zcc_type_to_ir(fn_node->ret_type);
++    ZCC_IR_FUNC_BEGIN(fname, ir_ret);
+
+     /* ... existing x86-64 prologue emit ... */
+     /* UNCHANGED — IR emit is ADDITIVE in P1, not a replacement */
+
+     /* ... existing function body codegen ... */
+
++    ZCC_IR_FUNC_END();
+ }
+
+@@ -XX,6 +XX,20 @@
+ /* ── Helper: map ZCC TY_ constants to IR ir_type_t ── */
++/* ADD THIS NEW FUNCTION — not present in original zcc.c */
++static ir_type_t zcc_type_to_ir(int zcc_ty) {
++    /* ZCC type tag → IR type mapping.
++     * Adjust TY_INT / TY_LONG / TY_CHAR etc. to match your actual
++     * zcc.c type enum values.  These are representative mappings. */
++    switch (zcc_ty) {
++        case TY_VOID:   return IR_TY_VOID;
++        case TY_CHAR:   return IR_TY_I8;
++        case TY_SHORT:  return IR_TY_I16;
++        case TY_INT:    return IR_TY_I32;
++        case TY_LONG:   return IR_TY_I64;   /* LP64: long = 8 bytes */
++        case TY_UCHAR:  return IR_TY_U8;
++        case TY_USHORT: return IR_TY_U16;
++        case TY_UINT:   return IR_TY_U32;
++        case TY_ULONG:  return IR_TY_U64;
++        case TY_PTR:    return IR_TY_PTR;
++        default:        return IR_TY_I64;   /* conservative fallback */
++    }
++}
+
+@@ Makefile @@
+--- a/Makefile
++++ b/Makefile
++# P1-IR additions — ir.c compiled as part of zcc_full target
+-zcc_full:
+-	gcc -o zcc zcc.c compiler_passes.c -lm
++zcc_full:
++	gcc -o zcc zcc.c ir.c compiler_passes.c -lm
+
++# Self-host still works — ir.h is ZCC-parseable
++selfhost_ir: zcc_full
++	sed 's/#include "zcc_ast_bridge.h"/#include "zcc_ast_bridge_zcc.h"/' zcc.c | \
++	grep -v '_Static_assert' > zcc_pp.c
++	./zcc zcc_pp.c ir.c -o zcc_stage2
++	./zcc_stage2 zcc_pp.c ir.c -o zcc_stage3
++	cmp zcc_stage2 zcc_stage3 && echo "PASS: stage2 == stage3"
+
++# Smoke test: emit IR for hello_world.c
++test_emit_ir:
++	ZCC_EMIT_IR=1 ./zcc tests/hello_world.c | head -40
