@@ -33,7 +33,7 @@ enum {
     MAX_PARAMS  = 128,
     MAX_CALL_ARGS = 256,
     MAX_CASES   = 4096,
-    MAX_INIT    = 65536,  /* TODO(v0.11): Replace with dynamic realloc when num_args hits capacity */
+    MAX_INIT    = 65536,  /* DEPRECATED: init lists now use dynamic realloc (v0.9.9) */
     ARENA_SIZE  = 16777216
 };
 

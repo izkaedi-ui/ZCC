@@ -29,6 +29,7 @@ extern int  g_peephole_verbose;
 
 /* Security pass globals */
 static int  g_security_signext = 0;
+static int  g_security_476 = 0;
 
 static void init_compiler(Compiler *cc) {
   /* zero everyt5555hing — cc was calloc'd */
@@ -494,6 +495,148 @@ static void security_signext_scan(char *filename) {
 }
 
 /* ================================================================ */
+/* SECURITY PASS: --security-476 (CWE-476)                           */
+/* Scans assembly for nullable-return calls (malloc, calloc, realloc, */
+/* fopen, etc.) followed by dereference of %rax without null check.  */
+/* ================================================================ */
+
+#define NULLDEREF_WINDOW 30
+
+static int is_nullable_call(const char *line) {
+  return strstr(line, "call malloc") || strstr(line, "call calloc") ||
+         strstr(line, "call realloc") || strstr(line, "call fopen") ||
+         strstr(line, "call fdopen") || strstr(line, "call tmpfile") ||
+         strstr(line, "call strdup") || strstr(line, "call strndup") ||
+         strstr(line, "call mmap");
+}
+
+static int is_null_check(const char *line) {
+  /* testq %rax, %rax  or  cmpq $0, %rax */
+  return strstr(line, "testq %rax") || strstr(line, "cmpq $0, %rax") ||
+         strstr(line, "test %eax") || strstr(line, "cmp $0, %eax");
+}
+
+static int is_rax_deref(const char *line) {
+  /* (%rax) — memory access through %rax without offset guard */
+  return strstr(line, "(%rax)") != 0;
+}
+
+static int is_rax_moved(const char *line) {
+  /* movq %rax, %r.. — return value moved to another register */
+  if (strstr(line, "movq %rax, %r") && !strstr(line, "movq %rax, %rsp") &&
+      !strstr(line, "movq %rax, %rbp"))
+    return 1;
+  return 0;
+}
+
+static void security_nullderef_scan(char *filename) {
+  FILE *fp;
+  int nlines = 0;
+  int findings = 0;
+  int i;
+  char current_func[128];
+  char *line_buf;
+  char **lp;
+  int max_lines = 32768;
+
+  fp = fopen(filename, "r");
+  if (!fp) return;
+
+  line_buf = (char *)malloc(max_lines * 128);
+  lp = (char **)malloc(max_lines * sizeof(char *));
+  if (!line_buf || !lp) { fclose(fp); return; }
+
+  current_func[0] = 0;
+  while (nlines < max_lines && fgets(line_buf + nlines * 128, 128, fp)) {
+    lp[nlines] = line_buf + nlines * 128;
+    nlines++;
+  }
+  fclose(fp);
+
+  for (i = 0; i < nlines; i++) {
+    /* Track current function */
+    if (lp[i][0] != ' ' && lp[i][0] != '\t' && lp[i][0] != '.' &&
+        lp[i][0] != '#' && lp[i][0] != '\n') {
+      int k = 0;
+      while (lp[i][k] && lp[i][k] != ':' && k < 127) {
+        current_func[k] = lp[i][k];
+        k++;
+      }
+      current_func[k] = 0;
+    }
+
+    /* Look for nullable-return function calls */
+    if (is_nullable_call(lp[i])) {
+      int j;
+      int saw_null_check = 0;
+      const char *call_name = strstr(lp[i], "call ") + 5;
+      char tracked_reg[8];  /* register holding the return value */
+      char deref_pat[16];   /* "(%rXX)" pattern to search for */
+      char null_pat1[32];   /* "testq %rXX, %rXX" */
+      char null_pat2[32];   /* "cmpq $0, %rXX" */
+
+      strcpy(tracked_reg, "%rax");
+      strcpy(deref_pat, "(%rax)");
+      strcpy(null_pat1, "testq %rax");
+      strcpy(null_pat2, "cmpq $0, %rax");
+
+      for (j = i + 1; j < nlines && j < i + NULLDEREF_WINDOW; j++) {
+        /* If we see a null check on tracked reg OR %rax, we're safe */
+        if (strstr(lp[j], null_pat1) || strstr(lp[j], null_pat2) ||
+            strstr(lp[j], "cmpq $0, %rax") || strstr(lp[j], "testq %rax")) {
+          saw_null_check = 1;
+          break;
+        }
+        /* If %rax is moved to another register, follow the copy */
+        if (strcmp(tracked_reg, "%rax") == 0 && is_rax_moved(lp[j])) {
+          /* Extract destination: "movq %rax, %rXX" */
+          char *dst = strstr(lp[j], ", %r");
+          if (dst) {
+            int k = 0;
+            dst += 2;  /* skip ", " */
+            while (dst[k] && dst[k] != '\n' && dst[k] != ' ' && k < 5) {
+              tracked_reg[k] = dst[k];
+              k++;
+            }
+            tracked_reg[k] = 0;
+            sprintf(deref_pat, "(%s)", tracked_reg);
+            sprintf(null_pat1, "testq %s", tracked_reg);
+            sprintf(null_pat2, "cmpq $0, %s", tracked_reg);
+          }
+          continue;  /* keep scanning with new register */
+        }
+        /* If there's a deref of the tracked register OR %rax (which
+         * may be a reload of the tracked register) without a null check */
+        if ((strstr(lp[j], deref_pat) || strstr(lp[j], "(%rax)")) &&
+            !saw_null_check) {
+          findings++;
+          printf("[--security-476] CWE-476 WARNING: unchecked %s return "
+                 "dereferenced via %s in %s() (asm lines %d->%d)\n",
+                 call_name, tracked_reg,
+                 current_func[0] ? current_func : "<unknown>",
+                 i + 1, j + 1);
+          break;
+        }
+        /* Stop at label or ret - different basic block */
+        if (lp[j][0] == '.' && lp[j][1] == 'L') break;
+        if (strstr(lp[j], "ret")) break;
+        /* Stop at another call - %rax is clobbered */
+        if (strstr(lp[j], "call ")) break;
+      }
+    }
+  }
+
+  free(line_buf);
+  free(lp);
+
+  if (findings) {
+    printf("[--security-476] %d potential null-deref(s) found\n", findings);
+  } else {
+    printf("[--security-476] Clean: all nullable returns checked\n");
+  }
+}
+
+/* ================================================================ */
 /* MAIN                                                              */
 /* Bug fix: Compiler is heap-allocated (52KB+ struct, not stack)     */
 /* ================================================================ */
@@ -521,6 +664,8 @@ int main(int argc, char **argv) {
 
   int zcc_verbose_flag = 0;
 
+  int zcc_quiet_flag = 0;
+
   int compile_only = 0;
 
   int g_ir_primary = 0;
@@ -537,6 +682,8 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
+    } else if (strcmp(argv[i], "--quiet") == 0 || strcmp(argv[i], "-q") == 0) {
+      zcc_quiet_flag = 1;
     } else if (strcmp(argv[i], "--ir") == 0) {
       g_emit_ir = 1;
       g_ir_primary = 1;
@@ -563,6 +710,8 @@ int main(int argc, char **argv) {
       g_peephole_verbose = 1;
     } else if (strcmp(argv[i], "--security-signext") == 0) {
       g_security_signext = 1;
+    } else if (strcmp(argv[i], "--security-476") == 0) {
+      g_security_476 = 1;
     } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-O", 2) == 0) {
       /* ignore linker flags */
     } else {
@@ -570,7 +719,9 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (!zcc_verbose_flag) {
+  /* Stderr policy: open by default, --quiet silences.
+   * -v adds extra diagnostic output but stderr is always open unless -q. */
+  if (zcc_quiet_flag) {
 #ifdef _WIN32
     freopen("nul", "w", stderr);
 #else
@@ -704,6 +855,11 @@ int main(int argc, char **argv) {
   /* security pass: sign-extension overflow detection */
   if (g_security_signext) {
     security_signext_scan(asm_file);
+  }
+
+  /* security pass: null-deref detection */
+  if (g_security_476) {
+    security_nullderef_scan(asm_file);
   }
 
   /* assemble and link if not stopping at assembly */
