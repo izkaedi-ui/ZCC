@@ -258,12 +258,31 @@ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
     }
     if (!stype) {
         stype = type_new(cc, is_union ? TY_UNION : TY_STRUCT);
+        if (cc->pending_tbfp) {
+            stype->is_tbfp = 1;
+            cc->pending_tbfp = 0;
+        }
         if (has_tag) {
             strncpy(stype->tag, tag, MAX_IDENT - 1);
             register_struct(cc, stype);
         }
+    } else if (cc->pending_tbfp) {
+        stype->is_tbfp = 1;
+        cc->pending_tbfp = 0;
     }
 
+    return parse_struct_or_union_body(cc, stype, is_union);
+}
+
+static int get_member_size(Type *stype, Type *ftype) {
+    if (stype && stype->is_tbfp) {
+        if (ftype->kind == TY_FLOAT) return 2;
+        if (ftype->kind == TY_DOUBLE) return 5;
+    }
+    return type_size(ftype);
+}
+
+static Type *parse_struct_or_union_body(Compiler *cc, Type *stype, int is_union) {
     expect(cc, TK_LBRACE);
 
     {
@@ -1066,6 +1085,7 @@ Node *parse_postfix(Compiler *cc) {
                 if (f) {
                     member->member_offset = accumulated_offset;
                     member->type = f->type;
+                    member->member_size = get_member_size(n->type, f->type);
                     member->member_size = type_size(f->type);
                 } else {
                     char buf[256];
@@ -1111,7 +1131,7 @@ Node *parse_postfix(Compiler *cc) {
                 if (f) {
                     n->member_offset = accumulated_offset;
                     n->type = f->type;
-                    n->member_size = type_size(f->type);
+                    n->member_size = get_member_size(deref->type, f->type);
                 } else {
                     char buf[256];
                     sprintf(buf, "unknown struct member '%s' after -> in struct '%s' (type=%p, fields=%p)", cc->tk_text, (deref->type && deref->type->tag[0]) ? deref->type->tag : "<anon>", (void*)deref->type, deref->type ? (void*)deref->type->fields : NULL);
@@ -2199,10 +2219,8 @@ Node *parse_stmt(Compiler *cc) {
                                 Node *init_list;
                                 Node **inits;
                                 int count;
-                                int init_cap;
                                 init_list = node_new(cc, ND_INIT_LIST, line);
-                                init_cap = 256;
-                                inits = (Node **)cc_alloc(cc, sizeof(Node *) * init_cap);
+                                inits = (Node **)cc_alloc(cc, sizeof(Node *) * MAX_INIT);
                                 count = 0;
                                 next_token(cc); /* skip { */
                                 int depth = 1;
@@ -2229,14 +2247,11 @@ Node *parse_stmt(Compiler *cc) {
                                         next_token(cc);
                                     } else {
                                         skip_tk = cc->tk;
-                                        if (count >= init_cap) {
-                                            Node **old_inits = inits;
-                                            int j;
-                                            init_cap *= 2;
-                                            inits = (Node **)cc_alloc(cc, sizeof(Node *) * init_cap);
-                                            for (j = 0; j < count; j++) inits[j] = old_inits[j];
+                                        if (count < MAX_INIT) {
+                                            inits[count++] = parse_assign(cc);
+                                        } else {
+                                            parse_assign(cc);
                                         }
-                                        inits[count++] = parse_assign(cc);
                                         if (cc->tk == skip_tk) {
                                             if (cc->tk != TK_EOF) next_token(cc);
                                         }
@@ -2977,10 +2992,8 @@ Node *parse_program(Compiler *cc) {
                     Node *init_list;
                     Node **inits;
                     int count;
-                    int init_cap;
                     init_list = node_new(cc, ND_INIT_LIST, line);
-                    init_cap = 256;
-                    inits = (Node **)cc_alloc(cc, sizeof(Node *) * init_cap);
+                    inits = (Node **)cc_alloc(cc, sizeof(Node *) * MAX_INIT);
                     count = 0;
                     next_token(cc); /* skip { */
                     int depth = 1;
@@ -3007,14 +3020,11 @@ Node *parse_program(Compiler *cc) {
                             next_token(cc);
                         } else {
                             skip_tk = cc->tk;
-                            if (count >= init_cap) {
-                                Node **old_inits = inits;
-                                int j;
-                                init_cap *= 2;
-                                inits = (Node **)cc_alloc(cc, sizeof(Node *) * init_cap);
-                                for (j = 0; j < count; j++) inits[j] = old_inits[j];
+                            if (count < MAX_INIT) {
+                                inits[count++] = parse_assign(cc);
+                            } else {
+                                parse_assign(cc); /* discard if over limit */
                             }
-                            inits[count++] = parse_assign(cc);
                             if (cc->tk == skip_tk) {
                                 if (cc->tk != TK_EOF) next_token(cc);
                             }

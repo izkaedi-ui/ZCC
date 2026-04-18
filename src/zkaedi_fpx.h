@@ -13,6 +13,19 @@
  * All operations go through explicit function calls.
  * Requires ZCC >= v0.10.1 (CG-FLOAT-001 fix).
  *
+ * Subnormal handling: fp24_t and fp48_t are flush-to-zero (FTZ) on both
+ * conversion boundaries. This is a deliberate design choice, not a bug.
+ *
+ *   fp24_from_double(d): any |d| < 2^-126 (smallest normal fp24) returns
+ *     the signed zero with the sign of d. Gradual underflow NOT implemented.
+ *
+ *   fp24_to_double(u): bit patterns with biased exponent == 0 (subnormals)
+ *     return +/-0.0 regardless of mantissa. These patterns are unreachable
+ *     via fp24_from_double and are defined as equivalent to signed zero.
+ *
+ *   Callers requiring IEEE 754 gradual underflow must post-process, use
+ *   fp48_t, or request a future fp24_denorm build variant.
+ *
  * (c) 2026 ZKAEDI Systems — v0.10.2
  */
 

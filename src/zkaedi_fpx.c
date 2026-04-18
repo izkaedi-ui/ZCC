@@ -115,7 +115,10 @@ double fp24_to_double(fp24_t x) {
         if (fmant) dbits |= 1ULL;
         return bits_to_double(dbits);
     }
-    if (fexp == 0 && fmant == 0)
+    /* CG-FPX-FTZ-001: flush subnormal fp24 bit patterns to ±0.0.
+     * exp==0, mant!=0 is a subnormal. We FTZ on both sides for consistency.
+     * These bit patterns are unreachable via fp24_from_double. */
+    if (fexp == 0)
         return bits_to_double((unsigned long long)sign << 63);
 
     dexp  = (unsigned long long)((int)fexp - 127 + 1023);
