@@ -3641,9 +3641,39 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
     if (elem->kind == ND_BXOR) return eval_const_expr_p4(elem->lhs, ok) ^ eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SHL) return eval_const_expr_p4(elem->lhs, ok) << eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SHR) return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_NEG) return -eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_NEG) {
+        /* CG-GINIT-FLOAT-001: float negation must negate the float value,
+           not the bit-pattern. Check if child is ND_FLIT. */
+        if (elem->lhs && elem->lhs->kind == ND_FLIT) {
+            double negval = -(elem->lhs->f_val);
+            if (elem->lhs->type && elem->lhs->type->kind == TY_FLOAT) {
+                float fv = (float)negval;
+                unsigned int fbits;
+                memcpy(&fbits, &fv, sizeof(float));
+                return (long long)fbits;
+            } else {
+                unsigned long long bits;
+                memcpy(&bits, &negval, sizeof(double));
+                return (long long)bits;
+            }
+        }
+        return -eval_const_expr_p4(elem->lhs, ok);
+    }
     if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
     if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
+    /* CG-GINIT-FLOAT-001: float/double literals in aggregate initializers */
+    if (elem->kind == ND_FLIT) {
+        if (elem->type && elem->type->kind == TY_FLOAT) {
+            float fv = (float)elem->f_val;
+            unsigned int fbits;
+            memcpy(&fbits, &fv, sizeof(float));
+            return (long long)fbits;
+        } else {
+            unsigned long long bits;
+            memcpy(&bits, &elem->f_val, sizeof(double));
+            return (long long)bits;
+        }
+    }
     *ok = 0;
     return 0;
 }
@@ -3795,6 +3825,31 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long %lld\n", init->int_val);
       else
         fprintf(cc->out, "    .quad %lld\n", init->int_val);
+    } else if (init && init->kind == ND_FLIT) {
+      /* CG-GINIT-FLOAT-001: static/global float/double scalar initializer */
+      if (size == 4) {
+        float fv = (float)init->f_val;
+        unsigned int fbits;
+        memcpy(&fbits, &fv, sizeof(float));
+        fprintf(cc->out, "    .long 0x%08x\n", fbits);
+      } else {
+        unsigned long long bits;
+        memcpy(&bits, &init->f_val, sizeof(double));
+        fprintf(cc->out, "    .quad 0x%016llx\n", bits);
+      }
+    } else if (init && init->kind == ND_NEG && init->lhs && init->lhs->kind == ND_FLIT) {
+      /* CG-GINIT-FLOAT-001: negated float/double scalar (e.g. static double d = -1.5;) */
+      double negval = -(init->lhs->f_val);
+      if (size == 4) {
+        float fv = (float)negval;
+        unsigned int fbits;
+        memcpy(&fbits, &fv, sizeof(float));
+        fprintf(cc->out, "    .long 0x%08x\n", fbits);
+      } else {
+        unsigned long long bits;
+        memcpy(&bits, &negval, sizeof(double));
+        fprintf(cc->out, "    .quad 0x%016llx\n", bits);
+      }
     } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->lhs->name);
