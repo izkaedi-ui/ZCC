@@ -71,6 +71,19 @@ static const char *zcc_stddef_text =
 "#define UINT_MAX 4294967295U\n"
 "#define ULONG_MAX 18446744073709551615UL\n"
 "#define SIZE_MAX ULONG_MAX\n"
+"/* PP-HEADERS-023A: C99 <limits.h> full sweep */\n"
+"#define SCHAR_MIN  (-128)\n"
+"#define SCHAR_MAX  127\n"
+"#define UCHAR_MAX  255\n"
+"/* CHAR_MIN/MAX assume signed char (x86-64 SysV ABI default) */\n"
+"#define CHAR_MIN   (-128)\n"
+"#define CHAR_MAX   127\n"
+"#define SHRT_MIN   (-32768)\n"
+"#define SHRT_MAX   32767\n"
+"#define USHRT_MAX  65535\n"
+"#define LLONG_MIN  (-9223372036854775807LL-1LL)\n"
+"#define LLONG_MAX  9223372036854775807LL\n"
+"#define ULLONG_MAX 18446744073709551615ULL\n"
 "#define RAND_MAX 2147483647\n"
 "#define BUFSIZ 8192\n"
 "#define FILENAME_MAX 4096\n"
@@ -1070,6 +1083,50 @@ char *zcc_preprocess(const char *source, int source_len,
         strcpy(m->body, "1");
         m = pp_add_macro(state, "__thread");
         strcpy(m->body, "");
+        /* PP-HEADERS-023A: C99 <limits.h> predefined — must be in macro table
+         * (not only in zcc_stddef_text) so #if defined(LLONG_MAX) works before
+         * any #include fires. These duplicate the zcc_stddef_text entries
+         * intentionally: the table entries handle conditional evaluation,
+         * the stub entries handle explicit #include <limits.h>. */
+        m = pp_add_macro(state, "LLONG_MAX");
+        strcpy(m->body, "9223372036854775807LL");
+        m = pp_add_macro(state, "LLONG_MIN");
+        strcpy(m->body, "(-9223372036854775807LL-1LL)");
+        m = pp_add_macro(state, "ULLONG_MAX");
+        strcpy(m->body, "18446744073709551615ULL");
+        m = pp_add_macro(state, "SCHAR_MIN");
+        strcpy(m->body, "(-128)");
+        m = pp_add_macro(state, "SCHAR_MAX");
+        strcpy(m->body, "127");
+        m = pp_add_macro(state, "UCHAR_MAX");
+        strcpy(m->body, "255");
+        m = pp_add_macro(state, "CHAR_MIN");
+        strcpy(m->body, "(-128)");
+        m = pp_add_macro(state, "CHAR_MAX");
+        strcpy(m->body, "127");
+        m = pp_add_macro(state, "SHRT_MIN");
+        strcpy(m->body, "(-32768)");
+        m = pp_add_macro(state, "SHRT_MAX");
+        strcpy(m->body, "32767");
+        m = pp_add_macro(state, "USHRT_MAX");
+        strcpy(m->body, "65535");
+        /* Pre-register existing stub limits so #if defined() works before #include */
+        m = pp_add_macro(state, "CHAR_BIT");
+        strcpy(m->body, "8");
+        m = pp_add_macro(state, "INT_MAX");
+        strcpy(m->body, "2147483647");
+        m = pp_add_macro(state, "INT_MIN");
+        strcpy(m->body, "(-2147483647-1)");
+        m = pp_add_macro(state, "UINT_MAX");
+        strcpy(m->body, "4294967295U");
+        m = pp_add_macro(state, "LONG_MAX");
+        strcpy(m->body, "9223372036854775807L");
+        m = pp_add_macro(state, "LONG_MIN");
+        strcpy(m->body, "(-9223372036854775807L-1L)");
+        m = pp_add_macro(state, "ULONG_MAX");
+        strcpy(m->body, "18446744073709551615UL");
+        m = pp_add_macro(state, "SIZE_MAX");
+        strcpy(m->body, "18446744073709551615UL");
     }
 
     pp_parse_target_depth(state, 0);
