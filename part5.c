@@ -428,6 +428,8 @@ int main(int argc, char **argv) {
 
   int g_ir_primary = 0;
 
+  const char *include_paths = ".:./include";
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -445,6 +447,17 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--ir") == 0) {
       g_emit_ir = 1;
       g_ir_primary = 1;
+    } else if (strncmp(argv[i], "-I", 2) == 0) {
+      /* PP-INCLUDE-022: append -I path to include_paths */
+      const char *ipath = argv[i] + 2;
+      if (ipath[0] == '\0' && i + 1 < argc) { i++; ipath = argv[i]; }
+      if (ipath[0]) {
+        int olen = strlen(include_paths);
+        int nlen = strlen(ipath);
+        char *merged = (char *)malloc(olen + 1 + nlen + 1);
+        sprintf(merged, "%s:%s", include_paths, ipath);
+        include_paths = merged;
+      }
     } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-O", 2) == 0) {
       /* ignore linker flags */
     } else {
@@ -480,13 +493,11 @@ int main(int argc, char **argv) {
   /* PREPROCESSOR HOOK */
   {
     int pp_len;
-    char *pp_source = zcc_preprocess(source, source_len, input_file, ".:./include", &pp_len);
+    char *pp_source = zcc_preprocess(source, source_len, input_file, include_paths, &pp_len);
     if (!pp_source) {
-      fprintf(stderr, "zcc: preprocessing failed\n");
+      printf("zcc: preprocessing failed\n");
       return 1;
     }
-    /* We leak original `source` here because we replaced it.
-       ZCC doesn't care much about leaking in main string allocations anyway. */
     source = pp_source;
     source_len = pp_len;
   }

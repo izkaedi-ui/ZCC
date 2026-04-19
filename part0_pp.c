@@ -53,6 +53,7 @@ typedef struct {
     int input_depth;
     char *alloc_buf;
     int pop_barrier;
+    int include_errors;
 } PPState;
 
 static const char *zcc_stddef_text = 
@@ -330,40 +331,120 @@ static void pp_parse(PPState *state) {
     pp_parse_target_depth(state, state->input_depth);
 }
 
+/* PP-INCLUDE-022: Only these exact basenames get the synthesized stub.
+ * Everything else must resolve from disk or hard-fail. */
+static int is_stddef_stub(const char *path) {
+    const char *base = path;
+    const char *slash = strrchr(path, '/');
+    if (slash) base = slash + 1;
+    return strcmp(base, "stddef.h") == 0
+        || strcmp(base, "stdarg.h") == 0
+        || strcmp(base, "stdio.h")  == 0
+        || strcmp(base, "stdlib.h") == 0
+        || strcmp(base, "string.h") == 0;
+}
+
+/* PP-INCLUDE-022: Resolve an include path via -I search and relative lookup.
+ * Returns 1 if found (writes to out_resolved), 0 if not found. */
+static int pp_resolve_path(PPState *state, const char *path, int is_system, char *out_resolved) {
+    /* For quoted includes, try relative to current file's directory first */
+    if (!is_system && state->filename) {
+        char dir[1024];
+        const char *sl = strrchr(state->filename, '/');
+        if (sl) {
+            int dirlen = (int)(sl - state->filename);
+            if (dirlen < 1023) {
+                memcpy(dir, state->filename, dirlen);
+                dir[dirlen] = '\0';
+            } else {
+                strcpy(dir, ".");
+            }
+        } else {
+            strcpy(dir, ".");  /* no directory component — use CWD */
+        }
+        snprintf(out_resolved, 1024, "%s/%s", dir, path);
+        {
+            FILE *fp = fopen(out_resolved, "rb");
+            if (fp) { fclose(fp); return 1; }
+        }
+    }
+
+    /* Search -I paths (colon-separated, Linux convention) */
+    if (state->include_paths && state->include_paths[0]) {
+        const char *p = state->include_paths;
+        while (*p) {
+            char seg[1024];
+            int si = 0;
+            while (*p && *p != ':' && si < 1022) seg[si++] = *p++;
+            seg[si] = '\0';
+            if (*p == ':') p++;
+            if (si > 0) {
+                snprintf(out_resolved, 1024, "%s/%s", seg, path);
+                {
+                    FILE *fp = fopen(out_resolved, "rb");
+                    if (fp) { fclose(fp); return 1; }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static void pp_process_include(PPState *state, const char *path, int is_system) {
     char *file_src = 0;
     int file_len = 0;
     int i;
-    
-    /* Avoid system includes entirely and just inject stddef */
-    if (is_system || strcmp(path, "stdio.h") == 0 || strcmp(path, "stdlib.h") == 0 || 
-        strcmp(path, "string.h") == 0 || strcmp(path, "stddef.h") == 0) {
+    int from_disk = 0;
+    char resolved_path[1024];
+
+    /* Step 1: Try disk lookup */
+    if (pp_resolve_path(state, path, is_system, resolved_path)) {
+        file_src = pp_read_file(resolved_path, &file_len);
+        if (file_src) from_disk = 1;
+    }
+
+    /* Step 2: If disk failed, check stub whitelist */
+    if (!file_src && is_stddef_stub(path)) {
         file_src = (char *)zcc_stddef_text;
         file_len = strlen(file_src);
-    } else {
-        /* check circle include logic (very simple, limit depth) */
-        void *p = pp_read_file(path, &file_len);
-        if (p) file_src = (char *)p;
+        strncpy(resolved_path, path, 1023);
+        resolved_path[1023] = '\0';
     }
-    
-    if (file_src) {
+
+    /* Step 3: Hard error if nothing found (Flag 2: accumulate, don't exit)
+     * Use printf because driver silences stderr before preprocessing. */
+    if (!file_src) {
+        printf("zcc: error: include file not found: %s\n", path);
+        printf("  (while processing %s:%d)\n",
+                state->filename ? state->filename : "<main>", state->line);
+        state->include_errors++;
+        return;
+    }
+
+    {
         PPState *sub_state = (PPState *)malloc(sizeof(PPState));
         if (!sub_state) {
-            fprintf(stderr, "zcc preprocessor error: out of memory for include state\\n");
+            fprintf(stderr, "zcc preprocessor error: out of memory for include state\n");
             exit(1);
         }
         memset(sub_state, 0, sizeof(PPState));
-        sub_state->src = file_src;
-        sub_state->len = file_len;
+        sub_state->src           = file_src;
+        sub_state->pos           = 0;
+        sub_state->len           = file_len;
+        sub_state->line          = 1;
+        sub_state->filename      = resolved_path;
+        sub_state->include_paths = state->include_paths;
         sub_state->cond_stack[0] = 1;
-        
-        /* copy macro table into sub_state */
+        sub_state->pop_barrier   = 0;
+
+        /* Macro table transfer (preserving baseline memcpy behavior) */
         sub_state->num_macros = state->num_macros;
-        for (i = 0; i < state->num_macros; i++) memcpy(&sub_state->macros[i], &state->macros[i], sizeof(PPMacro));
-        
+        for (i = 0; i < state->num_macros; i++)
+            memcpy(&sub_state->macros[i], &state->macros[i], sizeof(PPMacro));
+
         pp_parse(sub_state);
-        
-        /* we need to copy back the macros added by the header */
+
+        /* Copy back macros added by the header */
         for (i = state->num_macros; i < sub_state->num_macros; i++) {
             if (state->num_macros >= PP_MAX_MACROS) {
                 fprintf(stderr, "MAX MACROS REACHED!\n");
@@ -371,21 +452,21 @@ static void pp_process_include(PPState *state, const char *path, int is_system) 
             }
             memcpy(&state->macros[state->num_macros++], &sub_state->macros[i], sizeof(PPMacro));
         }
-        
-        fprintf(stderr, "pp_process_include: %s added %d macros, total is %d\n", path, sub_state->num_macros - i, state->num_macros);
-        
-        /* update all previous active flags because undefs may have occurred */
+
+        fprintf(stderr, "pp_process_include: %s added %d macros, total is %d\n",
+                path, sub_state->num_macros - i, state->num_macros);
+
+        /* Update active flags (undefs may have occurred) */
         for (i = 0; i < state->num_macros; i++) {
             state->macros[i].active = sub_state->macros[i].active;
         }
-        
+
         pp_emit_str(state, sub_state->out, sub_state->out_len);
-        
+        state->include_errors += sub_state->include_errors;
+
         if (sub_state->out) free(sub_state->out);
         free(sub_state);
-        if (file_src != zcc_stddef_text) free(file_src);
-    } else {
-        fprintf(stderr, "zcc compiler error: include file not found: %s\n", path);
+        if (from_disk && file_src) free(file_src);
     }
 }
 
@@ -594,8 +675,13 @@ static void pp_parse_directive(PPState *state) {
                 pp_next(state);
             }
             pp_read_line(state, inc_path, 256);
-            if (strlen(inc_path) > 0 && (inc_path[strlen(inc_path) - 1] == '"' || inc_path[strlen(inc_path) - 1] == '>')) {
-                inc_path[strlen(inc_path) - 1] = 0;
+            /* Strip trailing \r from Windows line endings */
+            {
+                int plen = strlen(inc_path);
+                while (plen > 0 && (inc_path[plen - 1] == '\r' || inc_path[plen - 1] == ' ' || inc_path[plen - 1] == '\t'))
+                    inc_path[--plen] = 0;
+                if (plen > 0 && (inc_path[plen - 1] == '"' || inc_path[plen - 1] == '>'))
+                    inc_path[--plen] = 0;
             }
             pp_process_include(state, inc_path, is_system);
         } else if (strcmp(dir, "error") == 0) {
