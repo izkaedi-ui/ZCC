@@ -7293,6 +7293,18 @@ static int ptr_elem_size(Type *type) {
 /* Expression codegen — result in %rax                               */
 /* ---------------------------------------------------------------- */
 
+static void emit_reg_meta(Compiler *cc, const char *reg, Node *node) {
+  if (backend_ops) return;
+  const char *name = "_";
+  const char *file = cc->filename ? cc->filename : "unknown";
+  int line = 0;
+  if (node) {
+    if (node->kind == ND_VAR && node->name[0]) name = node->name;
+    line = node->line;
+  }
+  fprintf(cc->out, "    # ZCC_META %%%s=%s@%s:%d\n", reg, name, file, line);
+}
+
 void codegen_expr(Compiler *cc, Node *node) {
   if (!node)
     return;
@@ -7408,6 +7420,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         char *dst = ir_bridge_fresh_tmp();
         ZCC_EMIT_LOAD(ir_map_type(node->type), dst, vname, node->line);
       }
+      emit_reg_meta(cc, "rax", node);
       return;
     }
     codegen_addr_checked(cc, node);
@@ -7427,6 +7440,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       char *dst = ir_bridge_fresh_tmp();
       ZCC_EMIT_LOAD(ir_map_type(node->type), dst, vname, node->line);
     }
+    emit_reg_meta(cc, "rax", node);
     return;
 
   case ND_ASSIGN: {
@@ -7454,6 +7468,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         char *vname = ir_var_name(node->lhs);
         ZCC_EMIT_STORE(ir_map_type(node->lhs->type), vname, rhs_ir, node->line);
       }
+      emit_reg_meta(cc, node->lhs->sym->assigned_reg + 1, node->lhs);
       return;
     }
     push_reg(cc, "rax");
@@ -7523,6 +7538,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       ZCC_EMIT_STORE(ir_map_type(node->lhs->type), lhs_addr_ir, rhs_ir,
                      node->line);
     }
+    emit_reg_meta(cc, "rax", node->lhs);
     return;
   }
 
@@ -7538,7 +7554,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       char *reg = node->lhs->sym->assigned_reg;
       codegen_expr_checked(cc, node->rhs);
       if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+      else {
+          fprintf(cc->out, "    movq %%rax, %%r11\n");
+          emit_reg_meta(cc, "r11", node->lhs);
+      }
       if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
       switch (node->compound_op) {
       case ND_ADD:
@@ -7615,6 +7634,7 @@ void codegen_expr(Compiler *cc, Node *node) {
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
       if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      emit_reg_meta(cc, "rax", node->lhs);
       return;
     }
     codegen_addr_checked(cc, node->lhs);
@@ -7802,6 +7822,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    emit_reg_meta(cc, "rax", node->lhs);
     {
       char *dst = ir_bridge_fresh_tmp();
       ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
@@ -8685,6 +8706,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         ZCC_EMIT_LOAD(ir_map_type(node->type), dst, member_addr, node->line);
       }
     }
+    emit_reg_meta(cc, "rax", node);
     return;
 
   case ND_CAST: {
@@ -9251,6 +9273,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       } else {
           fprintf(cc->out, "    call %s\n", node->func_name);
       }
+      emit_reg_meta(cc, "rax", node);
     }
 
     if (node->type && is_float_type(node->type)) {
@@ -11263,6 +11286,14 @@ static void security_nullderef_scan(Compiler *cc, char *filename) {
       int j;
       int saw_null_check = 0;
       const char *call_name = strstr(lp[i], "call ") + 5;
+      char clean_call[64];
+      int c_idx = 0;
+      while (call_name[c_idx] && call_name[c_idx] != '\n' && call_name[c_idx] != '@' && call_name[c_idx] != ' ' && c_idx < 63) {
+          clean_call[c_idx] = call_name[c_idx];
+          c_idx++;
+      }
+      clean_call[c_idx] = '\0';
+
       char tracked_reg[8];  /* register holding the return value */
       char deref_pat[16];   /* "(%rXX)" pattern to search for */
       char null_pat1[32];   /* "testq %rXX, %rXX" */
@@ -11273,7 +11304,45 @@ static void security_nullderef_scan(Compiler *cc, char *filename) {
       strcpy(null_pat1, "testq %rax");
       strcpy(null_pat2, "cmpq $0, %rax");
 
+      char current_owner[128];
+      char current_file[128];
+      int current_line = 0;
+      current_owner[0] = 0;
+      current_file[0] = 0;
+
       for (j = i + 1; j < nlines && j < i + NULLDEREF_WINDOW; j++) {
+        /* Parse latest ZCC_META for our tracked register */
+        /* Format: # ZCC_META %reg=owner@file:line */
+        char meta_pat[64];
+        sprintf(meta_pat, "# ZCC_META %s=", tracked_reg);
+        char *meta_match = strstr(lp[j], meta_pat);
+        if (meta_match) {
+           meta_match += strlen(meta_pat);
+           /* owner */
+           int k = 0;
+           while (meta_match[k] && meta_match[k] != '@' && k < 127) {
+               current_owner[k] = meta_match[k];
+               k++;
+           }
+           current_owner[k] = 0;
+           if (strcmp(current_owner, "_") == 0) current_owner[0] = 0;
+           
+           if (meta_match[k] == '@') {
+               meta_match += k + 1;
+               /* file */
+               k = 0;
+               while (meta_match[k] && meta_match[k] != ':' && k < 127) {
+                   current_file[k] = meta_match[k];
+                   k++;
+               }
+               current_file[k] = 0;
+               
+               if (meta_match[k] == ':') {
+                   current_line = atoi(meta_match + k + 1);
+               }
+           }
+        }
+
         /* If we see a null check on tracked reg OR %rax, we're safe */
         if (strstr(lp[j], null_pat1) || strstr(lp[j], null_pat2) ||
             strstr(lp[j], "cmpq $0, %rax") || strstr(lp[j], "testq %rax")) {
@@ -11303,18 +11372,21 @@ static void security_nullderef_scan(Compiler *cc, char *filename) {
         if ((strstr(lp[j], deref_pat) || strstr(lp[j], "(%rax)")) &&
             !saw_null_check) {
           findings++;
+          char *reported_var = current_owner[0] ? current_owner : clean_call;
           if (g_emit_anomalies) {
               Symbol *sym = scope_find(cc, current_func);
               const char *ret_type = "unknown";
               if (sym && sym->type && sym->type->kind == TY_FUNC) {
                   ret_type = type_to_str(sym->type->ret);
               }
-              printf("{\"type\":\"ir_anomaly\", \"kind\":\"CWE-476\", \"site\":\"%s:%d\", \"severity\":0.7, \"variable\":\"%s\", \"return_type\":\"%s\"}\n",
-                     current_func[0] ? current_func : "unknown", i + 1, tracked_reg, ret_type);
+              printf("{\"type\":\"ir_anomaly\", \"kind\":\"CWE-476\", \"site\":\"%s:%s:%d\", \"severity\":0.7, \"variable\":\"%s\", \"return_type\":\"%s\"}\n",
+                     current_file[0] ? current_file : (cc->filename ? cc->filename : "unknown"),
+                     current_func[0] ? current_func : "unknown",
+                     current_line, reported_var, ret_type);
           } else {
               printf("[--security-476] CWE-476 WARNING: unchecked %s return "
                      "dereferenced via %s in %s() (asm lines %d->%d)\n",
-                     call_name, tracked_reg,
+                     clean_call, reported_var,
                      current_func[0] ? current_func : "<unknown>",
                      i + 1, j + 1);
           }

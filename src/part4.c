@@ -477,6 +477,18 @@ static int ptr_elem_size(Type *type) {
 /* Expression codegen — result in %rax                               */
 /* ---------------------------------------------------------------- */
 
+static void emit_reg_meta(Compiler *cc, const char *reg, Node *node) {
+  if (backend_ops) return;
+  const char *name = "_";
+  const char *file = cc->filename ? cc->filename : "unknown";
+  int line = 0;
+  if (node) {
+    if (node->kind == ND_VAR && node->name[0]) name = node->name;
+    line = node->line;
+  }
+  fprintf(cc->out, "    # ZCC_META %%%s=%s@%s:%d\n", reg, name, file, line);
+}
+
 void codegen_expr(Compiler *cc, Node *node) {
   if (!node)
     return;
@@ -592,6 +604,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         char *dst = ir_bridge_fresh_tmp();
         ZCC_EMIT_LOAD(ir_map_type(node->type), dst, vname, node->line);
       }
+      emit_reg_meta(cc, "rax", node);
       return;
     }
     codegen_addr_checked(cc, node);
@@ -611,6 +624,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       char *dst = ir_bridge_fresh_tmp();
       ZCC_EMIT_LOAD(ir_map_type(node->type), dst, vname, node->line);
     }
+    emit_reg_meta(cc, "rax", node);
     return;
 
   case ND_ASSIGN: {
@@ -638,6 +652,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         char *vname = ir_var_name(node->lhs);
         ZCC_EMIT_STORE(ir_map_type(node->lhs->type), vname, rhs_ir, node->line);
       }
+      emit_reg_meta(cc, node->lhs->sym->assigned_reg + 1, node->lhs);
       return;
     }
     push_reg(cc, "rax");
@@ -707,6 +722,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       ZCC_EMIT_STORE(ir_map_type(node->lhs->type), lhs_addr_ir, rhs_ir,
                      node->line);
     }
+    emit_reg_meta(cc, "rax", node->lhs);
     return;
   }
 
@@ -722,7 +738,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       char *reg = node->lhs->sym->assigned_reg;
       codegen_expr_checked(cc, node->rhs);
       if (backend_ops) fprintf(cc->out, "    mov r1, r0\n");
-      else fprintf(cc->out, "    movq %%rax, %%r11\n");
+      else {
+          fprintf(cc->out, "    movq %%rax, %%r11\n");
+          emit_reg_meta(cc, "r11", node->lhs);
+      }
       if (backend_ops) fprintf(cc->out, "    mov r0, %s\n", reg); else fprintf(cc->out, "    movq %s, %%rax\n", reg);
       switch (node->compound_op) {
       case ND_ADD:
@@ -799,6 +818,7 @@ void codegen_expr(Compiler *cc, Node *node) {
           else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
       }
       if (backend_ops) fprintf(cc->out, "    mov %s, r0\n", reg); else fprintf(cc->out, "    movq %%rax, %s\n", reg);
+      emit_reg_meta(cc, "rax", node->lhs);
       return;
     }
     codegen_addr_checked(cc, node->lhs);
@@ -986,6 +1006,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (node->lhs->type->size == 1) fprintf(cc->out, "    movzbq %%al, %%rax\n");
         else if (node->lhs->type->size == 2) fprintf(cc->out, "    movzwq %%ax, %%rax\n");
     }
+    emit_reg_meta(cc, "rax", node->lhs);
     {
       char *dst = ir_bridge_fresh_tmp();
       ir_emit_binary_op(node->compound_op, node->lhs->type, "ca_lhs", "ca_rhs", node->line);
@@ -1869,6 +1890,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         ZCC_EMIT_LOAD(ir_map_type(node->type), dst, member_addr, node->line);
       }
     }
+    emit_reg_meta(cc, "rax", node);
     return;
 
   case ND_CAST: {
@@ -2435,6 +2457,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       } else {
           fprintf(cc->out, "    call %s\n", node->func_name);
       }
+      emit_reg_meta(cc, "rax", node);
     }
 
     if (node->type && is_float_type(node->type)) {

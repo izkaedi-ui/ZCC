@@ -509,6 +509,7 @@ struct Compiler {
     int pending_packed;     /* __attribute__((packed)) seen before struct keyword */
     int pending_aligned_n;  /* __attribute__((aligned(N))) value, 0 = none */
     int debug_abi_classes;  /* -fdebug-abi-classes flag */
+    int abi_scratch_offset; /* %rbp-relative offset to 16-byte aggregate return scratch (CG-IR-019) */
 };
 
 typedef struct TargetBackend {
@@ -592,7 +593,7 @@ void classify_aggregate(Type *agg, abi_class_t eb[2]);
 #define PP_MAX_MACROS 4096
 #define PP_MAX_PARAMS 16
 static int _warned_pp_max_params = 0;
-#define PP_MAX_BODY   16384
+#define PP_MAX_BODY   65536
 #define PP_MAX_INCLUDE_DEPTH 32
 
 typedef struct {
@@ -600,7 +601,8 @@ typedef struct {
     int  is_function_like;
     int  num_params;
     char params[PP_MAX_PARAMS][64];
-    char body[PP_MAX_BODY];
+    char *body;
+    int  body_cap;
     int  active;
 } PPMacro;
 
@@ -638,6 +640,8 @@ typedef struct {
     PPInputCtx input_stack[32];
     int input_depth;
     char *alloc_buf;
+    int pop_barrier;
+    int include_errors;
 } PPState;
 
 static const char *zcc_stddef_text = 
@@ -723,7 +727,7 @@ static char pp_peek(PPState *state) {
         printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
         fflush(stdout);
     }
-    while (state->pos >= state->len && state->input_depth > 0) {
+    while (state->pos >= state->len && state->input_depth > state->pop_barrier) {
         if (state->alloc_buf) free(state->alloc_buf);
         state->input_depth--;
         if (state->input_stack[state->input_depth].expanding_macro) {
@@ -803,6 +807,8 @@ static PPMacro *pp_add_macro(PPState *state, const char *name) {
     memset(m_macro, 0, sizeof(PPMacro));
     strncpy(m_macro->name, name, 127);
     m_macro->active = 1;
+    m_macro->body_cap = 256;
+    m_macro->body = (char *)calloc(1, m_macro->body_cap);
     return m_macro;
 }
 
@@ -834,6 +840,47 @@ static void pp_read_line(PPState *state, char *buf, int max) {
         if (!in_comment && c != '\n') buf[i++] = c;
     }
     buf[i] = 0;
+}
+
+static void pp_read_macro_body(PPState *state, PPMacro *m, int max_limit) {
+    int i = 0;
+    int in_comment = 0;
+    if (!m->body) {
+        m->body_cap = 256;
+        m->body = (char *)calloc(1, m->body_cap);
+    }
+    
+    while (pp_peek(state) != 0) {
+        if (i >= m->body_cap - 2) {
+            m->body_cap *= 2;
+            m->body = (char *)realloc(m->body, m->body_cap);
+        }
+        if (i >= max_limit - 1) {
+            fprintf(stderr, "zcc: macro body exceeds PP_MAX_BODY (%d bytes)\n", max_limit);
+            exit(1);
+        }
+        char c = pp_peek(state);
+        if (c == '\n' && !in_comment) break;
+        if (c == '\\' && state->src[state->pos + 1] == '\n') {
+            pp_next(state); pp_next(state);
+            continue;
+        }
+        if (!in_comment && c == '/' && state->src[state->pos + 1] == '/') {
+            while (pp_peek(state) != '\n' && pp_peek(state) != 0) pp_next(state);
+            break;
+        }
+        if (!in_comment && c == '/' && state->src[state->pos + 1] == '*') {
+            in_comment = 1; pp_next(state); pp_next(state);
+            continue;
+        }
+        if (in_comment && c == '*' && state->src[state->pos + 1] == '/') {
+            in_comment = 0; pp_next(state); pp_next(state);
+            continue;
+        }
+        pp_next(state);
+        if (!in_comment && c != '\n') m->body[i++] = c;
+    }
+    m->body[i] = 0;
 }
 
 static int pp_is_active(PPState *state) {
@@ -872,40 +919,120 @@ static void pp_parse(PPState *state) {
     pp_parse_target_depth(state, state->input_depth);
 }
 
+/* PP-INCLUDE-022: Only these exact basenames get the synthesized stub.
+ * Everything else must resolve from disk or hard-fail. */
+static int is_stddef_stub(const char *path) {
+    const char *base = path;
+    const char *slash = strrchr(path, '/');
+    if (slash) base = slash + 1;
+    return strcmp(base, "stddef.h") == 0
+        || strcmp(base, "stdarg.h") == 0
+        || strcmp(base, "stdio.h")  == 0
+        || strcmp(base, "stdlib.h") == 0
+        || strcmp(base, "string.h") == 0;
+}
+
+/* PP-INCLUDE-022: Resolve an include path via -I search and relative lookup.
+ * Returns 1 if found (writes to out_resolved), 0 if not found. */
+static int pp_resolve_path(PPState *state, const char *path, int is_system, char *out_resolved) {
+    /* For quoted includes, try relative to current file's directory first */
+    if (!is_system && state->filename) {
+        char dir[1024];
+        const char *sl = strrchr(state->filename, '/');
+        if (sl) {
+            int dirlen = (int)(sl - state->filename);
+            if (dirlen < 1023) {
+                memcpy(dir, state->filename, dirlen);
+                dir[dirlen] = '\0';
+            } else {
+                strcpy(dir, ".");
+            }
+        } else {
+            strcpy(dir, ".");  /* no directory component — use CWD */
+        }
+        snprintf(out_resolved, 1024, "%s/%s", dir, path);
+        {
+            FILE *fp = fopen(out_resolved, "rb");
+            if (fp) { fclose(fp); return 1; }
+        }
+    }
+
+    /* Search -I paths (colon-separated, Linux convention) */
+    if (state->include_paths && state->include_paths[0]) {
+        const char *p = state->include_paths;
+        while (*p) {
+            char seg[1024];
+            int si = 0;
+            while (*p && *p != ':' && si < 1022) seg[si++] = *p++;
+            seg[si] = '\0';
+            if (*p == ':') p++;
+            if (si > 0) {
+                snprintf(out_resolved, 1024, "%s/%s", seg, path);
+                {
+                    FILE *fp = fopen(out_resolved, "rb");
+                    if (fp) { fclose(fp); return 1; }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static void pp_process_include(PPState *state, const char *path, int is_system) {
     char *file_src = 0;
     int file_len = 0;
     int i;
-    
-    /* Avoid system includes entirely and just inject stddef */
-    if (is_system || strcmp(path, "stdio.h") == 0 || strcmp(path, "stdlib.h") == 0 || 
-        strcmp(path, "string.h") == 0 || strcmp(path, "stddef.h") == 0) {
+    int from_disk = 0;
+    char resolved_path[1024];
+
+    /* Step 1: Try disk lookup */
+    if (pp_resolve_path(state, path, is_system, resolved_path)) {
+        file_src = pp_read_file(resolved_path, &file_len);
+        if (file_src) from_disk = 1;
+    }
+
+    /* Step 2: If disk failed, check stub whitelist */
+    if (!file_src && is_stddef_stub(path)) {
         file_src = (char *)zcc_stddef_text;
         file_len = strlen(file_src);
-    } else {
-        /* check circle include logic (very simple, limit depth) */
-        void *p = pp_read_file(path, &file_len);
-        if (p) file_src = (char *)p;
+        strncpy(resolved_path, path, 1023);
+        resolved_path[1023] = '\0';
     }
-    
-    if (file_src) {
+
+    /* Step 3: Hard error if nothing found (Flag 2: accumulate, don't exit)
+     * Use printf because driver silences stderr before preprocessing. */
+    if (!file_src) {
+        printf("zcc: error: include file not found: %s\n", path);
+        printf("  (while processing %s:%d)\n",
+                state->filename ? state->filename : "<main>", state->line);
+        state->include_errors++;
+        return;
+    }
+
+    {
         PPState *sub_state = (PPState *)malloc(sizeof(PPState));
         if (!sub_state) {
-            fprintf(stderr, "zcc preprocessor error: out of memory for include state\\n");
+            fprintf(stderr, "zcc preprocessor error: out of memory for include state\n");
             exit(1);
         }
         memset(sub_state, 0, sizeof(PPState));
-        sub_state->src = file_src;
-        sub_state->len = file_len;
+        sub_state->src           = file_src;
+        sub_state->pos           = 0;
+        sub_state->len           = file_len;
+        sub_state->line          = 1;
+        sub_state->filename      = resolved_path;
+        sub_state->include_paths = state->include_paths;
         sub_state->cond_stack[0] = 1;
-        
-        /* copy macro table into sub_state */
+        sub_state->pop_barrier   = 0;
+
+        /* Macro table transfer (preserving baseline memcpy behavior) */
         sub_state->num_macros = state->num_macros;
-        for (i = 0; i < state->num_macros; i++) memcpy(&sub_state->macros[i], &state->macros[i], sizeof(PPMacro));
-        
+        for (i = 0; i < state->num_macros; i++)
+            memcpy(&sub_state->macros[i], &state->macros[i], sizeof(PPMacro));
+
         pp_parse(sub_state);
-        
-        /* we need to copy back the macros added by the header */
+
+        /* Copy back macros added by the header */
         for (i = state->num_macros; i < sub_state->num_macros; i++) {
             if (state->num_macros >= PP_MAX_MACROS) {
                 fprintf(stderr, "MAX MACROS REACHED!\n");
@@ -913,21 +1040,21 @@ static void pp_process_include(PPState *state, const char *path, int is_system) 
             }
             memcpy(&state->macros[state->num_macros++], &sub_state->macros[i], sizeof(PPMacro));
         }
-        
-        fprintf(stderr, "pp_process_include: %s added %d macros, total is %d\n", path, sub_state->num_macros - i, state->num_macros);
-        
-        /* update all previous active flags because undefs may have occurred */
+
+        fprintf(stderr, "pp_process_include: %s added %d macros, total is %d\n",
+                path, sub_state->num_macros - i, state->num_macros);
+
+        /* Update active flags (undefs may have occurred) */
         for (i = 0; i < state->num_macros; i++) {
             state->macros[i].active = sub_state->macros[i].active;
         }
-        
+
         pp_emit_str(state, sub_state->out, sub_state->out_len);
-        
+        state->include_errors += sub_state->include_errors;
+
         if (sub_state->out) free(sub_state->out);
         free(sub_state);
-        if (file_src != zcc_stddef_text) free(file_src);
-    } else {
-        fprintf(stderr, "zcc compiler error: include file not found: %s\n", path);
+        if (from_disk && file_src) free(file_src);
     }
 }
 
@@ -1116,10 +1243,10 @@ static void pp_parse_directive(PPState *state) {
                 m->is_function_like = 1;
                 pp_parse_params(state, m);
                 pp_skip_whitespace(state);
-                pp_read_line(state, m->body, PP_MAX_BODY);
+                pp_read_macro_body(state, m, PP_MAX_BODY);
             } else {
                 pp_skip_whitespace(state);
-                pp_read_line(state, m->body, PP_MAX_BODY);
+                pp_read_macro_body(state, m, PP_MAX_BODY);
             }
         } else if (strcmp(dir, "undef") == 0) {
             char name[128];
@@ -1136,8 +1263,13 @@ static void pp_parse_directive(PPState *state) {
                 pp_next(state);
             }
             pp_read_line(state, inc_path, 256);
-            if (strlen(inc_path) > 0 && (inc_path[strlen(inc_path) - 1] == '"' || inc_path[strlen(inc_path) - 1] == '>')) {
-                inc_path[strlen(inc_path) - 1] = 0;
+            /* Strip trailing \r from Windows line endings */
+            {
+                int plen = strlen(inc_path);
+                while (plen > 0 && (inc_path[plen - 1] == '\r' || inc_path[plen - 1] == ' ' || inc_path[plen - 1] == '\t'))
+                    inc_path[--plen] = 0;
+                if (plen > 0 && (inc_path[plen - 1] == '"' || inc_path[plen - 1] == '>'))
+                    inc_path[--plen] = 0;
             }
             pp_process_include(state, inc_path, is_system);
         } else if (strcmp(dir, "error") == 0) {
@@ -1159,7 +1291,12 @@ static void pp_parse_directive(PPState *state) {
 static void pp_expand_ident(PPState *state, const char *ident) {
     PPMacro *m;
     int i, p_count;
-    char args[PP_MAX_PARAMS][256];
+    char *args[PP_MAX_PARAMS];
+    int arg_caps[PP_MAX_PARAMS];
+    for (i = 0; i < PP_MAX_PARAMS; i++) {
+        arg_caps[i] = 256;
+        args[i] = (char *)malloc(arg_caps[i]);
+    }
     char c;
     
     if (strcmp(ident, "defined") == 0) {
@@ -1257,7 +1394,11 @@ static void pp_expand_ident(PPState *state, const char *ident) {
         if (c == '\\') {
             pp_next(state);
             if (pp_peek(state) == '\n') { pp_next(state); continue; }
-            if (p_count < PP_MAX_PARAMS && arg_idx < 254) {
+            if (p_count < PP_MAX_PARAMS) {
+                if (arg_idx >= arg_caps[p_count] - 2) {
+                    arg_caps[p_count] *= 2;
+                    args[p_count] = (char *)realloc(args[p_count], arg_caps[p_count]);
+                }
                 args[p_count][arg_idx++] = c;
                 args[p_count][arg_idx++] = pp_next(state);
                 args[p_count][arg_idx] = 0;
@@ -1288,7 +1429,11 @@ static void pp_expand_ident(PPState *state, const char *ident) {
             }
         }
         
-        if (p_count < PP_MAX_PARAMS && arg_idx < 255) {
+        if (p_count < PP_MAX_PARAMS) {
+            if (arg_idx >= arg_caps[p_count] - 1) {
+                arg_caps[p_count] *= 2;
+                args[p_count] = (char *)realloc(args[p_count], arg_caps[p_count]);
+            }
             args[p_count][arg_idx++] = c;
             args[p_count][arg_idx] = 0;
         } else if (p_count >= PP_MAX_PARAMS) {
@@ -1298,31 +1443,56 @@ static void pp_expand_ident(PPState *state, const char *ident) {
     }
     
     /* PRE-EXPAND ARGUMENTS */
-    char expanded_args[PP_MAX_PARAMS][1024];
+    char *expanded_args[PP_MAX_PARAMS];
+    int expanded_cap[PP_MAX_PARAMS];
+    for (i = 0; i < p_count; i++) {
+        expanded_cap[i] = 1024;
+        expanded_args[i] = (char *)malloc(expanded_cap[i]);
+    }
     for (i = 0; i < p_count; i++) { /* using p_count which is correctly set */
+        /* Save */
+        int old_barrier = state->pop_barrier;
         char *old_out = state->out;
         int old_out_len = state->out_len;
         int old_out_cap = state->out_cap;
         
+        /* Raise barrier before pushing arg stream */
+        state->pop_barrier = state->input_depth;
         state->out = expanded_args[i];
         state->out_len = 0;
-        state->out_cap = 1023;
+        state->out_cap = expanded_cap[i] - 1;
         
-        /* Evaluate arg[i] as an independent parsing stream */
         pp_push_input(state, args[i], NULL, NULL);
-        pp_parse_target_depth(state, state->input_depth); 
+        pp_parse_target_depth(state, state->input_depth);
+        
+        /* Force-drain residual frames under the barrier */
+        while (state->input_depth > state->pop_barrier) {
+            if (state->alloc_buf) free(state->alloc_buf);
+            state->input_depth--;
+            if (state->input_stack[state->input_depth].expanding_macro)
+                state->input_stack[state->input_depth].expanding_macro->active = 1;
+            state->src       = state->input_stack[state->input_depth].src;
+            state->pos       = state->input_stack[state->input_depth].pos;
+            state->len       = state->input_stack[state->input_depth].len;
+            state->alloc_buf = state->input_stack[state->input_depth].alloc_buf;
+        }
+        
+        /* Sync heap pointer back — realloc may have moved it */
+        expanded_args[i] = state->out;
+        expanded_cap[i] = state->out_cap + 1;
         expanded_args[i][state->out_len] = 0;
         
-        /* restore */
+        /* Restore */
         state->out = old_out;
         state->out_len = old_out_len;
         state->out_cap = old_out_cap;
+        state->pop_barrier = old_barrier;
     }
     
     /* substitute */
     int len = strlen(m->body);
-    int est_len = len + (p_count * 256) + 1;
-    char *subst = (char *)malloc(est_len);
+    int subst_cap = 1024;
+    char *subst = (char *)malloc(subst_cap);
     int subst_idx = 0;
     
     for (i = 0; i < len; i++) {
@@ -1357,13 +1527,27 @@ static void pp_expand_ident(PPState *state, const char *ident) {
             }
             
             if (found >= 0 && found < p_count) {
+                int exp_len = strlen(expanded_args[found]);
+                if (subst_idx + exp_len + 128 > subst_cap) {
+                    subst_cap = (subst_idx + exp_len + 1024) * 2;
+                    subst = (char *)realloc(subst, subst_cap);
+                }
                 strcpy(subst + subst_idx, expanded_args[found]);
-                subst_idx += strlen(expanded_args[found]);
+                subst_idx += exp_len;
             } else {
+                int param_len = strlen(param_name);
+                if (subst_idx + param_len + 128 > subst_cap) {
+                    subst_cap = (subst_idx + param_len + 1024) * 2;
+                    subst = (char *)realloc(subst, subst_cap);
+                }
                 strcpy(subst + subst_idx, param_name);
-                subst_idx += strlen(param_name);
+                subst_idx += param_len;
             }
         } else {
+            if (subst_idx + 128 > subst_cap) {
+                subst_cap *= 2;
+                subst = (char *)realloc(subst, subst_cap);
+            }
             subst[subst_idx++] = m->body[i];
         }
     }
@@ -1372,6 +1556,13 @@ static void pp_expand_ident(PPState *state, const char *ident) {
     /* Standard C preprocessor hide-set logic */
     m->active = 0;
     pp_push_input(state, subst, subst, m);
+
+    for (i = 0; i < PP_MAX_PARAMS; i++) {
+        if (args[i]) free(args[i]);
+    }
+    for (i = 0; i < p_count; i++) {
+        if (expanded_args[i]) free(expanded_args[i]);
+    }
 }
 
 static void pp_parse_target_depth(PPState *state, int target_depth) {
@@ -1474,6 +1665,13 @@ char *zcc_preprocess(const char *source, int source_len,
     pp_emit(state, 0);
     if (out_len) *out_len = state->out_len - 1;
     result = state->out;
+    for (int i = 0; i < state->num_macros; i++) {
+        if (state->macros[i].body) {
+            free(state->macros[i].body);
+            state->macros[i].body = NULL;
+            state->macros[i].body_cap = 0;
+        }
+    }
     free(state);
     return result;
 }
@@ -9186,6 +9384,22 @@ void codegen_expr(Compiler *cc, Node *node) {
         return;
       }
       codegen_expr_checked(cc, node->args[i]);
+      Type *atype = node->args[i]->type;
+      if (atype && (atype->kind == TY_STRUCT || atype->kind == TY_UNION)) {
+          abi_class_t eb[2];
+          classify_aggregate(atype, eb);
+          if (eb[0] != CLASS_MEMORY) {
+              /* Small aggregate: push by value (eightbytes) */
+              fprintf(cc->out, "    movq %%rax, %%r10\n");
+              if (type_size(atype) > 8) {
+                  fprintf(cc->out, "    pushq 8(%%r10)\n");
+                  cc->stack_depth++;
+              }
+              fprintf(cc->out, "    pushq 0(%%r10)\n");
+              cc->stack_depth++;
+              continue;
+          }
+      }
       ir_save_result(&args_ir_1d[i * 32]);
       ZCC_EMIT_ARG(ir_map_type(node->args[i] ? node->args[i]->type : 0), &args_ir_1d[i * 32], node->line);
       push_reg(cc, "rax");
@@ -9206,49 +9420,64 @@ void codegen_expr(Compiler *cc, Node *node) {
         else if (lt->kind == TY_PTR && lt->base && lt->base->kind == TY_FUNC)
           callee_ftype = lt->base;
       }
-      for (i = 0; i < nargs; i++) {
-        if (node->args[i] && node->args[i]->type && is_float_type(node->args[i]->type)) {
+       for (i = 0; i < nargs; i++) {
+        Type *atype = node->args[i]->type;
+        if (atype && (atype->kind == TY_STRUCT || atype->kind == TY_UNION)) {
+            abi_class_t eb[2];
+            classify_aggregate(atype, eb);
+            if (eb[0] != CLASS_MEMORY) {
+                /* Small aggregate: pop eightbytes into correct registers. */
+                /* Pop eightbyte 0 */
+                if (eb[0] == CLASS_SSE) {
+                    if (fp_idx < 8) {
+                        fprintf(cc->out, "    popq %%rax\n");
+                        cc->stack_depth--;
+                        fprintf(cc->out, "    movq %%rax, %%xmm%d\n", fp_idx++);
+                    }
+                } else {
+                    if (gp_idx < 6) {
+                        pop_reg(cc, argregs[gp_idx++]);
+                    }
+                }
+                /* Pop eightbyte 1 */
+                if (type_size(atype) > 8) {
+                    if (eb[1] == CLASS_SSE) {
+                        if (fp_idx < 8) {
+                            fprintf(cc->out, "    popq %%rax\n");
+                            cc->stack_depth--;
+                            fprintf(cc->out, "    movq %%rax, %%xmm%d\n", fp_idx++);
+                        }
+                    } else {
+                        if (gp_idx < 6) {
+                            pop_reg(cc, argregs[gp_idx++]);
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        if (atype && is_float_type(atype)) {
           if (fp_idx < 8) {
             fprintf(cc->out, "    popq %%rax\n");
             cc->stack_depth--;
             fprintf(cc->out, "    movq %%rax, %%xmm%d\n", fp_idx);
-            /* Check callee's declared param type; if float, convert double->float.
-             * Rules:
-             * - Fixed-param call with TY_FLOAT param → cvtsd2ss (ABI requires float in xmm low 32)
-             * - Variadic '...' args → NO conversion (C promotes float→double)
-             * - Function pointer (callee_ftype == 0) → NO conversion (assume variadic-safe)
-             * - K&R no-prototype → NO conversion (default promotion) */
+            /* Check callee's declared param type... (keep existing conversion logic) */
             {
-              int arg_is_float = (node->args[i]->type->kind == TY_FLOAT);
+              int arg_is_float = (atype->kind == TY_FLOAT);
               if (arg_is_float) {
-                /* New path: arg was a ty_float FLIT or float-typed expression.
-                 * xmm has 32-bit float bits loaded via movss.
-                 * Determine destination: */
                 int in_fixed_float_param = 0;
-                int in_fixed_double_param = 0;
                 if (callee_ftype && callee_ftype->params && i < callee_ftype->num_params) {
-                  if (callee_ftype->params[i]->kind == TY_FLOAT)
-                    in_fixed_float_param = 1;
-                  else if (callee_ftype->params[i]->kind == TY_DOUBLE)
-                    in_fixed_double_param = 1;
+                  if (callee_ftype->params[i]->kind == TY_FLOAT) in_fixed_float_param = 1;
                 }
-                if (in_fixed_float_param) {
-                  /* callee expects float — already in xmm as 32-bit, nothing to do */
-                } else {
-                  /* variadic, fptr, K&R, or double param: C default promotes float→double */
+                if (!in_fixed_float_param) {
                   fprintf(cc->out, "    cvtss2sd %%xmm%d, %%xmm%d\n", fp_idx, fp_idx);
-                  (void)in_fixed_double_param;
                 }
               } else {
-                /* arg is ty_double */
                 int need_cvt = 0;
                 if (callee_ftype && callee_ftype->params && i < callee_ftype->num_params) {
-                  if (callee_ftype->params[i] && callee_ftype->params[i]->kind == TY_FLOAT)
-                    need_cvt = 1;
+                  if (callee_ftype->params[i] && callee_ftype->params[i]->kind == TY_FLOAT) need_cvt = 1;
                 }
-                if (need_cvt) {
-                  fprintf(cc->out, "    cvtsd2ss %%xmm%d, %%xmm%d\n", fp_idx, fp_idx);
-                }
+                if (need_cvt) fprintf(cc->out, "    cvtsd2ss %%xmm%d, %%xmm%d\n", fp_idx, fp_idx);
               }
             }
             fp_idx++;
@@ -9307,7 +9536,37 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
     }
 
-    if (node->type && is_float_type(node->type)) {
+    /* CG-IR-019: System V aggregate return capture */
+    if (node->type && (node->type->kind == TY_STRUCT || node->type->kind == TY_UNION)) {
+        abi_class_t eb[2];
+        classify_aggregate(node->type, eb);
+        if (eb[0] != CLASS_MEMORY) {
+            /* Small aggregate: capture registers into scratch buffer immediately post-call.
+             * This must happen before any stack cleanup or other register clobbering. */
+            fprintf(cc->out, "    # SysV spill for %s\n", node->type->tag[0] ? node->type->tag : "<anon>");
+            
+            int cur_gp = 0, cur_fp = 0;
+            char *ret_gpregs[] = { "rax", "rdx" };
+
+            /* Eightbyte 0 */
+            if (eb[0] == CLASS_SSE) {
+                fprintf(cc->out, "    movq %%xmm%d, %d(%%rbp)\n", cur_fp++, cc->abi_scratch_offset);
+            } else {
+                fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", ret_gpregs[cur_gp++], cc->abi_scratch_offset);
+            }
+
+            /* Eightbyte 1 */
+            if (type_size(node->type) > 8) {
+                if (eb[1] == CLASS_SSE) {
+                    fprintf(cc->out, "    movq %%xmm%d, %d(%%rbp)\n", cur_fp++, cc->abi_scratch_offset + 8);
+                } else {
+                    fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", ret_gpregs[cur_gp++], cc->abi_scratch_offset + 8);
+                }
+            }
+            /* Set %rax to the address of the scratch buffer for downstream consumption. */
+            fprintf(cc->out, "    leaq %d(%%rbp), %%rax\n", cc->abi_scratch_offset);
+        }
+    } else if (node->type && is_float_type(node->type)) {
         fprintf(cc->out, "    movq %%xmm0, %%rax\n");
     } else if (node->type && !node_type_unsigned(node)) {
         if (node->type->size == 4) { if (!backend_ops) fprintf(cc->out, "    cltq\n"); }
@@ -9375,6 +9634,42 @@ void codegen_stmt(Compiler *cc, Node *node) {
   case ND_RETURN:
     if (node->lhs) {
       codegen_expr_checked(cc, node->lhs);
+      /* CG-IR-019: System V aggregate return support */
+      Type *ty = node->lhs->type;
+      if (ty && (ty->kind == TY_STRUCT || ty->kind == TY_UNION)) {
+        abi_class_t eb[2];
+        classify_aggregate(ty, eb);
+        if (eb[0] != CLASS_MEMORY) {
+          /* Small aggregate return: classify and load into registers.
+           * Use %r10 as a temporary base to avoid clobbering %rax (the result address). */
+          fprintf(cc->out, "    movq %%rax, %%r10\n");
+          
+          int cur_gp = 0, cur_fp = 0;
+          char *ret_gpregs[] = { "rax", "rdx" };
+
+          /* Eightbyte 0 */
+          if (eb[0] == CLASS_SSE) {
+            fprintf(cc->out, "    movq 0(%%r10), %%xmm%d\n", cur_fp++);
+          } else {
+            fprintf(cc->out, "    movq 0(%%r10), %%%s\n", ret_gpregs[cur_gp++]);
+          }
+          
+          /* Eightbyte 1 (optional) */
+          if (type_size(ty) > 8) {
+            if (eb[1] == CLASS_SSE) {
+              fprintf(cc->out, "    movq 8(%%r10), %%xmm%d\n", cur_fp++);
+            } else {
+              fprintf(cc->out, "    movq 8(%%r10), %%%s\n", ret_gpregs[cur_gp++]);
+            }
+          }
+          
+          /* Jump directly to epilogue */
+          if (backend_ops) fprintf(cc->out, "    b .Lfunc_end_%d\n", cc->func_end_label);
+          else fprintf(cc->out, "    jmp .Lfunc_end_%d\n", cc->func_end_label);
+          return;
+        }
+      }
+
       {
         char ret_tmp[32];
         ir_save_result(ret_tmp);
@@ -9957,6 +10252,8 @@ void codegen_func(Compiler *cc, Node *func) {
       backend_ops->emit_prologue(cc, func);
   } else {
       stack_size = func->stack_size + 40; /* reserve 5x8 byte push slots */
+      stack_size += 16;                   /* ABI: 16-byte scratch for aggregate returns (CG-IR-019) */
+      cc->abi_scratch_offset = -stack_size;
       if (func->func_type && func->func_type->is_variadic) {
           stack_size += 176;
       }
@@ -9998,15 +10295,36 @@ void codegen_func(Compiler *cc, Node *func) {
   int gp_idx = 0;
   if (!backend_ops) {
   for (i = 0; i < func->num_params; i++) {
-    int sz = type_size(func->param_types[i]);
+    Type *ptype = func->param_types[i];
+    int sz = type_size(ptype);
     if (sz < 8) sz = 8;
     param_offset -= sz;
     
-    if (func->param_types[i]->kind == TY_STRUCT || func->param_types[i]->kind == TY_UNION) {
-        if (i < 6) {
+    if (ptype->kind == TY_STRUCT || ptype->kind == TY_UNION) {
+        abi_class_t eb[2];
+        classify_aggregate(ptype, eb);
+        if (eb[0] != CLASS_MEMORY) {
+            /* Small aggregate in registers: load each eightbyte from correct register set. */
+            if (eb[0] == CLASS_SSE) {
+                if (f_idx < 8) fprintf(cc->out, "    movq %%xmm%d, %d(%%rbp)\n", f_idx++, param_offset);
+            } else {
+                if (gp_idx < 6) fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[gp_idx++], param_offset);
+            }
+            if (type_size(ptype) > 8) {
+                if (eb[1] == CLASS_SSE) {
+                    if (f_idx < 8) fprintf(cc->out, "    movq %%xmm%d, %d(%%rbp)\n", f_idx++, param_offset + 8);
+                } else {
+                    if (gp_idx < 6) fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[gp_idx++], param_offset + 8);
+                }
+            }
+            continue;
+        }
+        /* MEMORY class: pointer is passed in next available GPR or on stack. */
+        if (gp_idx < 6) {
           fprintf(cc->out, "    movq %%%s, %%r10\n", argregs[gp_idx]);
           gp_idx++;
         } else {
+          /* Fallback for many-args: ZCC simplified stack handling */
           fprintf(cc->out, "    movq %d(%%rbp), %%r10\n", 16 + (i - 6) * 8);
         }
         int j;
@@ -10014,20 +10332,17 @@ void codegen_func(Compiler *cc, Node *func) {
             fprintf(cc->out, "    movb %d(%%r10), %%al\n", j);
             fprintf(cc->out, "    movb %%al, %d(%%rbp)\n", param_offset + j);
         }
-    } else if (is_float_type(func->param_types[i])) {
+    } else if (is_float_type(ptype)) {
         if (f_idx < 8) {
-            if (func->param_types[i]->kind == TY_FLOAT) {
-                fprintf(cc->out, "    movss %%xmm%d, %d(%%rbp)\n", f_idx, param_offset);
-            } else {
-                fprintf(cc->out, "    movsd %%xmm%d, %d(%%rbp)\n", f_idx, param_offset);
-            }
+            if (ptype->kind == TY_FLOAT) fprintf(cc->out, "    movss %%xmm%d, %d(%%rbp)\n", f_idx, param_offset);
+            else fprintf(cc->out, "    movsd %%xmm%d, %d(%%rbp)\n", f_idx, param_offset);
+            f_idx++;
         } else {
             fprintf(cc->out, "    movq %d(%%rbp), %%rax\n", 16 + (i - 6) * 8);
             fprintf(cc->out, "    movq %%rax, %d(%%rbp)\n", param_offset);
         }
-        f_idx++;
     } else {
-        if (i < 6) {
+        if (gp_idx < 6) {
           fprintf(cc->out, "    movq %%%s, %d(%%rbp)\n", argregs[gp_idx], param_offset);
           gp_idx++;
         } else {
@@ -11229,6 +11544,8 @@ int main(int argc, char **argv) {
 
   int g_ir_primary = 0;
 
+  const char *include_paths = ".:./include";
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -11246,6 +11563,17 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--ir") == 0) {
       g_emit_ir = 1;
       g_ir_primary = 1;
+    } else if (strncmp(argv[i], "-I", 2) == 0) {
+      /* PP-INCLUDE-022: append -I path to include_paths */
+      const char *ipath = argv[i] + 2;
+      if (ipath[0] == '\0' && i + 1 < argc) { i++; ipath = argv[i]; }
+      if (ipath[0]) {
+        int olen = strlen(include_paths);
+        int nlen = strlen(ipath);
+        char *merged = (char *)malloc(olen + 1 + nlen + 1);
+        sprintf(merged, "%s:%s", include_paths, ipath);
+        include_paths = merged;
+      }
     } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-O", 2) == 0) {
       /* ignore linker flags */
     } else {
@@ -11281,13 +11609,11 @@ int main(int argc, char **argv) {
   /* PREPROCESSOR HOOK */
   {
     int pp_len;
-    char *pp_source = zcc_preprocess(source, source_len, input_file, ".:./include", &pp_len);
+    char *pp_source = zcc_preprocess(source, source_len, input_file, include_paths, &pp_len);
     if (!pp_source) {
-      fprintf(stderr, "zcc: preprocessing failed\n");
+      printf("zcc: preprocessing failed\n");
       return 1;
     }
-    /* We leak original `source` here because we replaced it.
-       ZCC doesn't care much about leaking in main string allocations anyway. */
     source = pp_source;
     source_len = pp_len;
   }
