@@ -119,6 +119,13 @@ enum {
     TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM
 };
 
+typedef enum {
+    CLASS_NO_CLASS = 0,
+    CLASS_INTEGER,
+    CLASS_SSE,
+    CLASS_MEMORY
+} abi_class_t;
+
 /* ================================================================ */
 /* FORWARD DECLARATIONS OF STRUCTS                                   */
 /* ================================================================ */
@@ -501,6 +508,7 @@ struct Compiler {
     /* pending __attribute__ flags — set by lexer, consumed by parse_struct_or_union */
     int pending_packed;     /* __attribute__((packed)) seen before struct keyword */
     int pending_aligned_n;  /* __attribute__((aligned(N))) value, 0 = none */
+    int debug_abi_classes;  /* -fdebug-abi-classes flag */
 };
 
 typedef struct TargetBackend {
@@ -574,6 +582,7 @@ static int is_type_token(Compiler *cc);
 int peek_token(Compiler *cc);
 void error(Compiler *cc, char *msg);
 void error_at(Compiler *cc, int line, char *msg);
+void classify_aggregate(Type *agg, abi_class_t eb[2]);
 
 /* ZKAEDI FORCE RENDER CACHE INVALIDATION */
 /* part0_pp.c -- ZCC Preprocessor */
@@ -582,6 +591,7 @@ void error_at(Compiler *cc, int line, char *msg);
 #include <stdlib.h>
 #define PP_MAX_MACROS 4096
 #define PP_MAX_PARAMS 16
+static int _warned_pp_max_params = 0;
 #define PP_MAX_BODY   16384
 #define PP_MAX_INCLUDE_DEPTH 32
 
@@ -929,6 +939,7 @@ static void pp_parse_params(PPState *state, PPMacro *m) {
             if (m->num_params < PP_MAX_PARAMS) {
                 pp_parse_ident(state, m->params[m->num_params++], 64);
             } else {
+                if (!_warned_pp_max_params) { printf("zcc: warning: PP_MAX_PARAMS (%d) exceeded at %s:%d — subsequent macro params silently discarded\n", PP_MAX_PARAMS, state->filename ? state->filename : "?", state->line); _warned_pp_max_params = 1; }
                 char dummy[64];
                 pp_parse_ident(state, dummy, 64);
             }
@@ -1250,7 +1261,10 @@ static void pp_expand_ident(PPState *state, const char *ident) {
                 args[p_count][arg_idx++] = c;
                 args[p_count][arg_idx++] = pp_next(state);
                 args[p_count][arg_idx] = 0;
-            } else { pp_next(state); }
+            } else {
+                if (!_warned_pp_max_params && p_count >= PP_MAX_PARAMS) { printf("zcc: warning: PP_MAX_PARAMS (%d) exceeded at %s:%d — subsequent macro args silently discarded\n", PP_MAX_PARAMS, state->filename ? state->filename : "?", state->line); _warned_pp_max_params = 1; }
+                pp_next(state);
+            }
             continue;
         }
         
@@ -1277,6 +1291,8 @@ static void pp_expand_ident(PPState *state, const char *ident) {
         if (p_count < PP_MAX_PARAMS && arg_idx < 255) {
             args[p_count][arg_idx++] = c;
             args[p_count][arg_idx] = 0;
+        } else if (p_count >= PP_MAX_PARAMS) {
+            if (!_warned_pp_max_params) { printf("zcc: warning: PP_MAX_PARAMS (%d) exceeded at %s:%d — subsequent macro args silently discarded\n", PP_MAX_PARAMS, state->filename ? state->filename : "?", state->line); _warned_pp_max_params = 1; }
         }
         pp_next(state);
     }
@@ -2612,6 +2628,15 @@ int peek_token(Compiler *cc) {
 /* PARSER                                                            */
 /* ================================================================ */
 
+/* CG-HARDEN-SILENT-001: per-cap warning flags (one warning per cap per compilation) */
+static int _warned_max_structs = 0;
+static int _warned_max_params = 0;
+static int _warned_max_strings = 0;
+static int _warned_max_call_args = 0;
+static int _warned_max_cases = 0;
+static int _warned_max_init = 0;
+static int _warned_max_globals = 0;
+
 static int is_type_token(Compiler *cc) {
     if (cc->tk >= TK_INT && cc->tk <= TK_DOUBLE) return 1;
     if (cc->tk >= TK_STATIC && cc->tk <= TK_INLINE) return 1;
@@ -2643,6 +2668,8 @@ static void register_struct(Compiler *cc, Type *t) {
     if (cc->num_structs < MAX_STRUCTS) {
         cc->structs[cc->num_structs] = t;
         cc->num_structs++;
+    } else {
+        if (!_warned_max_structs) { printf("zcc: warning: MAX_STRUCTS (%d) exceeded at %s:%d — subsequent struct types silently discarded\n", MAX_STRUCTS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_structs = 1; }
     }
 }
 
@@ -3001,6 +3028,15 @@ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
     }
 
     expect(cc, TK_RBRACE);
+    
+    if (cc->debug_abi_classes && stype->is_complete) {
+        abi_class_t eb[2];
+        classify_aggregate(stype, eb);
+        printf("ABI-CLASS: %s (size=%d, align=%d) -> lo:%d, hi:%d\n",
+               stype->tag[0] ? stype->tag : "<anon>",
+               stype->size, stype->align, (int)eb[0], (int)eb[1]);
+    }
+
     if (stype->tag[0] && (strcmp(stype->tag, "yyStackEntry") == 0 || strcmp(stype->tag, "yyParser") == 0 || strcmp(stype->tag, "Walker") == 0)) {
         int n = 0;
         StructField *f = stype->fields;
@@ -3313,6 +3349,8 @@ Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
                             if (ftype->num_params < MAX_PARAMS) {
                                 ftype->params[ftype->num_params] = ptype;
                                 ftype->num_params++;
+                            } else {
+                                if (!_warned_max_params) { printf("zcc: warning: MAX_PARAMS (%d) exceeded at %s:%d — subsequent params silently discarded\n", MAX_PARAMS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_params = 1; }
                             }
                             if (cc->tk == TK_COMMA) {
                                 next_token(cc);
@@ -3385,6 +3423,8 @@ Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
                     if (ftype->num_params < MAX_PARAMS) {
                         ftype->params[ftype->num_params] = ptype;
                         ftype->num_params++;
+                    } else {
+                        if (!_warned_max_params) { printf("zcc: warning: MAX_PARAMS (%d) exceeded at %s:%d — subsequent params silently discarded\n", MAX_PARAMS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_params = 1; }
                     }
 
                     if (cc->tk == TK_COMMA) {
@@ -3464,6 +3504,8 @@ Node *parse_primary(Compiler *cc) {
             se->label_id = cc->label_count;
             cc->label_count++;
             cc->num_strings++;
+        } else {
+            if (!_warned_max_strings) { printf("zcc: warning: MAX_STRINGS (%d) exceeded at %s:%d — subsequent string literals silently discarded\n", MAX_STRINGS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_strings = 1; }
         }
         n = node_new(cc, ND_STR, line);
         n->str_id = sid;
@@ -3779,6 +3821,7 @@ Node *parse_postfix(Compiler *cc) {
                         call->args[call->num_args] = parse_assign(cc);
                         call->num_args = call->num_args + 1;
                     } else {
+                        if (!_warned_max_call_args) { printf("zcc: warning: MAX_CALL_ARGS (%d) exceeded at %s:%d — subsequent call args silently discarded\n", MAX_CALL_ARGS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_call_args = 1; }
                         parse_assign(cc);
                     }
                     if (cc->tk == TK_COMMA) {
@@ -3824,6 +3867,7 @@ Node *parse_postfix(Compiler *cc) {
                         call->args[call->num_args] = parse_assign(cc);
                         call->num_args = call->num_args + 1;
                     } else {
+                        if (!_warned_max_call_args) { printf("zcc: warning: MAX_CALL_ARGS (%d) exceeded at %s:%d — subsequent call args silently discarded\n", MAX_CALL_ARGS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_call_args = 1; }
                         parse_assign(cc);
                     }
                     if (cc->tk == TK_COMMA) {
@@ -4721,6 +4765,8 @@ Node *parse_stmt(Compiler *cc) {
             strncpy(gto->label_name, cn->label_name, MAX_IDENT - 1);
             cnode->case_body = gto;
             current_sw->cases[current_sw->num_cases++] = cnode;
+        } else if (current_sw) {
+            if (!_warned_max_cases) { printf("zcc: warning: MAX_CASES (%d) exceeded at %s:%d — subsequent case labels silently discarded\n", MAX_CASES, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_cases = 1; }
         }
         return cn;
     }
@@ -4871,6 +4917,7 @@ Node *parse_stmt(Compiler *cc) {
                                         if (count < MAX_INIT) {
                                             inits[count++] = parse_assign(cc);
                                         } else {
+                                            if (!_warned_max_init) { printf("zcc: warning: MAX_INIT (%d) exceeded at %s:%d — subsequent initializers silently discarded\n", MAX_INIT, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_init = 1; }
                                             parse_assign(cc);
                                         }
                                         if (cc->tk == skip_tk) {
@@ -4910,7 +4957,8 @@ Node *parse_stmt(Compiler *cc) {
                             }
                         }
 
-                        if (cc->num_globals < MAX_GLOBALS) cc->globals[cc->num_globals++] = gvar;
+                        if (cc->num_globals < MAX_GLOBALS) { cc->globals[cc->num_globals++] = gvar; }
+                        else { if (!_warned_max_globals) { printf("zcc: warning: MAX_GLOBALS (%d) exceeded at %s:%d — subsequent globals silently discarded\n", MAX_GLOBALS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_globals = 1; } }
                     } else {
                         sym = scope_add_local(cc, vname, vtype);
 
@@ -5283,6 +5331,8 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
                     strncpy(func->param_names_buf[func->num_params], pname, MAX_IDENT - 1);
                     psym = scope_add_local(cc, pname, ptype);
                     func->num_params++;
+                } else {
+                    if (!_warned_max_params) { printf("zcc: warning: MAX_PARAMS (%d) exceeded at %s:%d — subsequent function params silently discarded\n", MAX_PARAMS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_params = 1; }
                 }
 
                 if (cc->tk == TK_COMMA) {
@@ -5486,6 +5536,8 @@ Node *parse_program(Compiler *cc) {
                                     if (ftype->num_params < MAX_PARAMS) {
                                         ftype->params[ftype->num_params] = ptype;
                                         ftype->num_params++;
+                                    } else {
+                                        if (!_warned_max_params) { printf("zcc: warning: MAX_PARAMS (%d) exceeded at %s:%d — subsequent params silently discarded\n", MAX_PARAMS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_params = 1; }
                                     }
                                     if (cc->tk == TK_COMMA) {
                                         next_token(cc);
@@ -5646,7 +5698,8 @@ Node *parse_program(Compiler *cc) {
                             if (count < MAX_INIT) {
                                 inits[count++] = parse_assign(cc);
                             } else {
-                                parse_assign(cc); /* discard if over limit */
+                                if (!_warned_max_init) { printf("zcc: warning: MAX_INIT (%d) exceeded at %s:%d — subsequent initializers silently discarded\n", MAX_INIT, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_init = 1; }
+                                parse_assign(cc);
                             }
                             if (cc->tk == skip_tk) {
                                 if (cc->tk != TK_EOF) next_token(cc);
@@ -5693,6 +5746,8 @@ Node *parse_program(Compiler *cc) {
             if (cc->num_globals < MAX_GLOBALS) {
                 cc->globals[cc->num_globals] = gvar;
                 cc->num_globals++;
+            } else {
+                if (!_warned_max_globals) { printf("zcc: warning: MAX_GLOBALS (%d) exceeded at %s:%d — subsequent globals silently discarded\n", MAX_GLOBALS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_globals = 1; }
             }
 
             /* handle multiple declarators: int a, b; */
@@ -5721,6 +5776,8 @@ Node *parse_program(Compiler *cc) {
                 if (cc->num_globals < MAX_GLOBALS) {
                     cc->globals[cc->num_globals] = gvar2;
                     cc->num_globals++;
+                } else {
+                    if (!_warned_max_globals) { printf("zcc: warning: MAX_GLOBALS (%d) exceeded at %s:%d — subsequent globals silently discarded\n", MAX_GLOBALS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_globals = 1; }
                 }
             }
 
@@ -6464,6 +6521,90 @@ int ptr_in_fault_range(const void *p) {
   return (hi == 0 && lo >= 0x80000000U) || (hi >= 0x80U && hi < 0x100U);
 }
 /* Use ptr_in_fault_range() in code, not macro; stage2 may not expand macros. */
+
+/* ---------------------------------------------------------------- */
+/* System V AMD64 ABI Classifications                               */
+/* ---------------------------------------------------------------- */
+
+/* Join two classes per SysV §3.2.3. INTEGER ⊔ SSE = INTEGER. */
+static abi_class_t abi_join(abi_class_t a, abi_class_t b) {
+    if (a == b) return a;
+    if (a == CLASS_NO_CLASS) return b;
+    if (b == CLASS_NO_CLASS) return a;
+    if (a == CLASS_MEMORY || b == CLASS_MEMORY) return CLASS_MEMORY;
+    if (a == CLASS_INTEGER || b == CLASS_INTEGER) return CLASS_INTEGER;
+    return CLASS_SSE;
+}
+
+/* Classify one field into one of the two eightbytes. */
+static void classify_field(Type *field_type, int field_offset, abi_class_t eb[2]) {
+    int size = type_size(field_type);
+    int first_eb  = field_offset / 8;
+    int last_eb   = (field_offset + size - 1) / 8;
+    abi_class_t fc = CLASS_INTEGER;
+
+    /* SysV §3.2.3: if it has unaligned fields, it has class MEMORY. */
+    int falign = type_align(field_type);
+    if (falign > 0 && (field_offset % falign) != 0) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    if (field_type->kind == TY_FLOAT || field_type->kind == TY_DOUBLE) {
+        fc = CLASS_SSE;
+    } else if (field_type->kind == TY_STRUCT || field_type->kind == TY_UNION) {
+        StructField *sf;
+        for (sf = field_type->fields; sf; sf = sf->next) {
+            classify_field(sf->type, field_offset + sf->offset, eb);
+        }
+        return;
+    } else if (field_type->kind == TY_ARRAY) {
+        for (int i = 0; i < field_type->array_len; i++) {
+            classify_field(field_type->base, field_offset + i * type_size(field_type->base), eb);
+        }
+        return;
+    }
+
+    if (first_eb >= 2 || last_eb >= 2) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+    eb[first_eb] = abi_join(eb[first_eb], fc);
+    if (last_eb != first_eb) {
+        eb[last_eb] = abi_join(eb[last_eb], fc);
+    }
+}
+
+void classify_aggregate(Type *agg, abi_class_t eb[2]) {
+    int size = type_size(agg);
+    int align = type_align(agg);
+    eb[0] = eb[1] = CLASS_NO_CLASS;
+
+    if (size > 16 || size == 0) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    /* SysV §3.2.3 step 1: unaligned aggregates (straddling boundary) go to MEMORY.
+     * If an aggregate is larger than 8 bytes and its alignment is less than 8,
+     * it might not start at a boundary multiple, which forces MEMORY. */
+    if (align < 8 && size > 8) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    if (agg->kind == TY_STRUCT || agg->kind == TY_UNION) {
+        StructField *f;
+        for (f = agg->fields; f; f = f->next) {
+            classify_field(f->type, f->offset, eb);
+            if (eb[0] == CLASS_MEMORY) return;
+        }
+    }
+
+    if (eb[0] == CLASS_MEMORY || eb[1] == CLASS_MEMORY) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+    }
+}
 
 /* ---------------------------------------------------------------- */
 /* Load value from address in %rax                                   */
@@ -8462,12 +8603,32 @@ void codegen_expr(Compiler *cc, Node *node) {
 
       switch (node->cast_type->size) {
       case 1:
+        if (node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
+            /* float/double -> char/uchar: truncating convert first, then narrow */
+            if (node->lhs->type->kind == TY_FLOAT) {
+                fprintf(cc->out, "    movd %%eax, %%xmm0\n");
+                fprintf(cc->out, "    cvttss2si %%xmm0, %%rax\n");
+            } else {
+                fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+                fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+            }
+        }
         if (node->cast_type->kind == TY_UCHAR)
           fprintf(cc->out, "    movzbl %%al, %%eax\n");
         else
           fprintf(cc->out, "    movsbl %%al, %%eax\n");
         break;
       case 2:
+        if (node->lhs && node->lhs->type && is_float_type(node->lhs->type)) {
+            /* float/double -> short/ushort: truncating convert first, then narrow */
+            if (node->lhs->type->kind == TY_FLOAT) {
+                fprintf(cc->out, "    movd %%eax, %%xmm0\n");
+                fprintf(cc->out, "    cvttss2si %%xmm0, %%rax\n");
+            } else {
+                fprintf(cc->out, "    movq %%rax, %%xmm0\n");
+                fprintf(cc->out, "    cvttsd2si %%xmm0, %%rax\n");
+            }
+        }
         if (node->cast_type->kind == TY_USHORT)
           fprintf(cc->out, "    movzwl %%ax, %%eax\n");
         else
@@ -9960,9 +10121,39 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
     if (elem->kind == ND_BXOR) return eval_const_expr_p4(elem->lhs, ok) ^ eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SHL) return eval_const_expr_p4(elem->lhs, ok) << eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SHR) return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_NEG) return -eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_NEG) {
+        /* CG-GINIT-FLOAT-001: float negation must negate the float value,
+           not the bit-pattern. Check if child is ND_FLIT. */
+        if (elem->lhs && elem->lhs->kind == ND_FLIT) {
+            double negval = -(elem->lhs->f_val);
+            if (elem->lhs->type && elem->lhs->type->kind == TY_FLOAT) {
+                float fv = (float)negval;
+                unsigned int fbits;
+                memcpy(&fbits, &fv, sizeof(float));
+                return (long long)fbits;
+            } else {
+                unsigned long long bits;
+                memcpy(&bits, &negval, sizeof(double));
+                return (long long)bits;
+            }
+        }
+        return -eval_const_expr_p4(elem->lhs, ok);
+    }
     if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
     if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
+    /* CG-GINIT-FLOAT-001: float/double literals in aggregate initializers */
+    if (elem->kind == ND_FLIT) {
+        if (elem->type && elem->type->kind == TY_FLOAT) {
+            float fv = (float)elem->f_val;
+            unsigned int fbits;
+            memcpy(&fbits, &fv, sizeof(float));
+            return (long long)fbits;
+        } else {
+            unsigned long long bits;
+            memcpy(&bits, &elem->f_val, sizeof(double));
+            return (long long)bits;
+        }
+    }
     *ok = 0;
     return 0;
 }
@@ -10114,6 +10305,31 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long %lld\n", init->int_val);
       else
         fprintf(cc->out, "    .quad %lld\n", init->int_val);
+    } else if (init && init->kind == ND_FLIT) {
+      /* CG-GINIT-FLOAT-001: static/global float/double scalar initializer */
+      if (size == 4) {
+        float fv = (float)init->f_val;
+        unsigned int fbits;
+        memcpy(&fbits, &fv, sizeof(float));
+        fprintf(cc->out, "    .long 0x%08x\n", fbits);
+      } else {
+        unsigned long long bits;
+        memcpy(&bits, &init->f_val, sizeof(double));
+        fprintf(cc->out, "    .quad 0x%016llx\n", bits);
+      }
+    } else if (init && init->kind == ND_NEG && init->lhs && init->lhs->kind == ND_FLIT) {
+      /* CG-GINIT-FLOAT-001: negated float/double scalar (e.g. static double d = -1.5;) */
+      double negval = -(init->lhs->f_val);
+      if (size == 4) {
+        float fv = (float)negval;
+        unsigned int fbits;
+        memcpy(&fbits, &fv, sizeof(float));
+        fprintf(cc->out, "    .long 0x%08x\n", fbits);
+      } else {
+        unsigned long long bits;
+        memcpy(&bits, &negval, sizeof(double));
+        fprintf(cc->out, "    .quad 0x%016llx\n", bits);
+      }
     } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->lhs->name);
@@ -11007,6 +11223,7 @@ int main(int argc, char **argv) {
   int pp_only = 0;
 
   int zcc_verbose_flag = 0;
+  int debug_abi_classes_flag = 0;
 
   int compile_only = 0;
 
@@ -11024,6 +11241,8 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
+    } else if (strcmp(argv[i], "-fdebug-abi-classes") == 0) {
+      debug_abi_classes_flag = 1;
     } else if (strcmp(argv[i], "--ir") == 0) {
       g_emit_ir = 1;
       g_ir_primary = 1;
@@ -11091,6 +11310,7 @@ int main(int argc, char **argv) {
   cc->filename = input_file;
 
   init_compiler(cc);
+  cc->debug_abi_classes = debug_abi_classes_flag;
 
   /* generate asm file name */
   strncpy(asm_file, output_file, 250);

@@ -407,6 +407,15 @@ static Type *parse_struct_or_union(Compiler *cc, int is_union) {
     }
 
     expect(cc, TK_RBRACE);
+    
+    if (cc->debug_abi_classes && stype->is_complete) {
+        abi_class_t eb[2];
+        classify_aggregate(stype, eb);
+        printf("ABI-CLASS: %s (size=%d, align=%d) -> lo:%d, hi:%d\n",
+               stype->tag[0] ? stype->tag : "<anon>",
+               stype->size, stype->align, (int)eb[0], (int)eb[1]);
+    }
+
     if (stype->tag[0] && (strcmp(stype->tag, "yyStackEntry") == 0 || strcmp(stype->tag, "yyParser") == 0 || strcmp(stype->tag, "Walker") == 0)) {
         int n = 0;
         StructField *f = stype->fields;

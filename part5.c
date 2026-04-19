@@ -422,6 +422,7 @@ int main(int argc, char **argv) {
   int pp_only = 0;
 
   int zcc_verbose_flag = 0;
+  int debug_abi_classes_flag = 0;
 
   int compile_only = 0;
 
@@ -439,6 +440,8 @@ int main(int argc, char **argv) {
       pp_only = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
       zcc_verbose_flag = 1;
+    } else if (strcmp(argv[i], "-fdebug-abi-classes") == 0) {
+      debug_abi_classes_flag = 1;
     } else if (strcmp(argv[i], "--ir") == 0) {
       g_emit_ir = 1;
       g_ir_primary = 1;
@@ -506,6 +509,7 @@ int main(int argc, char **argv) {
   cc->filename = input_file;
 
   init_compiler(cc);
+  cc->debug_abi_classes = debug_abi_classes_flag;
 
   /* generate asm file name */
   strncpy(asm_file, output_file, 250);

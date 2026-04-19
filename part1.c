@@ -119,6 +119,13 @@ enum {
     TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM
 };
 
+typedef enum {
+    CLASS_NO_CLASS = 0,
+    CLASS_INTEGER,
+    CLASS_SSE,
+    CLASS_MEMORY
+} abi_class_t;
+
 /* ================================================================ */
 /* FORWARD DECLARATIONS OF STRUCTS                                   */
 /* ================================================================ */
@@ -501,6 +508,7 @@ struct Compiler {
     /* pending __attribute__ flags — set by lexer, consumed by parse_struct_or_union */
     int pending_packed;     /* __attribute__((packed)) seen before struct keyword */
     int pending_aligned_n;  /* __attribute__((aligned(N))) value, 0 = none */
+    int debug_abi_classes;  /* -fdebug-abi-classes flag */
 };
 
 typedef struct TargetBackend {
@@ -574,5 +582,6 @@ static int is_type_token(Compiler *cc);
 int peek_token(Compiler *cc);
 void error(Compiler *cc, char *msg);
 void error_at(Compiler *cc, int line, char *msg);
+void classify_aggregate(Type *agg, abi_class_t eb[2]);
 
 /* ZKAEDI FORCE RENDER CACHE INVALIDATION */

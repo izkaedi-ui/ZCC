@@ -127,6 +127,90 @@ int ptr_in_fault_range(const void *p) {
 /* Use ptr_in_fault_range() in code, not macro; stage2 may not expand macros. */
 
 /* ---------------------------------------------------------------- */
+/* System V AMD64 ABI Classifications                               */
+/* ---------------------------------------------------------------- */
+
+/* Join two classes per SysV §3.2.3. INTEGER ⊔ SSE = INTEGER. */
+static abi_class_t abi_join(abi_class_t a, abi_class_t b) {
+    if (a == b) return a;
+    if (a == CLASS_NO_CLASS) return b;
+    if (b == CLASS_NO_CLASS) return a;
+    if (a == CLASS_MEMORY || b == CLASS_MEMORY) return CLASS_MEMORY;
+    if (a == CLASS_INTEGER || b == CLASS_INTEGER) return CLASS_INTEGER;
+    return CLASS_SSE;
+}
+
+/* Classify one field into one of the two eightbytes. */
+static void classify_field(Type *field_type, int field_offset, abi_class_t eb[2]) {
+    int size = type_size(field_type);
+    int first_eb  = field_offset / 8;
+    int last_eb   = (field_offset + size - 1) / 8;
+    abi_class_t fc = CLASS_INTEGER;
+
+    /* SysV §3.2.3: if it has unaligned fields, it has class MEMORY. */
+    int falign = type_align(field_type);
+    if (falign > 0 && (field_offset % falign) != 0) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    if (field_type->kind == TY_FLOAT || field_type->kind == TY_DOUBLE) {
+        fc = CLASS_SSE;
+    } else if (field_type->kind == TY_STRUCT || field_type->kind == TY_UNION) {
+        StructField *sf;
+        for (sf = field_type->fields; sf; sf = sf->next) {
+            classify_field(sf->type, field_offset + sf->offset, eb);
+        }
+        return;
+    } else if (field_type->kind == TY_ARRAY) {
+        for (int i = 0; i < field_type->array_len; i++) {
+            classify_field(field_type->base, field_offset + i * type_size(field_type->base), eb);
+        }
+        return;
+    }
+
+    if (first_eb >= 2 || last_eb >= 2) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+    eb[first_eb] = abi_join(eb[first_eb], fc);
+    if (last_eb != first_eb) {
+        eb[last_eb] = abi_join(eb[last_eb], fc);
+    }
+}
+
+void classify_aggregate(Type *agg, abi_class_t eb[2]) {
+    int size = type_size(agg);
+    int align = type_align(agg);
+    eb[0] = eb[1] = CLASS_NO_CLASS;
+
+    if (size > 16 || size == 0) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    /* SysV §3.2.3 step 1: unaligned aggregates (straddling boundary) go to MEMORY.
+     * If an aggregate is larger than 8 bytes and its alignment is less than 8,
+     * it might not start at a boundary multiple, which forces MEMORY. */
+    if (align < 8 && size > 8) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+        return;
+    }
+
+    if (agg->kind == TY_STRUCT || agg->kind == TY_UNION) {
+        StructField *f;
+        for (f = agg->fields; f; f = f->next) {
+            classify_field(f->type, f->offset, eb);
+            if (eb[0] == CLASS_MEMORY) return;
+        }
+    }
+
+    if (eb[0] == CLASS_MEMORY || eb[1] == CLASS_MEMORY) {
+        eb[0] = eb[1] = CLASS_MEMORY;
+    }
+}
+
+/* ---------------------------------------------------------------- */
 /* Load value from address in %rax                                   */
 /* ---------------------------------------------------------------- */
 
