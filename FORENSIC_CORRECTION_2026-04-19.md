@@ -44,3 +44,30 @@ Reconstruction order:
 3. PP-INCLUDE-022 — include propagation on stable memory foundation
 
 Verification gate raised: every commit claiming "closed" must include pasted output of an inter-op test (zcc object + gcc main), not just zcc-to-zcc self-consistency.
+
+## Resolution 2026-04-19 (post-reconstruction)
+
+CG-IR-019 was reconstructed via CG-IR-019-RECON, executed in two phases:
+
+- Phase 1A (commit 2bc2db8): ABI classification lattice verified against
+  gcc sizeof/alignof for 8 representative aggregates including the Lua
+  TValue case. Gate output embedded in commit body.
+
+- Phase 1B (commit ae6b5ff): Aggregate return codegen wired to SysV AMD64
+  ABI. All five gates passed:
+    Gate 1: self-host byte-identical
+    Gate 2: classification lattice regression
+    Gate 3: forward inter-op (zcc lib + gcc main), 5/5 cases
+    Gate 4: reverse inter-op (gcc lib + zcc main), 5/5 cases
+    Gate 5: tvalue_return.c regression
+
+  Mid-gate regression (Gate 3 ret_sse_int %xmm0/%rax ordering) was
+  diagnosed and corrected within the phase, with the fix documented.
+  Gate output embedded in commit body.
+
+Forensic discipline going forward: every "closed" commit subject must
+be backed by raw gate output pasted in the commit body. Precedent
+established at ae6b5ff.
+
+PP-MACRO-020, PP-MACRO-021 remain phantom — to be reconstructed as part
+of PP-MACRO-023's work per the reconstruction roadmap.
