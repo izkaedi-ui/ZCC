@@ -111,6 +111,12 @@ static const char *zcc_stddef_text =
 "typedef struct { unsigned int gp_offset; unsigned int fp_offset; void *overflow_arg_area; void *reg_save_area; } __va_list_struct[1];\n"
 "#define __builtin_va_list __va_list_struct\n"
 "#define __builtin_va_end(v)\n"
+"/* PP-STUB-024B: route va_* to ZCC builtins so va_arg(ap,type) is parsed correctly */\n"
+"#define va_list __builtin_va_list\n"
+"#define va_start(ap, last) ((void)0)\n"
+"#define va_end(ap)         ((void)0)\n"
+"#define va_copy(dst, src)  ((dst)[0] = (src)[0])\n"
+"#define va_arg(ap, type)   __builtin_va_arg(ap, type)\n"
 "#define __builtin_expect(exp, c) (exp)\n"
 "#define __builtin_constant_p(x) 0\n"
 "#define __builtin_types_compatible_p(x, y) 0\n"
@@ -129,6 +135,12 @@ static const char *zcc_stddef_text =
 "typedef unsigned short uint16_t;\n"
 "typedef unsigned long size_t;\n"
 "typedef long ssize_t;\n"
+"typedef long ptrdiff_t;\n"
+"typedef long intptr_t;\n"
+"typedef unsigned long uintptr_t;\n"
+"/* PP-STUB-024: signal.h / setjmp.h / stdint primitives for Lua internals */\n"
+"typedef int sig_atomic_t;\n"
+"typedef unsigned int jmp_buf[14];\n"
 "typedef struct _IO_FILE FILE;\n"
 "extern FILE *stdin, *stdout, *stderr;\n"
 "#endif\n";
@@ -932,6 +944,42 @@ static void pp_expand_ident(PPState *state, const char *ident) {
                 i++;
             }
             continue;
+        }
+        if (m->body[i] == '#' && m->body[i+1] != '#') {
+            int tmp_i = i + 1;
+            while (tmp_i < len && (m->body[tmp_i] == ' ' || m->body[tmp_i] == '\t')) tmp_i++;
+            if (tmp_i < len && is_ident_start(m->body[tmp_i])) {
+                char param_name[128];
+                int p_idx = 0;
+                int tmp_k = tmp_i;
+                while (tmp_k < len && is_ident_char(m->body[tmp_k]) && p_idx < 127) {
+                    param_name[p_idx++] = m->body[tmp_k++];
+                }
+                param_name[p_idx] = 0;
+                int found = -1;
+                for (int j = 0; j < m->num_params; j++) {
+                    if (strcmp(m->params[j], param_name) == 0) {
+                        found = j;
+                        break;
+                    }
+                }
+                if (found >= 0 && found < p_count) {
+                    if (subst_idx + 1024 > subst_cap) {
+                        subst_cap *= 2;
+                        subst = (char *)realloc(subst, subst_cap);
+                    }
+                    subst[subst_idx++] = '"';
+                    char *sa = args[found];
+                    while (*sa) {
+                        if (subst_idx + 128 > subst_cap) { subst_cap *= 2; subst = (char *)realloc(subst, subst_cap); }
+                        if (*sa == '\\' || *sa == '"') subst[subst_idx++] = '\\';
+                        subst[subst_idx++] = *sa++;
+                    }
+                    subst[subst_idx++] = '"';
+                    i = tmp_k - 1;
+                    continue;
+                }
+            }
         }
         if (is_ident_start(m->body[i])) {
             char param_name[128];
