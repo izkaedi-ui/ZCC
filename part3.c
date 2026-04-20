@@ -29,7 +29,10 @@ static int is_type_token(Compiler *cc) {
         Symbol *sym;
         sym = scope_find(cc, cc->tk_text);
         if (sym) {
-            if (sym->is_typedef) return 1;
+            if (sym->is_typedef) {
+                if (getenv("ZCC_DEBUG")) printf("!!! %s is a TYPEDEF !!!\n", cc->tk_text);
+                return 1;
+            }
         }
     }
     return 0;
@@ -880,8 +883,8 @@ Node *parse_primary(Compiler *cc) {
             se = &cc->strings[sid];
             se->data = cc_strdup(cc, cc->tk_str);
             se->len = cc->tk_str_len;
-            se->label_id = cc->label_count;
-            cc->label_count++;
+            se->label_id = cc->str_label_count;
+            cc->str_label_count++;
             cc->num_strings++;
         } else {
             if (!_warned_max_strings) { printf("zcc: warning: MAX_STRINGS (%d) exceeded at %s:%d — subsequent string literals silently discarded\n", MAX_STRINGS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_strings = 1; }
@@ -1370,7 +1373,7 @@ Node *parse_unary(Compiler *cc) {
             if (cc->tk == TK_LBRACE) {
                 Symbol *sym;
                 char tmp_name[32];
-                sprintf(tmp_name, ".L_comp_%d", cc->label_count++);
+                sprintf(tmp_name, ".LS_comp_%d", cc->str_label_count++);
                 sym = scope_add_local(cc, tmp_name, cast_type);
 
                 Node *var_n_final = node_new(cc, ND_VAR, line);
@@ -1533,6 +1536,15 @@ Node *parse_unary(Compiler *cc) {
         n = node_new(cc, ND_ADDR, line);
         n->lhs = parse_unary(cc);
         n->type = type_ptr(cc, n->lhs->type);
+        return n;
+    }
+    if (cc->tk == TK_LAND) {
+        /* GNU C Extension: address of label &&label */
+        next_token(cc);
+        n = node_new(cc, ND_ADDR_LABEL, line);
+        strncpy(n->label_name, cc->tk_text, MAX_IDENT - 1);
+        expect(cc, TK_IDENT);
+        n->type = type_ptr(cc, cc->ty_void); /* void * */
         return n;
     }
     if (cc->tk == TK_INC) {
@@ -2134,7 +2146,7 @@ Node *parse_stmt(Compiler *cc) {
         expect(cc, TK_COLON);
 
         cn = node_new(cc, ND_LABEL, line);
-        sprintf(cn->label_name, "__zc_%llx_%d", (unsigned long long)val, line);
+        sprintf(cn->label_name, "__zc_%llx_%d", (unsigned long long)val, cc->label_count++);
         cn->lhs = parse_stmt(cc);
 
         if (current_sw && current_sw->num_cases < MAX_CASES) {
@@ -2158,7 +2170,7 @@ Node *parse_stmt(Compiler *cc) {
         expect(cc, TK_COLON);
 
         dn = node_new(cc, ND_LABEL, line);
-        sprintf(dn->label_name, "__zc_def_%d", line);
+        sprintf(dn->label_name, "__zc_def_%d", cc->label_count++);
         dn->lhs = parse_stmt(cc);
 
         if (current_sw) {
@@ -2193,6 +2205,13 @@ Node *parse_stmt(Compiler *cc) {
     if (cc->tk == TK_GOTO) {
         Node *gto;
         next_token(cc);
+        if (cc->tk == TK_STAR) {
+            next_token(cc); /* consume * */
+            gto = node_new(cc, ND_GOTO_COMPUTED, line);
+            gto->lhs = parse_expr(cc);
+            expect(cc, TK_SEMI);
+            return gto;
+        }
         gto = node_new(cc, ND_GOTO, line);
         strncpy(gto->label_name, cc->tk_text, MAX_IDENT - 1);
         next_token(cc);
@@ -2247,7 +2266,7 @@ Node *parse_stmt(Compiler *cc) {
                         sym->is_typedef = 1;
                     } else if (is_static_local) {
                         char mangled[MAX_IDENT];
-                        sprintf(mangled, "%s__%s__%d", cc->current_func, vname, cc->label_count++);
+                        sprintf(mangled, "%s__%s__S_%d", cc->current_func, vname, cc->str_label_count++);
                         sym = scope_add_local(cc, vname, vtype);
                         sym->is_local = 0;
                         sym->is_global = 1;
@@ -2723,7 +2742,10 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
                     if (cc->tk == TK_ARROW) {
                         error(cc, "unexpected '->' in parameter list (missing ',' or ')'?)");
                     } else {
-                        error(cc, "expected ',' or ')' after parameter");
+                        if (getenv("ZCC_DEBUG")) printf("!!! parse_fparams ERROR !!! func='%s' param_idx=%d tk_text='%s' tk=%d prev_pname='%s'\n", func->func_def_name, func->num_params, cc->tk_text, cc->tk, func->num_params > 0 ? func->param_names_buf[func->num_params - 1] : "NONE");
+                        char buf[256];
+                        sprintf(buf, "expected ',' or ')' after parameter [at token '%s']", cc->tk_text);
+                        error(cc, buf);
                     }
                     while (cc->tk != TK_RPAREN && cc->tk != TK_EOF) next_token(cc);
                     break;
@@ -2846,8 +2868,9 @@ Node *parse_program(Compiler *cc) {
             if (cc->tk == TK_LPAREN) {
                 int gpk;
                 gpk = peek_token(cc);
-                if (gpk == TK_STAR) {
+                if (gpk == TK_STAR || gpk == TK_IDENT) {
                     /* function pointer: typedef int (*name)(params); or int (*fp)(int); */
+                    /* also handles parenthesized identifiers: LUA_API int (lua_gettop)(lua_State *L) */
                     int gptr;
                     int arr_lens[8];
                     int arr_num;

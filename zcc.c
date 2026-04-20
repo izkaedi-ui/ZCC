@@ -27,14 +27,14 @@
 enum {
     MAX_IDENT   = 128,
     MAX_STR     = 4096,
-    MAX_STRINGS = 16384,
-    MAX_GLOBALS = 16384,
-    MAX_STRUCTS = 8192,
+    MAX_STRINGS = 262144,
+    MAX_GLOBALS = 262144,
+    MAX_STRUCTS = 65536,
     MAX_PARAMS  = 128,
     MAX_CALL_ARGS = 256,
     MAX_CASES   = 4096,
-    MAX_INIT    = 8192,
-    ARENA_SIZE  = 16777216
+    MAX_INIT    = 262144,
+    ARENA_SIZE  = 67108864
 };
 
 /* ================================================================ */
@@ -94,9 +94,9 @@ enum {
     ND_NEG, ND_ADDR, ND_DEREF,
     ND_CALL, ND_RETURN, ND_BLOCK,
     ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
-    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_LABEL,
+    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_GOTO_COMPUTED, ND_LABEL,
     ND_SWITCH, ND_CASE, ND_DEFAULT,
-    ND_CAST, ND_SIZEOF, ND_VA_ARG,
+    ND_CAST, ND_SIZEOF, ND_VA_ARG, ND_ADDR_LABEL,
     ND_MEMBER, ND_PRE_INC, ND_PRE_DEC,
     ND_POST_INC, ND_POST_DEC,
     ND_TERNARY,
@@ -481,6 +481,7 @@ struct Compiler {
     /* codegen state */
     FILE *out;
     int label_count;
+    int str_label_count;
     int stack_depth;
 
     /* loop labels for break/continue */
@@ -659,6 +660,19 @@ static const char *zcc_stddef_text =
 "#define UINT_MAX 4294967295U\n"
 "#define ULONG_MAX 18446744073709551615UL\n"
 "#define SIZE_MAX ULONG_MAX\n"
+"/* PP-HEADERS-023A: C99 <limits.h> full sweep */\n"
+"#define SCHAR_MIN  (-128)\n"
+"#define SCHAR_MAX  127\n"
+"#define UCHAR_MAX  255\n"
+"/* CHAR_MIN/MAX assume signed char (x86-64 SysV ABI default) */\n"
+"#define CHAR_MIN   (-128)\n"
+"#define CHAR_MAX   127\n"
+"#define SHRT_MIN   (-32768)\n"
+"#define SHRT_MAX   32767\n"
+"#define USHRT_MAX  65535\n"
+"#define LLONG_MIN  (-9223372036854775807LL-1LL)\n"
+"#define LLONG_MAX  9223372036854775807LL\n"
+"#define ULLONG_MAX 18446744073709551615ULL\n"
 "#define RAND_MAX 2147483647\n"
 "#define BUFSIZ 8192\n"
 "#define FILENAME_MAX 4096\n"
@@ -686,6 +700,12 @@ static const char *zcc_stddef_text =
 "typedef struct { unsigned int gp_offset; unsigned int fp_offset; void *overflow_arg_area; void *reg_save_area; } __va_list_struct[1];\n"
 "#define __builtin_va_list __va_list_struct\n"
 "#define __builtin_va_end(v)\n"
+"/* PP-STUB-024B: route va_* to ZCC builtins so va_arg(ap,type) is parsed correctly */\n"
+"#define va_list __builtin_va_list\n"
+"#define va_start(ap, last) ((void)0)\n"
+"#define va_end(ap)         ((void)0)\n"
+"#define va_copy(dst, src)  ((dst)[0] = (src)[0])\n"
+"#define va_arg(ap, type)   __builtin_va_arg(ap, type)\n"
 "#define __builtin_expect(exp, c) (exp)\n"
 "#define __builtin_constant_p(x) 0\n"
 "#define __builtin_types_compatible_p(x, y) 0\n"
@@ -704,6 +724,12 @@ static const char *zcc_stddef_text =
 "typedef unsigned short uint16_t;\n"
 "typedef unsigned long size_t;\n"
 "typedef long ssize_t;\n"
+"typedef long ptrdiff_t;\n"
+"typedef long intptr_t;\n"
+"typedef unsigned long uintptr_t;\n"
+"/* PP-STUB-024: signal.h / setjmp.h / stdint primitives for Lua internals */\n"
+"typedef int sig_atomic_t;\n"
+"typedef unsigned int jmp_buf[14];\n"
 "typedef struct _IO_FILE FILE;\n"
 "extern FILE *stdin, *stdout, *stderr;\n"
 "#endif\n";
@@ -724,7 +750,7 @@ static void pp_emit_str(PPState *state, const char *str, int len) {
 static char pp_peek(PPState *state) {
     static int pp_peek_cnt = 0;
     if (++pp_peek_cnt % 500000 == 0) {
-        printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
+        if (getenv("ZCC_DEBUG")) printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
         fflush(stdout);
     }
     while (state->pos >= state->len && state->input_depth > state->pop_barrier) {
@@ -1508,6 +1534,42 @@ static void pp_expand_ident(PPState *state, const char *ident) {
             }
             continue;
         }
+        if (m->body[i] == '#' && m->body[i+1] != '#') {
+            int tmp_i = i + 1;
+            while (tmp_i < len && (m->body[tmp_i] == ' ' || m->body[tmp_i] == '\t')) tmp_i++;
+            if (tmp_i < len && is_ident_start(m->body[tmp_i])) {
+                char param_name[128];
+                int p_idx = 0;
+                int tmp_k = tmp_i;
+                while (tmp_k < len && is_ident_char(m->body[tmp_k]) && p_idx < 127) {
+                    param_name[p_idx++] = m->body[tmp_k++];
+                }
+                param_name[p_idx] = 0;
+                int found = -1;
+                for (int j = 0; j < m->num_params; j++) {
+                    if (strcmp(m->params[j], param_name) == 0) {
+                        found = j;
+                        break;
+                    }
+                }
+                if (found >= 0 && found < p_count) {
+                    if (subst_idx + 1024 > subst_cap) {
+                        subst_cap *= 2;
+                        subst = (char *)realloc(subst, subst_cap);
+                    }
+                    subst[subst_idx++] = '"';
+                    char *sa = args[found];
+                    while (*sa) {
+                        if (subst_idx + 128 > subst_cap) { subst_cap *= 2; subst = (char *)realloc(subst, subst_cap); }
+                        if (*sa == '\\' || *sa == '"') subst[subst_idx++] = '\\';
+                        subst[subst_idx++] = *sa++;
+                    }
+                    subst[subst_idx++] = '"';
+                    i = tmp_k - 1;
+                    continue;
+                }
+            }
+        }
         if (is_ident_start(m->body[i])) {
             char param_name[128];
             int p_idx = 0;
@@ -1658,6 +1720,50 @@ char *zcc_preprocess(const char *source, int source_len,
         strcpy(m->body, "1");
         m = pp_add_macro(state, "__thread");
         strcpy(m->body, "");
+        /* PP-HEADERS-023A: C99 <limits.h> predefined — must be in macro table
+         * (not only in zcc_stddef_text) so #if defined(LLONG_MAX) works before
+         * any #include fires. These duplicate the zcc_stddef_text entries
+         * intentionally: the table entries handle conditional evaluation,
+         * the stub entries handle explicit #include <limits.h>. */
+        m = pp_add_macro(state, "LLONG_MAX");
+        strcpy(m->body, "9223372036854775807LL");
+        m = pp_add_macro(state, "LLONG_MIN");
+        strcpy(m->body, "(-9223372036854775807LL-1LL)");
+        m = pp_add_macro(state, "ULLONG_MAX");
+        strcpy(m->body, "18446744073709551615ULL");
+        m = pp_add_macro(state, "SCHAR_MIN");
+        strcpy(m->body, "(-128)");
+        m = pp_add_macro(state, "SCHAR_MAX");
+        strcpy(m->body, "127");
+        m = pp_add_macro(state, "UCHAR_MAX");
+        strcpy(m->body, "255");
+        m = pp_add_macro(state, "CHAR_MIN");
+        strcpy(m->body, "(-128)");
+        m = pp_add_macro(state, "CHAR_MAX");
+        strcpy(m->body, "127");
+        m = pp_add_macro(state, "SHRT_MIN");
+        strcpy(m->body, "(-32768)");
+        m = pp_add_macro(state, "SHRT_MAX");
+        strcpy(m->body, "32767");
+        m = pp_add_macro(state, "USHRT_MAX");
+        strcpy(m->body, "65535");
+        /* Pre-register existing stub limits so #if defined() works before #include */
+        m = pp_add_macro(state, "CHAR_BIT");
+        strcpy(m->body, "8");
+        m = pp_add_macro(state, "INT_MAX");
+        strcpy(m->body, "2147483647");
+        m = pp_add_macro(state, "INT_MIN");
+        strcpy(m->body, "(-2147483647-1)");
+        m = pp_add_macro(state, "UINT_MAX");
+        strcpy(m->body, "4294967295U");
+        m = pp_add_macro(state, "LONG_MAX");
+        strcpy(m->body, "9223372036854775807L");
+        m = pp_add_macro(state, "LONG_MIN");
+        strcpy(m->body, "(-9223372036854775807L-1L)");
+        m = pp_add_macro(state, "ULONG_MAX");
+        strcpy(m->body, "18446744073709551615UL");
+        m = pp_add_macro(state, "SIZE_MAX");
+        strcpy(m->body, "18446744073709551615UL");
     }
 
     pp_parse_target_depth(state, 0);
@@ -1715,14 +1821,14 @@ void *cc_alloc(Compiler *cc, int size) {
             return p;
         }
         if (!a->next) {
-            if (block_count >= 512) {
+            if (block_count >= 8192) {
                 printf("zcc: too many arena blocks (%d) — possible infinite loop or corrupt AST (last alloc size=%d)\n", block_count, size);
                 if (cc) {
                     printf("zcc: stuck near token kind=%d line=%d text=%.127s\n", cc->tk, cc->tk_line, cc->tk_text);
                 }
                 exit(1);
             }
-            if (block_count >= 500 && cc) {
+            if (block_count >= 8000 && cc) {
                 printf("zcc: near block limit block_count=%d token=%d line=%d size=%d text=%.127s\n", block_count, cc->tk, cc->tk_line, size, cc->tk_text);
             }
             block_count++;
@@ -2732,6 +2838,7 @@ again:
 
     /* unknown character — skip */
     goto again;
+
 }
 
 /* Token enum in part1 runs 0..TK_HASH. Stage2 may compile enums to different values (75-81 seen); use 128 so we only flag obvious garbage. */
@@ -2745,7 +2852,7 @@ static const char *token_name(int t) {
         "IF", "ELSE", "WHILE", "FOR", "DO", "RETURN", "BREAK", "CONTINUE", "GOTO",
         "SWITCH", "CASE", "DEFAULT", "STRUCT", "UNION", "ENUM", "TYPEDEF",
         "SIZEOF", "STATIC", "EXTERN", "CONST", "VOLATILE", "AUTO", "REGISTER", "INLINE",
-        "BUILTIN_VA_ARG",
+        "ASM", "BUILTIN_VA_ARG", "TYPEOF", "AUTO_TYPE",
         "PLUS", "MINUS", "STAR", "SLASH", "PERCENT", "AMP", "PIPE", "CARET", "TILDE", "BANG",
         "ASSIGN", "EQ", "NE", "LT", "GT", "LE", "GE", "LAND", "LOR", "SHL", "SHR",
         "INC", "DEC", "ARROW", "DOT", "QUESTION", "COLON",
@@ -2754,7 +2861,7 @@ static const char *token_name(int t) {
         "LPAREN", "RPAREN", "LBRACE", "RBRACE", "LBRACKET", "RBRACKET",
         "SEMI", "COMMA", "ELLIPSIS", "HASH"
     };
-    if (t >= 0 && t < 85) return names[t];  /* 85 = number of token names; avoid sizeof for stage2 parse */
+    if (t >= 0 && t < 88) return names[t];  /* 88 = number of token names */
     return "?";
 }
 
@@ -2848,7 +2955,10 @@ static int is_type_token(Compiler *cc) {
         Symbol *sym;
         sym = scope_find(cc, cc->tk_text);
         if (sym) {
-            if (sym->is_typedef) return 1;
+            if (sym->is_typedef) {
+                if (getenv("ZCC_DEBUG")) printf("!!! %s is a TYPEDEF !!!\n", cc->tk_text);
+                return 1;
+            }
         }
     }
     return 0;
@@ -3699,8 +3809,8 @@ Node *parse_primary(Compiler *cc) {
             se = &cc->strings[sid];
             se->data = cc_strdup(cc, cc->tk_str);
             se->len = cc->tk_str_len;
-            se->label_id = cc->label_count;
-            cc->label_count++;
+            se->label_id = cc->str_label_count;
+            cc->str_label_count++;
             cc->num_strings++;
         } else {
             if (!_warned_max_strings) { printf("zcc: warning: MAX_STRINGS (%d) exceeded at %s:%d — subsequent string literals silently discarded\n", MAX_STRINGS, cc->filename ? cc->filename : "?", cc->tk_line); _warned_max_strings = 1; }
@@ -4189,7 +4299,7 @@ Node *parse_unary(Compiler *cc) {
             if (cc->tk == TK_LBRACE) {
                 Symbol *sym;
                 char tmp_name[32];
-                sprintf(tmp_name, ".L_comp_%d", cc->label_count++);
+                sprintf(tmp_name, ".LS_comp_%d", cc->str_label_count++);
                 sym = scope_add_local(cc, tmp_name, cast_type);
 
                 Node *var_n_final = node_new(cc, ND_VAR, line);
@@ -4352,6 +4462,15 @@ Node *parse_unary(Compiler *cc) {
         n = node_new(cc, ND_ADDR, line);
         n->lhs = parse_unary(cc);
         n->type = type_ptr(cc, n->lhs->type);
+        return n;
+    }
+    if (cc->tk == TK_LAND) {
+        /* GNU C Extension: address of label &&label */
+        next_token(cc);
+        n = node_new(cc, ND_ADDR_LABEL, line);
+        strncpy(n->label_name, cc->tk_text, MAX_IDENT - 1);
+        expect(cc, TK_IDENT);
+        n->type = type_ptr(cc, cc->ty_void); /* void * */
         return n;
     }
     if (cc->tk == TK_INC) {
@@ -4953,7 +5072,7 @@ Node *parse_stmt(Compiler *cc) {
         expect(cc, TK_COLON);
 
         cn = node_new(cc, ND_LABEL, line);
-        sprintf(cn->label_name, "__zc_%llx_%d", (unsigned long long)val, line);
+        sprintf(cn->label_name, "__zc_%llx_%d", (unsigned long long)val, cc->label_count++);
         cn->lhs = parse_stmt(cc);
 
         if (current_sw && current_sw->num_cases < MAX_CASES) {
@@ -4977,7 +5096,7 @@ Node *parse_stmt(Compiler *cc) {
         expect(cc, TK_COLON);
 
         dn = node_new(cc, ND_LABEL, line);
-        sprintf(dn->label_name, "__zc_def_%d", line);
+        sprintf(dn->label_name, "__zc_def_%d", cc->label_count++);
         dn->lhs = parse_stmt(cc);
 
         if (current_sw) {
@@ -5012,6 +5131,13 @@ Node *parse_stmt(Compiler *cc) {
     if (cc->tk == TK_GOTO) {
         Node *gto;
         next_token(cc);
+        if (cc->tk == TK_STAR) {
+            next_token(cc); /* consume * */
+            gto = node_new(cc, ND_GOTO_COMPUTED, line);
+            gto->lhs = parse_expr(cc);
+            expect(cc, TK_SEMI);
+            return gto;
+        }
         gto = node_new(cc, ND_GOTO, line);
         strncpy(gto->label_name, cc->tk_text, MAX_IDENT - 1);
         next_token(cc);
@@ -5066,7 +5192,7 @@ Node *parse_stmt(Compiler *cc) {
                         sym->is_typedef = 1;
                     } else if (is_static_local) {
                         char mangled[MAX_IDENT];
-                        sprintf(mangled, "%s__%s__%d", cc->current_func, vname, cc->label_count++);
+                        sprintf(mangled, "%s__%s__S_%d", cc->current_func, vname, cc->str_label_count++);
                         sym = scope_add_local(cc, vname, vtype);
                         sym->is_local = 0;
                         sym->is_global = 1;
@@ -5542,7 +5668,10 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
                     if (cc->tk == TK_ARROW) {
                         error(cc, "unexpected '->' in parameter list (missing ',' or ')'?)");
                     } else {
-                        error(cc, "expected ',' or ')' after parameter");
+                        if (getenv("ZCC_DEBUG")) printf("!!! parse_fparams ERROR !!! func='%s' param_idx=%d tk_text='%s' tk=%d prev_pname='%s'\n", func->func_def_name, func->num_params, cc->tk_text, cc->tk, func->num_params > 0 ? func->param_names_buf[func->num_params - 1] : "NONE");
+                        char buf[256];
+                        sprintf(buf, "expected ',' or ')' after parameter [at token '%s']", cc->tk_text);
+                        error(cc, buf);
                     }
                     while (cc->tk != TK_RPAREN && cc->tk != TK_EOF) next_token(cc);
                     break;
@@ -5665,8 +5794,9 @@ Node *parse_program(Compiler *cc) {
             if (cc->tk == TK_LPAREN) {
                 int gpk;
                 gpk = peek_token(cc);
-                if (gpk == TK_STAR) {
+                if (gpk == TK_STAR || gpk == TK_IDENT) {
                     /* function pointer: typedef int (*name)(params); or int (*fp)(int); */
+                    /* also handles parenthesized identifiers: LUA_API int (lua_gettop)(lua_State *L) */
                     int gptr;
                     int arr_lens[8];
                     int arr_num;
@@ -6661,6 +6791,24 @@ static int log2_of(long long val) {
   return n;
 }
 
+/* Emit efficient pointer-scale for r11: shlq for power-of-2 sizes, imulq otherwise.
+ * Oneirogenesis confirmed 371 surviving shlq substitutions — wire it into the codegen. */
+#define EMIT_PTR_SCALE_R11(cc, esz) do { \
+    int _e = (esz); \
+    if ((_e & (_e - 1)) == 0) \
+        fprintf((cc)->out, "    shlq $%d, %%r11\n", log2_of(_e)); \
+    else \
+        fprintf((cc)->out, "    imulq $%d, %%r11\n", _e); \
+} while(0)
+
+#define EMIT_PTR_SCALE_RAX(cc, esz) do { \
+    int _e = (esz); \
+    if ((_e & (_e - 1)) == 0) \
+        fprintf((cc)->out, "    shlq $%d, %%rax\n", log2_of(_e)); \
+    else \
+        fprintf((cc)->out, "    imulq $%d, %%rax\n", _e); \
+} while(0)
+
 /* Format codes for label emission — avoid passing string literals as 2nd arg
  * (stage2 mispasses them). */
 enum { FMT_JE = 1, FMT_JMP, FMT_DEF, FMT_JNE };
@@ -7230,8 +7378,8 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_FLIT: {
     int lbl;
-    lbl = cc->label_count;
-    cc->label_count = cc->label_count + 1;
+    lbl = cc->str_label_count;
+    cc->str_label_count = cc->str_label_count + 1;
     if (node->type && node->type->kind == TY_FLOAT) {
       /* CG-FLOAT-007: float literal (f/F suffix) — emit 32-bit IEEE bits */
       float fv = (float)node->f_val;
@@ -7239,10 +7387,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       memcpy(&fbits, &fv, sizeof(float));
       fprintf(cc->out, "    .section .rodata\n");
       fprintf(cc->out, "    .p2align 2\n");
-      fprintf(cc->out, ".L_flit_%d:\n", lbl);
+      fprintf(cc->out, ".LS_flit_%d:\n", lbl);
       fprintf(cc->out, "    .long %u\n", fbits);
       fprintf(cc->out, "    .text\n");
-      fprintf(cc->out, "    movss .L_flit_%d(%%rip), %%xmm0\n", lbl);
+      fprintf(cc->out, "    movss .LS_flit_%d(%%rip), %%xmm0\n", lbl);
       fprintf(cc->out, "    movd %%xmm0, %%eax\n");
     } else {
       /* double literal — existing path */
@@ -7250,10 +7398,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       memcpy(&bits, &node->f_val, sizeof(double));
       fprintf(cc->out, "    .section .rodata\n");
       fprintf(cc->out, "    .p2align 3\n");
-      fprintf(cc->out, ".L_flit_%d:\n", lbl);
+      fprintf(cc->out, ".LS_flit_%d:\n", lbl);
       fprintf(cc->out, "    .quad %llu\n", bits);
       fprintf(cc->out, "    .text\n");
-      fprintf(cc->out, "    movsd .L_flit_%d(%%rip), %%xmm0\n", lbl);
+      fprintf(cc->out, "    movsd .LS_flit_%d(%%rip), %%xmm0\n", lbl);
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
     }
     /* Satisfy IR subsystem sequence */
@@ -7268,9 +7416,9 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_STR: {
     char lbl_buf[32];
-    fprintf(cc->out, "    leaq .L%d(%%rip), %%rax\n",
+    fprintf(cc->out, "    leaq .LS%d(%%rip), %%rax\n",
             cc->strings[node->str_id].label_id);
-    sprintf(lbl_buf, ".L%d", cc->strings[node->str_id].label_id);
+    sprintf(lbl_buf, ".LS%d", cc->strings[node->str_id].label_id);
     char *dst = ir_bridge_fresh_tmp();
     ZCC_EMIT_CONST(IR_TY_PTR, dst, 0, node->line); /* Fake for now */
     ZCC_EMIT_UNARY(IR_CONST_STR, IR_TY_PTR, dst, lbl_buf,
@@ -7432,7 +7580,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (is_pointer(node->lhs->type)) {
           int esz = ptr_elem_size(node->lhs->type);
           if (esz > 1)
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
         }
         fprintf(cc->out, "    addq %%r11, %%rax\n");
         break;
@@ -7440,7 +7588,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (is_pointer(node->lhs->type)) {
           int esz = ptr_elem_size(node->lhs->type);
           if (esz > 1)
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
         }
         if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
       else fprintf(cc->out, "    subq %%r11, %%rax\n");
@@ -7561,7 +7709,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         int esz;
         esz = ptr_elem_size(node->lhs->type);
         if (esz > 1)
-          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+          EMIT_PTR_SCALE_R11(cc, esz);
       }
       fprintf(cc->out, "    addq %%r11, %%rax\n");
       break;
@@ -7584,7 +7732,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (is_pointer(node->lhs->type)) {
         int esz = ptr_elem_size(node->lhs->type);
         if (esz > 1)
-          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+          EMIT_PTR_SCALE_R11(cc, esz);
       }
       if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
       else fprintf(cc->out, "    subq %%r11, %%rax\n");
@@ -7777,7 +7925,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = ptr_elem_size(node->lhs->type);
       if (esz > 1) {
         if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+        else EMIT_PTR_SCALE_R11(cc, esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -7788,7 +7936,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = ptr_elem_size(node->rhs->type);
       if (esz > 1) {
         if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r0, r3, r0\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
+        else EMIT_PTR_SCALE_RAX(cc, esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -7884,7 +8032,7 @@ void codegen_expr(Compiler *cc, Node *node) {
           if (backend_ops) {
             fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
           } else {
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
           }
         }
       }
@@ -8692,6 +8840,13 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     /* End */
     emit_label_fmt(cc, lbl_end, FMT_DEF);
+    return;
+  }
+
+  case ND_ADDR_LABEL: {
+    /* get address of local label: leaq .Luser_func_label(%rip), %rax */
+    fprintf(cc->out, "    leaq .Luser_%s_%s(%%rip), %%rax\n", cc->current_func, node->label_name);
+    push_reg(cc, "rax");
     return;
   }
 
@@ -9994,6 +10149,15 @@ void codegen_stmt(Compiler *cc, Node *node) {
     return;
   }
 
+  case ND_GOTO_COMPUTED: {
+    /* GNU C Extension: goto *expr; */
+    codegen_expr(cc, node->lhs);
+    pop_reg(cc, "rax");
+    fprintf(cc->out, "    jmp *%%rax\n");
+    /* IR bridge: unsupported for now. */
+    return;
+  }
+
   case ND_LABEL: {
     char ir_lbl[64];
     if (!node->label_name) {
@@ -10515,6 +10679,9 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                         } else if (elem->kind == ND_STR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                             else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                        } else if (elem->kind == ND_ADDR_LABEL) {
+                            if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                            else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                         } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                             else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -10559,6 +10726,9 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                } else if (elem->kind == ND_ADDR_LABEL) {
+                    if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                    else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -10645,6 +10815,11 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         memcpy(&bits, &negval, sizeof(double));
         fprintf(cc->out, "    .quad 0x%016llx\n", bits);
       }
+    } else if (init->kind == ND_ADDR_LABEL) {
+      if (size == 4)
+        fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, init->label_name);
+      else
+        fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, init->label_name);
     } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->lhs->name);
@@ -10727,6 +10902,9 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                } else if (elem->kind == ND_ADDR_LABEL) {
+                    if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                    else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -10775,7 +10953,7 @@ static void emit_strings(Compiler *cc) {
   fprintf(cc->out, "    .section .rodata\n");
   for (i = 0; i < cc->num_strings; i++) {
     int j;
-    fprintf(cc->out, ".L%d:\n", cc->strings[i].label_id);
+    fprintf(cc->out, ".LS%d:\n", cc->strings[i].label_id);
     fprintf(cc->out, ".Lstr_%d:\n", i); /* IR backend alias */
     fprintf(cc->out, "    .asciz \"");
     for (j = 0; j < cc->strings[i].len; j++) {
@@ -11159,7 +11337,8 @@ static void init_compiler(Compiler *cc) {
   cc->col = 1;
   cc->pos = 0;
   cc->has_peek = 0;
-  cc->label_count = 100; /* start at 100 to avoid clashes */
+  cc->label_count = 0;
+  cc->str_label_count = 0;
   cc->errors = 0;
   cc->num_strings = 0;
   cc->num_structs = 0;

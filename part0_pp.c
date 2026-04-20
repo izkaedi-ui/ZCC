@@ -161,7 +161,7 @@ static void pp_emit_str(PPState *state, const char *str, int len) {
 static char pp_peek(PPState *state) {
     static int pp_peek_cnt = 0;
     if (++pp_peek_cnt % 500000 == 0) {
-        printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
+        if (getenv("ZCC_DEBUG")) printf("DEBUG zcc2 pp_peek_cnt=%d pos=%d line=%d\n", pp_peek_cnt, state->pos, state->line);
         fflush(stdout);
     }
     while (state->pos >= state->len && state->input_depth > state->pop_barrier) {
