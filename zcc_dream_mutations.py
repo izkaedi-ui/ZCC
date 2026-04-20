@@ -87,7 +87,7 @@ class MutationEngine:
 
         # --- SWEEP mutations (apply whole-assembly transformations) ---
         if include_sweeps:
-            results.extend(self._sweep_zero_mov_to_xor(asm_lines))
+            # results.extend(self._sweep_zero_mov_to_xor(asm_lines))  # re-enable after validation
             results.extend(self._sweep_strength_reduction(asm_lines))
             results.extend(self._sweep_cmpq_zero_to_testq(asm_lines))
             results.extend(self._sweep_branch_straighten(asm_lines))

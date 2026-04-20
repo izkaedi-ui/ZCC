@@ -27,14 +27,14 @@
 enum {
     MAX_IDENT   = 128,
     MAX_STR     = 4096,
-    MAX_STRINGS = 16384,
-    MAX_GLOBALS = 16384,
-    MAX_STRUCTS = 8192,
+    MAX_STRINGS = 262144,
+    MAX_GLOBALS = 262144,
+    MAX_STRUCTS = 65536,
     MAX_PARAMS  = 128,
     MAX_CALL_ARGS = 256,
     MAX_CASES   = 4096,
-    MAX_INIT    = 8192,
-    ARENA_SIZE  = 16777216
+    MAX_INIT    = 262144,
+    ARENA_SIZE  = 67108864
 };
 
 /* ================================================================ */
@@ -94,9 +94,9 @@ enum {
     ND_NEG, ND_ADDR, ND_DEREF,
     ND_CALL, ND_RETURN, ND_BLOCK,
     ND_IF, ND_WHILE, ND_FOR, ND_DO_WHILE,
-    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_LABEL,
+    ND_BREAK, ND_CONTINUE, ND_GOTO, ND_GOTO_COMPUTED, ND_LABEL,
     ND_SWITCH, ND_CASE, ND_DEFAULT,
-    ND_CAST, ND_SIZEOF, ND_VA_ARG,
+    ND_CAST, ND_SIZEOF, ND_VA_ARG, ND_ADDR_LABEL,
     ND_MEMBER, ND_PRE_INC, ND_PRE_DEC,
     ND_POST_INC, ND_POST_DEC,
     ND_TERNARY,
@@ -481,6 +481,7 @@ struct Compiler {
     /* codegen state */
     FILE *out;
     int label_count;
+    int str_label_count;
     int stack_depth;
 
     /* loop labels for break/continue */
@@ -510,6 +511,8 @@ struct Compiler {
     int pending_aligned_n;  /* __attribute__((aligned(N))) value, 0 = none */
     int debug_abi_classes;  /* -fdebug-abi-classes flag */
     int abi_scratch_offset; /* %rbp-relative offset to 16-byte aggregate return scratch (CG-IR-019) */
+    int used_regs_mask;     /* for telemetry tracking */
+    int is_forced_mask;     /* 1 if 0x1F was forced (CG-IR-011) */
 };
 
 typedef struct TargetBackend {

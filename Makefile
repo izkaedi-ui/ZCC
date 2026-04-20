@@ -13,6 +13,19 @@ zcc.c: $(PARTS)
 	cat $(PARTS) > zcc.c
 
 zcc: zcc.c $(PASSES)
+	# Tripwire: reject hand-edited zcc.c — parts are the source of truth.
+	# Bypass with: ZCC_MUTATION_SANDBOX=1 make zcc  (Oneirogenesis daemon)
+	# or:          touch .mutation_sandbox && make zcc
+	@if [ -z "$$ZCC_MUTATION_SANDBOX" ] && [ ! -f .mutation_sandbox ]; then \
+	  cat $(PARTS) > .zcc_parts_check.tmp; \
+	  if ! diff -q .zcc_parts_check.tmp zcc.c > /dev/null 2>&1; then \
+	    rm -f .zcc_parts_check.tmp; \
+	    echo "ERROR: zcc.c does not match cat($(PARTS)). Edit the parts, not zcc.c."; \
+	    echo "       To suppress (mutation sandbox): export ZCC_MUTATION_SANDBOX=1"; \
+	    exit 1; \
+	  fi; \
+	  rm -f .zcc_parts_check.tmp; \
+	fi
 	$(CC) $(CFLAGS) -o zcc zcc.c $(PASSES) $(LDFLAGS)
 
 selfhost: zcc

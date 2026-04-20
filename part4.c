@@ -67,10 +67,39 @@ static int log2_of(long long val) {
   return n;
 }
 
+/* Emit efficient pointer-scale for r11: shlq for power-of-2 sizes, imulq otherwise.
+ * Oneirogenesis confirmed 371 surviving shlq substitutions — wire it into the codegen. */
+#define EMIT_PTR_SCALE_R11(cc, esz) do { \
+    int _e = (esz); \
+    if ((_e & (_e - 1)) == 0) \
+        fprintf((cc)->out, "    shlq $%d, %%r11\n", log2_of(_e)); \
+    else \
+        fprintf((cc)->out, "    imulq $%d, %%r11\n", _e); \
+} while(0)
+
+#define EMIT_PTR_SCALE_RAX(cc, esz) do { \
+    int _e = (esz); \
+    if ((_e & (_e - 1)) == 0) \
+        fprintf((cc)->out, "    shlq $%d, %%rax\n", log2_of(_e)); \
+    else \
+        fprintf((cc)->out, "    imulq $%d, %%rax\n", _e); \
+} while(0)
+
 /* Format codes for label emission — avoid passing string literals as 2nd arg
  * (stage2 mispasses them). */
 enum { FMT_JE = 1, FMT_JMP, FMT_DEF, FMT_JNE };
+static void emit_bb_telem(Compiler *cc, int label_id) {
+    if (getenv("ZCC_EMIT_TELEMETRY")) {
+        fprintf(stderr, "[telem] fn=%s bb=%d used_regs=0x%02X src=%s\n",
+                cc->current_func, label_id, cc->used_regs_mask, cc->is_forced_mask ? "forced" : "computed");
+    }
+}
+
 static void emit_label_fmt(Compiler *cc, int n, int fmt) {
+    if (fmt == FMT_DEF) {
+        emit_bb_telem(cc, n);
+    }
+
   if (backend_ops) {
       switch (fmt) {
       case FMT_JE:
@@ -636,8 +665,8 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_FLIT: {
     int lbl;
-    lbl = cc->label_count;
-    cc->label_count = cc->label_count + 1;
+    lbl = cc->str_label_count;
+    cc->str_label_count = cc->str_label_count + 1;
     if (node->type && node->type->kind == TY_FLOAT) {
       /* CG-FLOAT-007: float literal (f/F suffix) — emit 32-bit IEEE bits */
       float fv = (float)node->f_val;
@@ -645,10 +674,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       memcpy(&fbits, &fv, sizeof(float));
       fprintf(cc->out, "    .section .rodata\n");
       fprintf(cc->out, "    .p2align 2\n");
-      fprintf(cc->out, ".L_flit_%d:\n", lbl);
+      fprintf(cc->out, ".LS_flit_%d:\n", lbl);
       fprintf(cc->out, "    .long %u\n", fbits);
       fprintf(cc->out, "    .text\n");
-      fprintf(cc->out, "    movss .L_flit_%d(%%rip), %%xmm0\n", lbl);
+      fprintf(cc->out, "    movss .LS_flit_%d(%%rip), %%xmm0\n", lbl);
       fprintf(cc->out, "    movd %%xmm0, %%eax\n");
     } else {
       /* double literal — existing path */
@@ -656,10 +685,10 @@ void codegen_expr(Compiler *cc, Node *node) {
       memcpy(&bits, &node->f_val, sizeof(double));
       fprintf(cc->out, "    .section .rodata\n");
       fprintf(cc->out, "    .p2align 3\n");
-      fprintf(cc->out, ".L_flit_%d:\n", lbl);
+      fprintf(cc->out, ".LS_flit_%d:\n", lbl);
       fprintf(cc->out, "    .quad %llu\n", bits);
       fprintf(cc->out, "    .text\n");
-      fprintf(cc->out, "    movsd .L_flit_%d(%%rip), %%xmm0\n", lbl);
+      fprintf(cc->out, "    movsd .LS_flit_%d(%%rip), %%xmm0\n", lbl);
       fprintf(cc->out, "    movq %%xmm0, %%rax\n");
     }
     /* Satisfy IR subsystem sequence */
@@ -674,9 +703,9 @@ void codegen_expr(Compiler *cc, Node *node) {
 
   case ND_STR: {
     char lbl_buf[32];
-    fprintf(cc->out, "    leaq .L%d(%%rip), %%rax\n",
+    fprintf(cc->out, "    leaq .LS%d(%%rip), %%rax\n",
             cc->strings[node->str_id].label_id);
-    sprintf(lbl_buf, ".L%d", cc->strings[node->str_id].label_id);
+    sprintf(lbl_buf, ".LS%d", cc->strings[node->str_id].label_id);
     char *dst = ir_bridge_fresh_tmp();
     ZCC_EMIT_CONST(IR_TY_PTR, dst, 0, node->line); /* Fake for now */
     ZCC_EMIT_UNARY(IR_CONST_STR, IR_TY_PTR, dst, lbl_buf,
@@ -838,7 +867,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (is_pointer(node->lhs->type)) {
           int esz = ptr_elem_size(node->lhs->type);
           if (esz > 1)
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
         }
         fprintf(cc->out, "    addq %%r11, %%rax\n");
         break;
@@ -846,7 +875,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         if (is_pointer(node->lhs->type)) {
           int esz = ptr_elem_size(node->lhs->type);
           if (esz > 1)
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
         }
         if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
       else fprintf(cc->out, "    subq %%r11, %%rax\n");
@@ -967,7 +996,7 @@ void codegen_expr(Compiler *cc, Node *node) {
         int esz;
         esz = ptr_elem_size(node->lhs->type);
         if (esz > 1)
-          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+          EMIT_PTR_SCALE_R11(cc, esz);
       }
       fprintf(cc->out, "    addq %%r11, %%rax\n");
       break;
@@ -990,7 +1019,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       if (is_pointer(node->lhs->type)) {
         int esz = ptr_elem_size(node->lhs->type);
         if (esz > 1)
-          fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+          EMIT_PTR_SCALE_R11(cc, esz);
       }
       if (backend_ops) backend_ops->emit_binary_op(cc, ND_SUB);
       else fprintf(cc->out, "    subq %%r11, %%rax\n");
@@ -1183,7 +1212,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = ptr_elem_size(node->lhs->type);
       if (esz > 1) {
         if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+        else EMIT_PTR_SCALE_R11(cc, esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -1194,7 +1223,7 @@ void codegen_expr(Compiler *cc, Node *node) {
       int esz = ptr_elem_size(node->rhs->type);
       if (esz > 1) {
         if (backend_ops) fprintf(cc->out, "    ldr r3, =%d\n    muls r0, r3, r0\n", esz);
-        else fprintf(cc->out, "    imulq $%d, %%rax\n", esz);
+        else EMIT_PTR_SCALE_RAX(cc, esz);
         char scale_str[32];
         sprintf(scale_str, "%d", esz);
         char *dst = ir_bridge_fresh_tmp();
@@ -1290,7 +1319,7 @@ void codegen_expr(Compiler *cc, Node *node) {
           if (backend_ops) {
             fprintf(cc->out, "    ldr r3, =%d\n    muls r1, r3, r1\n", esz);
           } else {
-            fprintf(cc->out, "    imulq $%d, %%r11\n", esz);
+            EMIT_PTR_SCALE_R11(cc, esz);
           }
         }
       }
@@ -2098,6 +2127,13 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     /* End */
     emit_label_fmt(cc, lbl_end, FMT_DEF);
+    return;
+  }
+
+  case ND_ADDR_LABEL: {
+    /* get address of local label: leaq .Luser_func_label(%rip), %rax */
+    fprintf(cc->out, "    leaq .Luser_%s_%s(%%rip), %%rax\n", cc->current_func, node->label_name);
+    push_reg(cc, "rax");
     return;
   }
 
@@ -3400,6 +3436,15 @@ void codegen_stmt(Compiler *cc, Node *node) {
     return;
   }
 
+  case ND_GOTO_COMPUTED: {
+    /* GNU C Extension: goto *expr; */
+    codegen_expr(cc, node->lhs);
+    pop_reg(cc, "rax");
+    fprintf(cc->out, "    jmp *%%rax\n");
+    /* IR bridge: unsupported for now. */
+    return;
+  }
+
   case ND_LABEL: {
     char ir_lbl[64];
     if (!node->label_name) {
@@ -3635,11 +3680,17 @@ void codegen_func(Compiler *cc, Node *func) {
   if (!func)
     return;
   fprintf(stderr, "cc_func: %s\n", func->func_def_name);
-  used_regs = allocate_registers(func);
-
-  /* CG-IR-011 FIX: Force all 5 callee-saved regs when IR backend active */
+  cc->used_regs_mask = allocate_registers(func);
+  cc->is_forced_mask = 0;
   if (backend_ops) {
-      used_regs = 0x1F;
+      if ((cc->used_regs_mask & 0x1F) != 0x1F) cc->is_forced_mask = 1;
+      cc->used_regs_mask = 0x1F;
+  }
+  used_regs = cc->used_regs_mask;
+
+  if (getenv("ZCC_EMIT_TELEMETRY")) {
+      fprintf(stderr, "[telem] fn=%s used_regs=0x%02X src=%s\n",
+              func->func_def_name, used_regs, cc->is_forced_mask ? "forced" : "computed");
   }
 
   argregs[0] = "rdi";
@@ -3921,6 +3972,9 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                         } else if (elem->kind == ND_STR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                             else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                        } else if (elem->kind == ND_ADDR_LABEL) {
+                            if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                            else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                         } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                             if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                             else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -3965,6 +4019,9 @@ static void emit_struct_fields(Compiler *cc, StructField *fields, Node **args, i
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                } else if (elem->kind == ND_ADDR_LABEL) {
+                    if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                    else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -4051,6 +4108,11 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         memcpy(&bits, &negval, sizeof(double));
         fprintf(cc->out, "    .quad 0x%016llx\n", bits);
       }
+    } else if (init->kind == ND_ADDR_LABEL) {
+      if (size == 4)
+        fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, init->label_name);
+      else
+        fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, init->label_name);
     } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
       if (size == 4)
         fprintf(cc->out, "    .long %s\n", init->lhs->name);
@@ -4133,6 +4195,9 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
                 } else if (elem->kind == ND_STR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Lstr_%d\n", elem->str_id);
                     else fprintf(cc->out, "    .quad .Lstr_%d\n", elem->str_id);
+                } else if (elem->kind == ND_ADDR_LABEL) {
+                    if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
+                    else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
                 } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
                     if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
                     else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
@@ -4181,7 +4246,7 @@ static void emit_strings(Compiler *cc) {
   fprintf(cc->out, "    .section .rodata\n");
   for (i = 0; i < cc->num_strings; i++) {
     int j;
-    fprintf(cc->out, ".L%d:\n", cc->strings[i].label_id);
+    fprintf(cc->out, ".LS%d:\n", cc->strings[i].label_id);
     fprintf(cc->out, ".Lstr_%d:\n", i); /* IR backend alias */
     fprintf(cc->out, "    .asciz \"");
     for (j = 0; j < cc->strings[i].len; j++) {

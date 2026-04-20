@@ -129,6 +129,8 @@ sqlite3_bt.log
 zcc
 zcc2
 zcc3
+zcc.c
+zcc_amal.c
 *.o
 *.a
 

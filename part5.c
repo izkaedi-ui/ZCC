@@ -1,4 +1,5 @@
 
+/* C99/POSIX support for curl graduation — see commit 262bd08 */
 /* ================================================================ */
 /* COMPILER INITIALIZATION                                           */
 /* ================================================================ */
@@ -43,7 +44,8 @@ static void init_compiler(Compiler *cc) {
   cc->col = 1;
   cc->pos = 0;
   cc->has_peek = 0;
-  cc->label_count = 100; /* start at 100 to avoid clashes */
+  cc->label_count = 0;
+  cc->str_label_count = 0;
   cc->errors = 0;
   cc->num_strings = 0;
   cc->num_structs = 0;
@@ -85,6 +87,87 @@ static void init_compiler(Compiler *cc) {
     sym = scope_add(cc, "_Float128", cc->ty_double);
     sym->is_typedef = 1;
 
+    /* POSIX / system typedefs — needed for GCC-preprocessed code */
+    sym = scope_add(cc, "socklen_t", cc->ty_int);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "sa_family_t", cc->ty_ushort);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "in_port_t", cc->ty_ushort);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "in_addr_t", cc->ty_uint);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "pid_t", cc->ty_int);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "uid_t", cc->ty_uint);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "gid_t", cc->ty_uint);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "mode_t", cc->ty_uint);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "off_t", cc->ty_long);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "time_t", cc->ty_long);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "clock_t", cc->ty_long);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "suseconds_t", cc->ty_long);
+    sym->is_typedef = 1;
+    sym = scope_add(cc, "nfds_t", cc->ty_ulong);
+    sym->is_typedef = 1;
+
+    /* glibc internal __ typedefs — survive GCC preprocessing */
+    sym = scope_add(cc, "__time_t", cc->ty_long);   sym->is_typedef = 1;
+    sym = scope_add(cc, "__clock_t", cc->ty_long);   sym->is_typedef = 1;
+    sym = scope_add(cc, "__pid_t", cc->ty_int);      sym->is_typedef = 1;
+    sym = scope_add(cc, "__uid_t", cc->ty_uint);     sym->is_typedef = 1;
+    sym = scope_add(cc, "__gid_t", cc->ty_uint);     sym->is_typedef = 1;
+    sym = scope_add(cc, "__off_t", cc->ty_long);     sym->is_typedef = 1;
+    sym = scope_add(cc, "__off64_t", cc->ty_long);   sym->is_typedef = 1;
+    sym = scope_add(cc, "__mode_t", cc->ty_uint);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__dev_t", cc->ty_ulong);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__ino_t", cc->ty_ulong);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__nlink_t", cc->ty_ulong);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__blksize_t", cc->ty_long); sym->is_typedef = 1;
+    sym = scope_add(cc, "__blkcnt_t", cc->ty_long);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__ssize_t", cc->ty_long);   sym->is_typedef = 1;
+    sym = scope_add(cc, "__socklen_t", cc->ty_int);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__suseconds_t", cc->ty_long); sym->is_typedef = 1;
+    sym = scope_add(cc, "__syscall_slong_t", cc->ty_long); sym->is_typedef = 1;
+    sym = scope_add(cc, "__syscall_ulong_t", cc->ty_ulong); sym->is_typedef = 1;
+    sym = scope_add(cc, "__intmax_t", cc->ty_long);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__uintmax_t", cc->ty_ulong); sym->is_typedef = 1;
+    sym = scope_add(cc, "__intptr_t", cc->ty_long);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__sig_atomic_t", cc->ty_int); sym->is_typedef = 1;
+    sym = scope_add(cc, "__clockid_t", cc->ty_int);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__timer_t", type_ptr(cc, cc->ty_void)); sym->is_typedef = 1;
+    sym = scope_add(cc, "__loff_t", cc->ty_long);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__key_t", cc->ty_int);      sym->is_typedef = 1;
+    sym = scope_add(cc, "__id_t", cc->ty_uint);      sym->is_typedef = 1;
+    sym = scope_add(cc, "__useconds_t", cc->ty_uint); sym->is_typedef = 1;
+    sym = scope_add(cc, "__daddr_t", cc->ty_int);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__caddr_t", type_ptr(cc, cc->ty_char)); sym->is_typedef = 1;
+    sym = scope_add(cc, "__fsblkcnt_t", cc->ty_ulong); sym->is_typedef = 1;
+    sym = scope_add(cc, "__fsfilcnt_t", cc->ty_ulong); sym->is_typedef = 1;
+    sym = scope_add(cc, "__fsword_t", cc->ty_long);  sym->is_typedef = 1;
+    sym = scope_add(cc, "__rlim_t", cc->ty_ulong);   sym->is_typedef = 1;
+    sym = scope_add(cc, "__quad_t", cc->ty_long);    sym->is_typedef = 1;
+    sym = scope_add(cc, "__u_quad_t", cc->ty_ulong); sym->is_typedef = 1;
+
+
+    /* fd_set — used by select(). glibc: struct with __fds_bits[16] (128 bytes) */
+    {
+        Type *t_fdset = type_new(cc, TY_STRUCT);
+        strncpy(t_fdset->tag, "fd_set", MAX_IDENT - 1);
+        t_fdset->size = 128;
+        t_fdset->align = 8;
+        t_fdset->is_complete = 1;
+        sym = scope_add(cc, "fd_set", t_fdset);
+        sym->is_typedef = 1;
+    }
+
+    /* curl_socket_t — typically int on POSIX */
+    sym = scope_add(cc, "curl_socket_t", cc->ty_int);
+    sym->is_typedef = 1;
 
     /* NULL as enum constant */
     sym = scope_add(cc, "NULL", cc->ty_long);
@@ -247,6 +330,136 @@ static void init_compiler(Compiler *cc) {
       /* _exit */
       ft = type_func(cc, cc->ty_void);
       sym = scope_add(cc, "_exit", ft);
+      sym->is_global = 1;
+
+      /* strrchr — returns char* */
+      ft = type_func(cc, type_ptr(cc, cc->ty_char));
+      sym = scope_add(cc, "strrchr", ft);
+      sym->is_global = 1;
+
+      /* strcspn — returns size_t (ulong) */
+      ft = type_func(cc, cc->ty_ulong);
+      sym = scope_add(cc, "strcspn", ft);
+      sym->is_global = 1;
+
+      /* strspn — returns size_t (ulong) */
+      ft = type_func(cc, cc->ty_ulong);
+      sym = scope_add(cc, "strspn", ft);
+      sym->is_global = 1;
+
+      /* memchr — returns void* */
+      ft = type_func(cc, type_ptr(cc, cc->ty_void));
+      sym = scope_add(cc, "memchr", ft);
+      sym->is_global = 1;
+
+      /* inet_pton — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "inet_pton", ft);
+      sym->is_global = 1;
+
+      /* strtod — returns double */
+      ft = type_func(cc, cc->ty_double);
+      sym = scope_add(cc, "strtod", ft);
+      sym->is_global = 1;
+
+      /* ctype functions — all return int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isalpha", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isdigit", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isxdigit", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "toupper", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "tolower", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isalnum", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isspace", ft); sym->is_global = 1;
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "isupper", ft); sym->is_global = 1;
+
+      /* strerror — returns char* */
+      ft = type_func(cc, type_ptr(cc, cc->ty_char));
+      sym = scope_add(cc, "strerror", ft);
+      sym->is_global = 1;
+
+      /* close — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "close", ft);
+      sym->is_global = 1;
+
+      /* select — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "select", ft);
+      sym->is_global = 1;
+
+      /* socket — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "socket", ft);
+      sym->is_global = 1;
+
+      /* connect — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "connect", ft);
+      sym->is_global = 1;
+
+      /* bind — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "bind", ft);
+      sym->is_global = 1;
+
+      /* listen — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "listen", ft);
+      sym->is_global = 1;
+
+      /* accept — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "accept", ft);
+      sym->is_global = 1;
+
+      /* recv — returns ssize_t */
+      ft = type_func(cc, cc->ty_long);
+      sym = scope_add(cc, "recv", ft);
+      sym->is_global = 1;
+
+      /* send — returns ssize_t */
+      ft = type_func(cc, cc->ty_long);
+      sym = scope_add(cc, "send", ft);
+      sym->is_global = 1;
+
+      /* setsockopt — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "setsockopt", ft);
+      sym->is_global = 1;
+
+      /* getsockopt — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "getsockopt", ft);
+      sym->is_global = 1;
+
+      /* fcntl — returns int, variadic */
+      ft = type_func(cc, cc->ty_int);
+      ft->is_variadic = 1;
+      sym = scope_add(cc, "fcntl", ft);
+      sym->is_global = 1;
+
+      /* ioctl — returns int, variadic */
+      ft = type_func(cc, cc->ty_int);
+      ft->is_variadic = 1;
+      sym = scope_add(cc, "ioctl", ft);
+      sym->is_global = 1;
+
+      /* poll — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "poll", ft);
+      sym->is_global = 1;
+
+      /* gettimeofday — returns int */
+      ft = type_func(cc, cc->ty_int);
+      sym = scope_add(cc, "gettimeofday", ft);
       sym->is_global = 1;
     }
   }

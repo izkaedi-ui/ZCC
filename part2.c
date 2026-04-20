@@ -3,6 +3,7 @@
 #include "part1.c"
 #endif
 
+/* C99/POSIX support for curl graduation — see commit 262bd08 */
 /* ================================================================ */
 /* ARENA ALLOCATOR                                                   */
 /* ================================================================ */
@@ -370,10 +371,17 @@ static Keyword keywords[] = {
     {"restrict",  TK_VOLATILE},
     {"__int128",   TK_LONG},
     {"__int128_t", TK_LONG},
+    {"_Bool",      TK_INT},
+    {"_Atomic",    TK_VOLATILE},
+    {"_Noreturn",  TK_INLINE},
+    {"_Thread_local", TK_STATIC},
+    {"_Alignof",   TK_SIZEOF},
+    {"__alignof__", TK_SIZEOF},
+    {"__alignof",  TK_SIZEOF},
     {0, 0}
 };
 
-static int kw_count = 53;
+static int kw_count = 62;
 
 static int lookup_keyword(char *name) {
     int i;
@@ -627,8 +635,24 @@ again:
         }
     }
 
-    /* preprocessor lines: skip entirely */
+    /* preprocessor lines: skip entirely; update line/filename from directives */
     if (c == '#') {
+        /* check if it's a GCC line directive: # NNN "filename" [flags] */
+        int dpos = cc->pos + 1;
+        int new_line = 0;
+        int has_linenum = 0;
+        /* skip spaces after # */
+        while (dpos < cc->source_len && (cc->source[dpos] == ' ' || cc->source[dpos] == '\t')) dpos++;
+        /* parse number */
+        while (dpos < cc->source_len && cc->source[dpos] >= '0' && cc->source[dpos] <= '9') {
+            new_line = new_line * 10 + (cc->source[dpos] - '0');
+            has_linenum = 1;
+            dpos++;
+        }
+        if (has_linenum && new_line > 0) {
+            cc->line = new_line;
+        }
+        /* skip to end of line */
         while (cc->pos < cc->source_len) {
             if (cc->source[cc->pos] == '\n') break;
             /* handle line continuation */

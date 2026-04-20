@@ -3,6 +3,7 @@
 #include "part1.c"
 #endif
 
+/* C99/POSIX support for curl graduation — see commit 262bd08 */
 /* ================================================================ */
 /* PARSER                                                            */
 /* ================================================================ */
@@ -212,6 +213,13 @@ static long long parse_const_expr_primary(Compiler *cc) {
     if (cc->tk == TK_LPAREN) {
         long long val;
         next_token(cc);
+        /* Handle casts: (int)expr, (unsigned long)expr, etc. */
+        if (is_type_token(cc)) {
+            /* Skip the type and closing paren, then evaluate the expression */
+            while (cc->tk != TK_RPAREN && cc->tk != TK_EOF) next_token(cc);
+            expect(cc, TK_RPAREN);
+            return parse_const_expr_unary(cc);
+        }
         val = parse_const_expr(cc);
         expect(cc, TK_RPAREN);
         return val;
@@ -1936,6 +1944,33 @@ Node *parse_stmt(Compiler *cc) {
     int line;
     line = cc->tk_line;
 
+    /* Skip __asm__(...) / asm(...) / __asm(...) statements */
+    if (cc->tk == TK_IDENT) {
+        if (strcmp(cc->tk_text, "__asm__") == 0 ||
+            strcmp(cc->tk_text, "asm") == 0 ||
+            strcmp(cc->tk_text, "__asm") == 0) {
+            next_token(cc); /* consume asm keyword */
+            /* skip optional volatile qualifier */
+            if (cc->tk == TK_IDENT && (strcmp(cc->tk_text, "__volatile__") == 0 ||
+                strcmp(cc->tk_text, "volatile") == 0)) {
+                next_token(cc);
+            }
+            if (cc->tk == TK_VOLATILE) next_token(cc);
+            if (cc->tk == TK_LPAREN) {
+                int depth = 1;
+                next_token(cc);
+                while (depth > 0 && cc->tk != TK_EOF) {
+                    if (cc->tk == TK_LPAREN) depth++;
+                    else if (cc->tk == TK_RPAREN) depth--;
+                    if (depth > 0) next_token(cc);
+                }
+                if (cc->tk == TK_RPAREN) next_token(cc);
+            }
+            if (cc->tk == TK_SEMI) next_token(cc);
+            return node_new(cc, ND_NOP, line);
+        }
+    }
+
     /* inline assembly */
     if (cc->tk == TK_ASM) {
         Node *n;
@@ -2966,6 +3001,60 @@ Node *parse_program(Compiler *cc) {
                         dtype = type_func(cc, dtype);
                     }
                     /* fall through to typedef / global var handling */
+                    goto after_name;
+                } else if (is_typedef_kw && gpk == TK_IDENT) {
+                    /* typedef returntype (Name)(params) — function type typedef
+                     * e.g. typedef ssize_t (Curl_send)(struct X *, int, ...); */
+                    next_token(cc); /* consume ( */
+                    strncpy(name, cc->tk_text, MAX_IDENT - 1);
+                    next_token(cc); /* consume Name */
+                    expect(cc, TK_RPAREN); /* consume ) */
+                    /* Now parse the parameter list */
+                    if (cc->tk == TK_LPAREN) {
+                        Type *ftype;
+                        next_token(cc);
+                        ftype = type_func(cc, ptr_type);
+                        ftype->params = (Type **)cc_alloc(cc, sizeof(Type *) * MAX_PARAMS);
+                        ftype->num_params = 0;
+                        ftype->is_variadic = 0;
+                        if (cc->tk != TK_RPAREN) {
+                            if (cc->tk == TK_VOID) {
+                                int vpk3 = peek_token(cc);
+                                if (vpk3 == TK_RPAREN) {
+                                    next_token(cc);
+                                } else {
+                                    goto parse_ft_params;
+                                }
+                            } else {
+                                parse_ft_params:
+                                while (cc->tk != TK_RPAREN) {
+                                    Type *ptype;
+                                    char pname[128];
+                                    if (cc->tk == TK_ELLIPSIS) {
+                                        ftype->is_variadic = 1;
+                                        next_token(cc);
+                                        break;
+                                    }
+                                    if (cc->tk == TK_EOF) break;
+                                    ptype = parse_type(cc);
+                                    ptype = parse_declarator(cc, ptype, pname);
+                                    if (ftype->num_params < MAX_PARAMS) {
+                                        ftype->params[ftype->num_params] = ptype;
+                                        ftype->num_params++;
+                                    }
+                                    if (cc->tk == TK_COMMA) {
+                                        next_token(cc);
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        expect(cc, TK_RPAREN);
+                        dtype = ftype;
+                    } else {
+                        dtype = ptr_type;
+                    }
                     goto after_name;
                 }
             }

@@ -62,10 +62,11 @@ BLACKLIST_FILE = DREAM_DIR / "blacklist.json"
 BENCHMARK_FILE = REPO_ROOT / "benchmark_workload.c"
 GODS_EYE_WS    = "ws://127.0.0.1:8082/ws/dream_telemetry"
 
-PARTS = ["part1.c", "part0_pp.c", "part2.c", "part3.c",
-         "ir.h", "ir_emit_dispatch.h", "ir_bridge.h",
-         "part6_arm.c", "part4.c", "part5.c", "ir.c", "ir_to_x86.c"]
-PASSES = ["compiler_passes.c", "compiler_passes_ir.c", "ir_pass_manager.c"]
+PARTS = ["part0_pp.c", "zcc_ast_bridge.h", "part1.c", "part2.c", "part3.c",
+         "ir.h", "ir_emit_dispatch.h", "ir_bridge.h", "part4.c", "part5.c",
+         "part6_arm.c", "ir.c", "ir_to_x86.c", "ir_pass_manager.c",
+         "regalloc.c", "ir_telemetry_stub.c"]
+PASSES = ["compiler_passes.c", "compiler_passes_ir.c"]
 
 # ANSI colour palette
 _R = "\033[91m"; _G = "\033[92m"; _Y = "\033[93m"
@@ -251,7 +252,14 @@ class SelfHostGate:
                  '-o', s3_bin, s3_s] + p_args + ['-lm'],
                 capture_output=True, timeout=60)
             if r.returncode != 0:
-                return False, f"s3 link fail: {r.stderr.decode()[:120]}"
+                full_stderr = r.stderr.decode('utf-8', 'ignore').strip()
+                with open("dreams/last_assembler_error.txt", "w") as f:
+                    f.write(full_stderr)
+                import shutil
+                shutil.copy2(s3_s, "dreams/g_s3_fault.s")
+                lines = full_stderr.split('\n')
+                err_summary = '\n'.join(lines[:10])
+                return False, f"s3 link fail:\n{err_summary}"
         except subprocess.TimeoutExpired:
             return False, "s3 link timeout"
 
@@ -609,15 +617,15 @@ class DreamEngine:
             if not os.path.exists(zcc_c):
                 # Concatenate parts first
                 print(f"  {_Y}[AUTO]{_W} Concatenating parts → zcc.c…")
-                parts_exist = [str(REPO_ROOT / p) for p in PARTS
-                               if (REPO_ROOT / p).exists()]
-                if not parts_exist:
-                    print(f"  {_R}[ERROR]{_W} No part files found. Cannot build zcc.c.")
-                    sys.exit(1)
+                # Order matters: part0_pp must come before headers/part1
                 with open(zcc_c, 'w') as out:
-                    for pf in parts_exist:
-                        with open(pf) as pf_h:
-                            out.write(pf_h.read())
+                    for p in PARTS:
+                        pf = REPO_ROOT / p
+                        if pf.exists():
+                            with open(pf) as f:
+                                out.write(f.read())
+                        else:
+                            print(f"  {_Y}[WARN]{_W} Missing part: {p}")
             # Strip _Static_assert lines
             zcc_pp_tmp = zcc_pp_c + '.tmp'
             with open(zcc_c) as fin, open(zcc_pp_tmp, 'w') as fout:
@@ -628,6 +636,12 @@ class DreamEngine:
             ast_bridge_zcc  = str(REPO_ROOT / 'zcc_ast_bridge_zcc.h')
             ir_bridge_zcc   = str(REPO_ROOT / 'zcc_ir_bridge_zcc.h')
             with open(zcc_pp_tmp) as fin, open(zcc_pp_c, 'w') as fout:
+                # Inject the bridge guard so ZCC's own preprocessor skips
+                # all five `#ifndef ZCC_AST_BRIDGE_H / #include "part1.c"`
+                # blocks. Without this fix, node_kind and every other
+                # accessor defined in part1.c is emitted multiple times in
+                # the mutant assembly, causing 'symbol already defined'.
+                fout.write('#define ZCC_AST_BRIDGE_H\n')
                 for line in fin:
                     if line.startswith('#include "zcc_ast_bridge.h"'):
                         if os.path.exists(ast_bridge_zcc):
