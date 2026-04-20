@@ -123,6 +123,13 @@ static const char *zcc_stddef_text =
 "#define __builtin_unreachable()\n"
 "#define __x86_64__ 1\n"
 "#define __GNUC__ 1\n"
+"#define __attribute__(x)\n"
+"#define __declspec(x)\n"
+"#define __inline__ inline\n"
+"#define __restrict\n"
+"#define __restrict__\n"
+"#define __extension__\n"
+"#define __asm__(x)\n"
 "#define assert(x)\n"
 "#define offsetof(t, m) ((unsigned long)&(((t*)0)->m))\n"
 "typedef int int32_t;\n"
@@ -515,75 +522,233 @@ static void pp_parse_params(PPState *state, PPMacro *m) {
     if (pp_peek(state) == ')') pp_next(state);
 }
 
-static int pp_eval_expr_str(PPState *state, const char *s, int depth) {
-    char buf[1024];
-    int i=0, j=0;
-    char *or_ptr, *and_ptr;
-    
-    fprintf(stderr, "eval depth=%d s='%s'\n", depth, s);
-    if (depth > 16) {
-        fprintf(stderr, "RECURSION DEPTH MAXED OUT!\n");
+/* ============================================================
+ * pp_eval_expr_str — recursive-descent C #if expression parser.
+ * Handles full C operator precedence per C11 6.10.1.
+ * Returns long long. Undefined identifiers evaluate to 0.
+ * ============================================================ */
+
+typedef struct { const char *s; PPState *state; int depth; } PPEval;
+
+static long long pp_e_expr(PPEval *e);      /* lowest precedence */
+
+static void pp_e_skip(PPEval *e) {
+    while (*e->s == ' ' || *e->s == '\t' || *e->s == '\n' || *e->s == '\r') e->s++;
+}
+
+static int pp_e_match(PPEval *e, const char *tok) {
+    pp_e_skip(e);
+    int n = 0; while (tok[n]) n++;
+    int i;
+    for (i = 0; i < n; i++) if (e->s[i] != tok[i]) return 0;
+    /* Guard: don't match '>' when '>>' is present, etc. */
+    if (n == 1) {
+        char c = tok[0];
+        if ((c == '>' || c == '<' || c == '&' || c == '|' || c == '=') && e->s[1] == c) return 0;
+        if ((c == '<' || c == '>' || c == '!' || c == '=') && e->s[1] == '=') return 0;
+    }
+    e->s += n;
+    return 1;
+}
+
+/* primary: number | defined(X) | identifier | (expr) | unary */
+static long long pp_e_primary(PPEval *e) {
+    pp_e_skip(e);
+    if (*e->s == '(') {
+        e->s++;
+        long long v = pp_e_expr(e);
+        pp_e_skip(e);
+        if (*e->s == ')') e->s++;
+        return v;
+    }
+    if (*e->s == '!') { e->s++; return !pp_e_primary(e); }
+    if (*e->s == '~') { e->s++; return ~pp_e_primary(e); }
+    if (*e->s == '-') { e->s++; return -pp_e_primary(e); }
+    if (*e->s == '+') { e->s++; return  pp_e_primary(e); }
+    if (*e->s >= '0' && *e->s <= '9') {
+        char *end;
+        long long v = (long long)strtoull(e->s, &end, 0);
+        e->s = end;
+        /* skip integer suffix: U, L, UL, ULL, LL */
+        while (*e->s == 'u' || *e->s == 'U' || *e->s == 'l' || *e->s == 'L') e->s++;
+        return v;
+    }
+    /* identifier: defined() or macro */
+    if ((*e->s >= 'a' && *e->s <= 'z') || (*e->s >= 'A' && *e->s <= 'Z') || *e->s == '_') {
+        char name[256];
+        int n = 0;
+        while (((*e->s >= 'a' && *e->s <= 'z') || (*e->s >= 'A' && *e->s <= 'Z') ||
+                (*e->s >= '0' && *e->s <= '9') || *e->s == '_') && n < 255) {
+            name[n++] = *e->s++;
+        }
+        name[n] = 0;
+        if (n == 7 && name[0]=='d' && name[1]=='e' && name[2]=='f' && name[3]=='i' &&
+                      name[4]=='n' && name[5]=='e' && name[6]=='d') {
+            pp_e_skip(e);
+            int paren = 0;
+            if (*e->s == '(') { e->s++; paren = 1; }
+            pp_e_skip(e);
+            char arg[256]; int an = 0;
+            while (((*e->s >= 'a' && *e->s <= 'z') || (*e->s >= 'A' && *e->s <= 'Z') ||
+                    (*e->s >= '0' && *e->s <= '9') || *e->s == '_') && an < 255) {
+                arg[an++] = *e->s++;
+            }
+            arg[an] = 0;
+            pp_e_skip(e);
+            if (paren && *e->s == ')') e->s++;
+            return pp_find_macro(e->state, arg) != 0;
+        }
+        /* regular identifier: expand as macro if defined, else 0 */
+        PPMacro *m = pp_find_macro(e->state, name);
+        if (m) {
+            PPEval sub = { m->body, e->state, e->depth + 1 };
+            if (sub.depth > 32) return 0;
+            return pp_e_expr(&sub);
+        }
         return 0;
     }
-    
-    while(s[i] && j<1023) { if (s[i]!=' ' && s[i]!='\t' && s[i]!='\n' && s[i]!='\r') buf[j++]=s[i]; i++; }
-    buf[j]=0;
-    if (buf[0] == 0) return 0;
-    
-    or_ptr = strstr(buf, "||");
-    if (or_ptr) {
-        *or_ptr = 0;
-        return pp_eval_expr_str(state, buf, depth+1) || pp_eval_expr_str(state, or_ptr + 2, depth+1);
-    }
-    and_ptr = strstr(buf, "&&");
-    if (and_ptr) {
-        *and_ptr = 0;
-        return pp_eval_expr_str(state, buf, depth+1) && pp_eval_expr_str(state, and_ptr + 2, depth+1);
-    }
-    
-    char *op;
-    if ((op = strstr(buf, "=="))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) == pp_eval_expr_str(state, op+2, depth+1);
-    }
-    if ((op = strstr(buf, "!="))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) != pp_eval_expr_str(state, op+2, depth+1);
-    }
-    if ((op = strstr(buf, "<="))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) <= pp_eval_expr_str(state, op+2, depth+1);
-    }
-    if ((op = strstr(buf, ">="))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) >= pp_eval_expr_str(state, op+2, depth+1);
-    }
-    if ((op = strchr(buf, '<'))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) < pp_eval_expr_str(state, op+1, depth+1);
-    }
-    if ((op = strchr(buf, '>'))) {
-        *op = 0; return pp_eval_expr_str(state, buf, depth+1) > pp_eval_expr_str(state, op+1, depth+1);
-    }
-    
-    if (buf[0] == '!') return !pp_eval_expr_str(state, buf+1, depth+1);
-    
-    /* parenthesis stripping */
-    if (buf[0] == '(' && buf[j-1] == ')') {
-        buf[j-1] = 0;
-        return pp_eval_expr_str(state, buf+1, depth+1);
-    }
-    
-    if (buf[0] >= '0' && buf[0] <= '9') return strtol(buf, NULL, 0);
-    
-    if (strncmp(buf, "defined", 7) == 0) {
-        char *p = buf + 7;
-        char name[128];
-        int n_idx = 0;
-        while (*p == '(') p++;
-        while (*p && *p != ')' && n_idx < 127) name[n_idx++] = *p++;
-        name[n_idx] = 0;
-        return pp_find_macro(state, name) != 0;
-    }
-    
-    PPMacro *m = pp_find_macro(state, buf);
-    if (m) return pp_eval_expr_str(state, m->body, depth+1);
     return 0;
+}
+
+/* multiplicative: * / % */
+static long long pp_e_mul(PPEval *e) {
+    long long v = pp_e_primary(e);
+    for (;;) {
+        pp_e_skip(e);
+        if      (pp_e_match(e, "*"))  v = v * pp_e_primary(e);
+        else if (pp_e_match(e, "/"))  { long long r = pp_e_primary(e); v = r ? v / r : 0; }
+        else if (pp_e_match(e, "%"))  { long long r = pp_e_primary(e); v = r ? v % r : 0; }
+        else break;
+    }
+    return v;
+}
+
+/* additive: + - */
+static long long pp_e_add(PPEval *e) {
+    long long v = pp_e_mul(e);
+    for (;;) {
+        pp_e_skip(e);
+        if      (pp_e_match(e, "+")) v = v + pp_e_mul(e);
+        else if (pp_e_match(e, "-")) v = v - pp_e_mul(e);
+        else break;
+    }
+    return v;
+}
+
+/* shift: << >> */
+static long long pp_e_shift(PPEval *e) {
+    long long v = pp_e_add(e);
+    for (;;) {
+        pp_e_skip(e);
+        if      (pp_e_match(e, "<<")) v = (long long)((unsigned long long)v << pp_e_add(e));
+        else if (pp_e_match(e, ">>")) v = (long long)((unsigned long long)v >> pp_e_add(e));
+        else break;
+    }
+    return v;
+}
+
+/* relational: < <= > >= */
+static long long pp_e_rel(PPEval *e) {
+    long long v = pp_e_shift(e);
+    for (;;) {
+        pp_e_skip(e);
+        if      (pp_e_match(e, "<=")) v = v <= pp_e_shift(e);
+        else if (pp_e_match(e, ">=")) v = v >= pp_e_shift(e);
+        else if (pp_e_match(e, "<"))  v = v <  pp_e_shift(e);
+        else if (pp_e_match(e, ">"))  v = v >  pp_e_shift(e);
+        else break;
+    }
+    return v;
+}
+
+/* equality: == != */
+static long long pp_e_eq(PPEval *e) {
+    long long v = pp_e_rel(e);
+    for (;;) {
+        pp_e_skip(e);
+        if      (pp_e_match(e, "==")) v = v == pp_e_rel(e);
+        else if (pp_e_match(e, "!=")) v = v != pp_e_rel(e);
+        else break;
+    }
+    return v;
+}
+
+/* bitwise AND: & */
+static long long pp_e_band(PPEval *e) {
+    long long v = pp_e_eq(e);
+    for (;;) {
+        pp_e_skip(e);
+        if (pp_e_match(e, "&")) v = v & pp_e_eq(e);
+        else break;
+    }
+    return v;
+}
+
+/* bitwise XOR: ^ */
+static long long pp_e_bxor(PPEval *e) {
+    long long v = pp_e_band(e);
+    for (;;) {
+        pp_e_skip(e);
+        if (pp_e_match(e, "^")) v = v ^ pp_e_band(e);
+        else break;
+    }
+    return v;
+}
+
+/* bitwise OR: | */
+static long long pp_e_bor(PPEval *e) {
+    long long v = pp_e_bxor(e);
+    for (;;) {
+        pp_e_skip(e);
+        if (pp_e_match(e, "|")) v = v | pp_e_bxor(e);
+        else break;
+    }
+    return v;
+}
+
+/* logical AND: && */
+static long long pp_e_land(PPEval *e) {
+    long long v = pp_e_bor(e);
+    for (;;) {
+        pp_e_skip(e);
+        if (pp_e_match(e, "&&")) { long long r = pp_e_bor(e); v = v && r; }
+        else break;
+    }
+    return v;
+}
+
+/* logical OR: || */
+static long long pp_e_lor(PPEval *e) {
+    long long v = pp_e_land(e);
+    for (;;) {
+        pp_e_skip(e);
+        if (pp_e_match(e, "||")) { long long r = pp_e_land(e); v = v || r; }
+        else break;
+    }
+    return v;
+}
+
+/* ternary: a ? b : c */
+static long long pp_e_expr(PPEval *e) {
+    long long c = pp_e_lor(e);
+    pp_e_skip(e);
+    if (*e->s == '?') {
+        e->s++;
+        long long t = pp_e_expr(e);
+        pp_e_skip(e);
+        if (*e->s == ':') e->s++;
+        long long f = pp_e_expr(e);
+        return c ? t : f;
+    }
+    return c;
+}
+
+static long long pp_eval_expr_str(PPState *state, const char *s, int depth) {
+    PPEval e;
+    e.s = s;
+    e.state = state;
+    e.depth = depth;
+    return pp_e_expr(&e);
 }
 
 static void pp_parse_directive(PPState *state) {
@@ -825,8 +990,58 @@ static void pp_expand_ident(PPState *state, const char *ident) {
     int arg_idx = 0;
     int in_string = 0;
     int in_char = 0;
+    int in_comment = 0;
     while (pp_peek(state) != 0) {
         c = pp_peek(state);
+
+        /* PP-COMMENT-ARG-FIX: track block comments inside macro args so
+           that apostrophes and quotes inside them do not toggle in_char
+           or in_string state. Copy characters through verbatim. */
+        if (!in_string && !in_char) {
+            if (!in_comment && c == '/' && state->src[state->pos + 1] == '*') {
+                in_comment = 1;
+                if (p_count < PP_MAX_PARAMS) {
+                    if (arg_idx >= arg_caps[p_count] - 2) {
+                        arg_caps[p_count] *= 2;
+                        args[p_count] = (char *)realloc(args[p_count], arg_caps[p_count]);
+                    }
+                    args[p_count][arg_idx++] = pp_next(state);
+                    args[p_count][arg_idx++] = pp_next(state);
+                    args[p_count][arg_idx] = 0;
+                } else {
+                    pp_next(state); pp_next(state);
+                }
+                continue;
+            }
+            if (in_comment && c == '*' && state->src[state->pos + 1] == '/') {
+                in_comment = 0;
+                if (p_count < PP_MAX_PARAMS) {
+                    if (arg_idx >= arg_caps[p_count] - 2) {
+                        arg_caps[p_count] *= 2;
+                        args[p_count] = (char *)realloc(args[p_count], arg_caps[p_count]);
+                    }
+                    args[p_count][arg_idx++] = pp_next(state);
+                    args[p_count][arg_idx++] = pp_next(state);
+                    args[p_count][arg_idx] = 0;
+                } else {
+                    pp_next(state); pp_next(state);
+                }
+                continue;
+            }
+        }
+        if (in_comment) {
+            if (p_count < PP_MAX_PARAMS) {
+                if (arg_idx >= arg_caps[p_count] - 1) {
+                    arg_caps[p_count] *= 2;
+                    args[p_count] = (char *)realloc(args[p_count], arg_caps[p_count]);
+                }
+                args[p_count][arg_idx++] = c;
+                args[p_count][arg_idx] = 0;
+            }
+            pp_next(state);
+            continue;
+        }
+
         
         if (c == '\\') {
             pp_next(state);
