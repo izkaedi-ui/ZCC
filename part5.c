@@ -1061,6 +1061,58 @@ static void security_bounds_scan(Compiler *cc, char *filename) {
 /* Forward declaration for IR pass manager (linked separately) */
 void ir_pm_run_default(void *mod_ptr, int verbose);
 
+/* JIT-C mode flag — file-scope to avoid perturbing main()'s stack layout
+ * during self-hosting (adding locals to main shifts regalloc intervals). */
+static int jit_c_mode = 0;
+
+/* JIT-C execution path — extracted from main() to avoid polluting main's
+ * stack frame with extra locals that shift the regalloc during self-host.
+ * Returns the process exit code (0 = success). */
+static int jit_c_execute(void) {
+    extern void *evm_jit_compile(void *func, void *mem, size_t *out_size);
+    typedef long (*JitMainFunc)(void);
+    ir_func_t *main_fn;
+    int fi;
+    size_t code_size;
+    void *entry;
+
+    if (!g_ir_module) {
+        printf("[jit-c] ERROR: no IR module generated\n");
+        return 1;
+    }
+
+    main_fn = 0;
+    for (fi = 0; fi < g_ir_module->func_count; fi++) {
+        if (strcmp(g_ir_module->funcs[fi]->name, "main") == 0) {
+            main_fn = g_ir_module->funcs[fi];
+            break;
+        }
+    }
+    if (!main_fn) {
+        printf("[jit-c] ERROR: no 'main' function found in IR module\n");
+        return 1;
+    }
+
+    printf("[jit-c] IR module: %d funcs, lowering '%s'...\n",
+           g_ir_module->func_count, main_fn->name);
+
+    code_size = 0;
+    entry = evm_jit_compile(main_fn, 0, &code_size);
+    if (!entry) {
+        printf("[jit-c] ERROR: JIT compilation failed\n");
+        return 1;
+    }
+
+    printf("[jit-c] Compiled %zu bytes. Executing...\n", code_size);
+
+    {
+        JitMainFunc jit_main = (JitMainFunc)entry;
+        long result = jit_main();
+        printf("[jit-c] main() returned: %ld\n", result);
+        return (int)result;
+    }
+}
+
 int main(int argc, char **argv) {
   Compiler *cc;
   FrontendLang frontend_lang;
@@ -1191,6 +1243,9 @@ int main(int argc, char **argv) {
       jit_mode = 1;
       i++;
       if (i < argc) input_file = argv[i];
+    } else if (strcmp(argv[i], "--jit-c") == 0) {
+      jit_c_mode = 1;
+      g_emit_ir = 1;
     } else if (strcmp(argv[i], "--prove") == 0) {
       prove_mode = 1;
       i++;
@@ -1283,6 +1338,7 @@ int main(int argc, char **argv) {
     printf("  --rust-strict   enable both strict let annotations and strict function signatures\n");
     printf("  --decompile <file>  decompile EVM bytecode to C pseudo-code\n");
     printf("  --jit <file>        compile EVM bytecode to native x86 machine code\n");
+    printf("  --jit-c             compile C source to IR, JIT execute in memory\n");
     printf("  --prove <file> <prop> run symbolic proofs on EVM bytecode\n");
     printf("  --memory-trace      enable full symbolic memory dump\n");
     printf("  --abi             force full ABI reconstruction\n");
@@ -1474,8 +1530,11 @@ int main(int argc, char **argv) {
     asm_file[al + 2] = 0;
   }
 
+  /* JIT-C mode: discard asm output — write to /dev/null.
+   * g_emit_ir is already set from arg parsing. */
+  cc->out = fopen(jit_c_mode ? "/dev/null" : asm_file, "w");
+
   /* open output */
-  cc->out = fopen(asm_file, "w");
   if (!cc->out) {
     if (!enable_telemetry_stdout) printf("zcc: cannot write '%s'\n", asm_file);
     free(source);
@@ -1508,6 +1567,13 @@ int main(int argc, char **argv) {
   fprintf(cc->out, "# ZCC asm begin\n");
   codegen_program(cc, prog);
   fclose(cc->out);
+
+  /* ── JIT-C execution path ──────────────────────────────────────── */
+  if (jit_c_mode) {
+    ret = jit_c_execute();
+    free(source); free(cc);
+    return ret;
+  }
 
   /* IR pass manager — runs when --ir flag is active */
   if (g_ir_primary && g_ir_module) {
@@ -1550,7 +1616,7 @@ int main(int argc, char **argv) {
     if (compile_only) {
       sprintf(cmd, "gcc -O0 -w -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -w -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_symbolic_cfg.c ir_dominance.c ir_vuln_tag.c evm_lifter.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -w -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c transient_state.c ir_pass_warden.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c ir_vuln_tag.c evm_lifter.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/jit_lower.c src/evm/jit_evm_runtime.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -w -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file, extra_link_args);
     }
