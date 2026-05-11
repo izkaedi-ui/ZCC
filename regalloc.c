@@ -92,7 +92,8 @@ void ra_free(RegAllocator *ra) {
 static int iv_cmp_start(const void *a, const void *b) {
     const LiveInterval *ia = (const LiveInterval *)a;
     const LiveInterval *ib = (const LiveInterval *)b;
-    return ia->start - ib->start;
+    if (ia->start != ib->start) return ia->start - ib->start;
+    return strcmp(ia->name, ib->name);
 }
 
 /* ── Phase 1: Build live intervals ──────────────────────────────────── */
@@ -125,6 +126,8 @@ static void build_intervals(RegAllocator *ra, const ir_func_t *fn) {
 }
 
 /* ── Phase 2: Chaitin-Briggs Graph Coloring ──────────────────────────── */
+static const PhysReg gpr_colors[7] = {PREG_RBX, PREG_R12, PREG_R13, PREG_R14, PREG_R15, PREG_R10, PREG_R11};
+static const PhysReg xmm_colors[8] = {PREG_XMM0, PREG_XMM1, PREG_XMM2, PREG_XMM3, PREG_XMM4, PREG_XMM5, PREG_XMM6, PREG_XMM7};
 
 static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     int N = ra->num_intervals;
@@ -137,6 +140,19 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     int *removed;
     int *stack;
     int *alias;
+    int *color;
+    int c;
+    int overlap;
+    int u, v;
+    int target;
+    int K;
+    int used_colors;
+    int root;
+    int len;
+    double max_metric;
+    double metric;
+    PhysReg preg;
+    const ir_node_t *n;
 
     if (N <= 0) return;
 
@@ -153,7 +169,7 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     for (i = 0; i < N; i++) {
         for (j = i + 1; j < N; j++) {
             if (ra->intervals[i].is_float != ra->intervals[j].is_float) continue;
-            int overlap = (ra->intervals[i].start <= ra->intervals[j].end && ra->intervals[j].start <= ra->intervals[i].end);
+            overlap = (ra->intervals[i].start <= ra->intervals[j].end && ra->intervals[j].start <= ra->intervals[i].end);
             if (overlap) {
                 adj[i*N + j] = 1;
                 adj[j*N + i] = 1;
@@ -164,10 +180,10 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     }
 
     /* Coalesce copies */
-    const ir_node_t *n;
     for (n = fn->head; n; n = n->next) {
         if (n->op == IR_COPY && is_temp(n->dst) && is_temp(n->src1)) {
-            int u = -1, v = -1;
+            u = -1;
+            v = -1;
             for (i = 0; i < N; i++) {
                 if (strcmp(ra->intervals[i].name, n->dst) == 0) u = i;
                 if (strcmp(ra->intervals[i].name, n->src1) == 0) v = i;
@@ -197,10 +213,10 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     for (i = 0; i < N; i++) if (!removed[i]) nodes_left++;
 
     while (nodes_left > 0) {
-        int target = -1;
+        target = -1;
         for (i = 0; i < N; i++) {
             if (removed[i]) continue;
-            int K = ra->intervals[i].is_float ? 8 : 7;
+            K = ra->intervals[i].is_float ? 8 : 7;
             if (degree[i] < K) {
                 target = i;
                 break;
@@ -209,12 +225,12 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
 
         if (target == -1) {
             /* Spill: pick node with highest degree / lowest cost */
-            double max_metric = -1.0;
+            max_metric = -1.0;
             for (i = 0; i < N; i++) {
                 if (!removed[i]) {
-                    int len = ra->intervals[i].end - ra->intervals[i].start + 1;
-                    double metric = (double)degree[i] / (double)len; 
-                    if (metric > max_metric) {
+                    len = ra->intervals[i].end - ra->intervals[i].start + 1;
+                    metric = (double)degree[i] / (double)len; 
+                    if (metric > max_metric || (metric == max_metric && target != -1 && strcmp(ra->intervals[i].name, ra->intervals[target].name) < 0)) {
                         max_metric = metric;
                         target = i;
                     }
@@ -235,27 +251,17 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
 
     /* Select Colors */
     for (i = 0; i < N; i++) removed[i] = 0;
-    {
-    int *color = (int *)calloc(N, sizeof(int));
-    int c;
+    color = (int *)calloc(N, sizeof(int));
     for (i = 0; i < N; i++) color[i] = -1;
 
-    /* Canonical callee-save preference order matching GCC: rbx first.
-     * CRITICAL: this order must be stable across ZCC stage-1 and stage-2
-     * or the register coloring will produce different assembly. r10/r11 are
-     * caller-saved scratch — prefer them last to minimize push/pop in hot
-     * paths, but keep them after all callee-saved to maintain the canon. */
-    PhysReg gpr_colors[7] = {PREG_RBX, PREG_R12, PREG_R13, PREG_R14, PREG_R15, PREG_R10, PREG_R11};
-    PhysReg xmm_colors[8] = {PREG_XMM0, PREG_XMM1, PREG_XMM2, PREG_XMM3, PREG_XMM4, PREG_XMM5, PREG_XMM6, PREG_XMM7};
-
     while (stack_top > 0) {
-        int target = stack[--stack_top];
-        int K = ra->intervals[target].is_float ? 8 : 7;
-        int used_colors = 0;
+        target = stack[--stack_top];
+        K = ra->intervals[target].is_float ? 8 : 7;
+        used_colors = 0;
 
         for (j = 0; j < N; j++) {
             if (removed[j] && adj[target*N + j]) {
-                int c = color[alias[j]];
+                c = color[alias[j]];
                 if (c != -1) used_colors |= (1 << c);
             }
         }
@@ -274,11 +280,11 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
 
     /* Assign to struct */
     for (i = 0; i < N; i++) {
-        int root = i;
+        root = i;
         while (alias[root] != root) root = alias[root];
         c = color[root];
         if (c != -1) {
-            PhysReg preg = ra->intervals[i].is_float ? xmm_colors[c] : gpr_colors[c];
+            preg = ra->intervals[i].is_float ? xmm_colors[c] : gpr_colors[c];
             ra->intervals[i].assigned = preg;
             ra->used[preg] = 1;
         } else {
@@ -287,7 +293,6 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     }
 
     free(color);
-    } /* end color block */
 
     free(adj);
     free(degree);
