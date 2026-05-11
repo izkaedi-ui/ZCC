@@ -148,9 +148,6 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
     int K;
     int used_colors;
     int root;
-    int len;
-    double max_metric;
-    double metric;
     PhysReg preg;
     const ir_node_t *n;
 
@@ -224,15 +221,22 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
         }
 
         if (target == -1) {
-            /* Spill: pick node with highest degree / lowest cost */
-            max_metric = -1.0;
+            /* Spill: pick node with highest degree / lowest cost using integer cross-multiplication */
             for (i = 0; i < N; i++) {
                 if (!removed[i]) {
-                    len = ra->intervals[i].end - ra->intervals[i].start + 1;
-                    metric = (double)degree[i] / (double)len; 
-                    if (metric > max_metric || (metric == max_metric && target != -1 && strcmp(ra->intervals[i].name, ra->intervals[target].name) < 0)) {
-                        max_metric = metric;
+                    if (target == -1) {
                         target = i;
+                    } else {
+                        int len_i = ra->intervals[i].end - ra->intervals[i].start + 1;
+                        int len_t = ra->intervals[target].end - ra->intervals[target].start + 1;
+                        
+                        /* Compare (degree[i] / len_i) > (degree[target] / len_t) */
+                        long long score_i = (long long)degree[i] * len_t;
+                        long long score_t = (long long)degree[target] * len_i;
+                        
+                        if (score_i > score_t || (score_i == score_t && strcmp(ra->intervals[i].name, ra->intervals[target].name) < 0)) {
+                            target = i;
+                        }
                     }
                 }
             }
