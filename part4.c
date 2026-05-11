@@ -597,6 +597,11 @@ static int ptr_elem_size(Type *type) {
 }
 
 /* ---------------------------------------------------------------- */
+/* Designated lowering hook for intelligent backend */
+__attribute__((weak)) Node* zcc_lower_designated(Compiler *cc, Node *des_node) {
+    return 0; /* Fallback: not lowered by intelligent backend */
+}
+
 /* Expression codegen — result in %rax                               */
 /* ---------------------------------------------------------------- */
 
@@ -626,13 +631,21 @@ void codegen_expr(Compiler *cc, Node *node) {
     fprintf(cc->out, "    movq $0, %%rax\n");
     return;
   }
-  if (node->kind < ND_NUM || node->kind > ND_NOP) {
+  if (node->kind < ND_NUM || node->kind > ND_DESIGNATED_INIT) {
     sprintf(errbuf, "codegen_expr: invalid kind %d (0x%x) at %p", node->kind,
             node->kind, (void *)node);
     error_at(cc, node->line, errbuf);
     return;
   }
   guard_node(cc, node);
+
+  if (node->kind == ND_DESIGNATED_INIT) {
+      Node *lowered = zcc_lower_designated(cc, node);
+      if (lowered) {
+          codegen_expr(cc, lowered); /* or hand to Rust backend */
+      }
+      return;
+  }
 
   switch (node->kind) {
 
@@ -3658,9 +3671,14 @@ static int allocate_registers(Node *func) {
   int count = 0;
   int i, j, r;
   int param_limit = -(func->num_params * 8);
-  char *active_regs[5] = {0, 0, 0, 0, 0};
-  int active_ends[5] = {0, 0, 0, 0, 0};
+  char *active_regs[5];
+  int active_ends[5];
   int used_regs_bitmask = 0;
+
+  for (r = 0; r < 5; r++) {
+    active_regs[r] = 0;
+    active_ends[r] = 0;
+  }
 
   num_ra_locals = 0;
   pseudo_pc = 1;
@@ -3682,7 +3700,9 @@ static int allocate_registers(Node *func) {
 
   for (i = 0; i < num_ra_locals; i++) {
     for (j = i + 1; j < num_ra_locals; j++) {
-      if (ra_locals[j]->live_start < ra_locals[i]->live_start) {
+      if (ra_locals[j]->live_start < ra_locals[i]->live_start ||
+          (ra_locals[j]->live_start == ra_locals[i]->live_start &&
+           strcmp(ra_locals[j]->name, ra_locals[i]->name) < 0)) {
         Symbol *t = ra_locals[i];
         ra_locals[i] = ra_locals[j];
         ra_locals[j] = t;
@@ -4509,6 +4529,57 @@ static void fold_constants(Compiler *cc, Node *node) {
   }
 }
 
+#ifndef _WIN32
+extern void *dlopen(const char *filename, int flag);
+extern char *dlerror(void);
+extern void *dlsym(void *handle, const char *symbol);
+extern int dlclose(void *handle);
+#define RTLD_NOW 2
+#define RTLD_LOCAL 0
+#endif
+
+ZccCodegenPlugin* active_plugin = NULL;
+
+ZccCodegenPlugin* zcc_load_codegen_plugin(const char* path) {
+#ifndef _WIN32
+    void* handle;
+    typedef ZccCodegenPlugin* (*CreateFn)(void);
+    CreateFn create_fn;
+    
+    handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        fprintf(stderr, "[ZCC] Failed to load plugin %s: %s\n", path, dlerror());
+        return NULL;
+    }
+    create_fn = (CreateFn)dlsym(handle, "zcc_create_plugin");
+    if (!create_fn) {
+        fprintf(stderr, "[ZCC] Plugin %s missing zcc_create_plugin\n", path);
+        dlclose(handle);
+        return NULL;
+    }
+    return create_fn();
+#else
+    return NULL;
+#endif
+}
+
+void zcc_unload_codegen_plugin(ZccCodegenPlugin* plugin) {
+    if (plugin && plugin->destroy) {
+        plugin->destroy(plugin);
+    }
+}
+
+void zcc_try_load_intelligent_codegen(void) {
+    const char* plugin_path = getenv("ZCC_CODEGEN_PLUGIN");
+    if (plugin_path) {
+        active_plugin = zcc_load_codegen_plugin(plugin_path);
+        if (active_plugin) {
+            printf("[ZCC] Loaded intelligent codegen plugin: %s (v%d)\n", 
+                   active_plugin->name, active_plugin->version);
+        }
+    }
+}
+
 void codegen_program(Compiler *cc, Node *prog) {
   Node *n;
   int i;
@@ -4519,20 +4590,38 @@ void codegen_program(Compiler *cc, Node *prog) {
   if (!prog)
     return;
 
+  zcc_try_load_intelligent_codegen();
+
   /* Linux: avoid "missing .note.GNU-stack" linker warning */
   if (!backend_ops) fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
   if (cc->filename) {
     fprintf(cc->out, "    .file 1 \"%s\"\n", cc->filename);
   }
 
-  /* Emit functions */
-  n = prog;
-  while (n) {
-    if (n->kind == ND_FUNC_DEF) {
-      fold_constants(cc, n);
-      codegen_func(cc, n);
-    }
-    n = n->next;
+  if (active_plugin && active_plugin->emit_function) {
+      for (n = prog; n; n = n->next) {
+          if (active_plugin->can_handle && active_plugin->can_handle(n)) {
+              if (n->kind == ND_FUNC_DEF) active_plugin->emit_function(cc, n);
+              else if (n->kind == ND_GLOBAL_VAR && active_plugin->emit_global) active_plugin->emit_global(cc, n);
+          } else {
+              /* Fallback */
+              if (n->kind == ND_FUNC_DEF) {
+                  fold_constants(cc, n);
+                  codegen_func(cc, n);
+              }
+          }
+      }
+      if (active_plugin->optimize_pass) active_plugin->optimize_pass(cc, prog);
+  } else {
+      /* Emit functions */
+      n = prog;
+      while (n) {
+        if (n->kind == ND_FUNC_DEF) {
+          fold_constants(cc, n);
+          codegen_func(cc, n);
+        }
+        n = n->next;
+      }
   }
 
   /* Deduplicate tentative definitions: keep only one instance (prioritizing initializers) */
