@@ -20,9 +20,11 @@ fail() {
   exit 1
 }
 
-echo "[RUN] $name"
+ZCC="${2:-./zcc}"
 
-./zcc "$file" -o "$zcc_s" \
+echo "[RUN] $name (using $ZCC)"
+
+"$ZCC" "$file" -o "$zcc_s" \
   || fail "ZCC compile failed"
 
 gcc "$zcc_s" -o "$zcc_bin" -lm \
