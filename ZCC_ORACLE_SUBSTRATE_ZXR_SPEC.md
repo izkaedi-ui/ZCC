@@ -291,9 +291,66 @@ By decoupling validation from platform environmental limits, ZCC establishes a *
 - **Cross-Machine Consensus**: Compiling identical C sources on heterogeneous targets (WSL, Windows, ARM64 bare-metal) produces mathematically convergent `.zproof` theorem chains, even when machine-specific instruction scheduling varies.
 - **Trustless Replay**: Remote build swarms can replay `.zxr` records and verify `.zproof` certificates natively without needing to trust the host compiler executable or execution environment.
 
+### 🔱 7.8 Cryptographic Computational Attestations (`zcc --attest`)
+To formalize public/private attestation keys on build artifacts, ZCC natively verifies the proof structures:
+```bash
+zcc --attest artifact.zxr artifact.zproof
+```
+* **Oracle Verification Output**:
+  ```text
+  COMPUTATION VERIFIED
+
+  semantic domains:
+    ABI ........ VERIFIED
+    CFG ........ VERIFIED
+    REGALLOC ... VERIFIED
+    STACK ....... VERIFIED
+    PEEPHOLE .... VERIFIED
+
+  consensus:
+    7/7 remote nodes converged
+
+  artifact trust:
+    CRYPTOGRAPHICALLY ATTESTED
+  ```
+
 ---
 
-## 🔱 8. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
+## 🔱 8. MINIMAL VIABLE IMPLEMENTATION BLUEPRINT
+
+To guarantee structured execution without compounding complexity, implementation progresses through three highly focused developmental phases:
+
+### 🔱 Phase A: Deterministic Pass Event Recorder
+Embeds lightweight event tracking primitives directly inside the compiler driver:
+* **Primitives**:
+  - `record_pass_begin(const char *pass_name)`
+  - `record_pass_end(const char *pass_name)`
+  - `record_transform(const char *pass_name, uint64_t node_id, const char *transform_details)`
+* **Active Passes Instrumented**: Only `constant_folding`, `peephole`, and `regalloc`.
+* **Objective**: Verifies that compiler decision topology is mathematically stable under randomized environment vectors before compiling binary records.
+
+### 🔱 Phase B: Canonical CFG Fingerprinter
+Establishes ZCC’s first semantic intermediate representation fingerprinting layer:
+* **Lowering Rules**:
+  - Emits CFG block lists in strictly deterministic Depth-First Search (DFS) topological order.
+  - Implements stable virtual node IDs and canonical control-flow edge sorting.
+* **Objective**: Validates that compiled multi-stage outputs (`zcc`, `zcc2`, `zcc3`) yield exactly convergent semantic CFG fingerprints.
+
+### 🔱 Phase C: Push/Pop Micro-Theorem Prototype
+Implements ZCC’s first native SMT transformation correctness proof block, focused exclusively on stack instruction elimination:
+* **Target Pattern**:
+  ```asm
+  push %rax
+  pop  %rax
+  ```
+* **Theorem Verified**:
+  - **Stack Depth Parity**: Prove that stack offset adjustments equal 0.
+  - **Register Value Preservation**: Prove that `%rax` state contains identical semantic values post-elimination.
+  - **Control Flags Invariance**: Prove that conditional flags register remains unperturbed.
+
+---
+
+## 🔱 9. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
 
 ```text
   [Self-Host Compiler]
