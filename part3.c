@@ -2538,6 +2538,72 @@ static Node *parse_initializer_list(Compiler *cc, int *out_count) {
     return list;
 }
 
+int g_init_list_nodes = 0;
+int g_max_init_depth = 0;
+
+static int compute_initializer_depth(Node *init) {
+    if (!init || init->kind != ND_INIT_LIST) return 0;
+    int max_child_depth = 0;
+    for (int i = 0; i < init->num_args; i++) {
+        int d = compute_initializer_depth(init->args[i]);
+        if (d > max_child_depth) max_child_depth = d;
+    }
+    return 1 + max_child_depth;
+}
+
+static void validate_initializer_dimensions(Compiler *cc, Type *t, Node *init) {
+    if (!t || !init) return;
+    
+    if (init->kind == ND_INIT_LIST) {
+        g_init_list_nodes++;
+        
+        int depth = compute_initializer_depth(init);
+        if (depth > g_max_init_depth) {
+            g_max_init_depth = depth;
+        }
+        
+        if (t->kind == TY_ARRAY) {
+            int len = t->array_len;
+            if (len > 0 && init->num_args > len) {
+                error_at(cc, init->line, "excess elements in array initializer");
+            }
+            Type *elem_type = t->base;
+            for (int i = 0; i < init->num_args; i++) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, elem_type, item);
+                }
+            }
+        } else if (t->kind == TY_STRUCT || t->kind == TY_UNION) {
+            StructField *f = t->fields;
+            int field_count = 0;
+            while (f) { field_count++; f = f->next; }
+            
+            if (init->num_args > field_count && t->kind == TY_STRUCT) {
+                error_at(cc, init->line, "excess elements in struct initializer");
+            }
+            
+            f = t->fields;
+            for (int i = 0; i < init->num_args && f != NULL; i++, f = f->next) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, f->type, item);
+                }
+            }
+        } else {
+            if (init->num_args > 1) {
+                error_at(cc, init->line, "excess elements in scalar initializer");
+            }
+            for (int i = 0; i < init->num_args; i++) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, t, item);
+                }
+            }
+        }
+    }
+}
+
 static void emit_local_initializer(Compiler *cc, Node *block, int *cnt, int *cap, Node *base_var, Type *curr_type, Node *init_list, int offset) {
     if (curr_type->kind == TY_ARRAY) {
         Type *elem_type = curr_type->base;
@@ -3034,6 +3100,7 @@ Node *parse_stmt(Compiler *cc) {
                                 strncpy(var_node->name, vname, MAX_IDENT - 1);
                                 var_node->sym = sym;
                                 var_node->type = arr_type;
+                                validate_initializer_dimensions(cc, arr_type, init_list);
                                 emit_local_initializer(cc, block, &cnt, &cap, var_node, arr_type, init_list, 0);
                             }
                         } else {
@@ -3108,6 +3175,13 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
     expect(cc, TK_LPAREN);
     scope_push(cc);
     cc->local_offset = 0;
+    if (ret_type && (ret_type->kind == TY_STRUCT || ret_type->kind == TY_UNION)) {
+        abi_class_t eb[2];
+        classify_aggregate(ret_type, eb);
+        if (eb[0] == CLASS_MEMORY) {
+            cc->local_offset = -8;
+        }
+    }
 
     func->num_params = 0;
     if (cc->tk != TK_RPAREN) {
@@ -3199,14 +3273,15 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
         func->func_type = ftype;
 
         /* add to parent scope (global) */
-        fsym = scope_find(cc, name);
-        if (!fsym) {
-            /* temporarily pop to add to parent */
+        {
             Scope *cur;
             cur = cc->current_scope;
             cc->current_scope = cur->parent;
-            fsym = scope_add(cc, name, ftype);
-            fsym->is_global = 1;
+            fsym = scope_find(cc, name);
+            if (!fsym) {
+                fsym = scope_add(cc, name, ftype);
+                fsym->is_global = 1;
+            }
             cc->current_scope = cur;
         }
     }
