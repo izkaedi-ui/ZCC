@@ -230,7 +230,47 @@ ROOT CAUSE IDENTIFIED:
 
 ---
 
-## 🔱 7. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
+## 🔱 7. PROOF-CARRYING COMPILATION & MATHEMATICAL PROVENANCE
+
+To bridge deterministic execution tracking with mathematically checkable transformation proofs, ZCC natively supports **Proof-Carrying Compilation**.
+
+### 🔱 7.1 Proof Record Command Interface
+* **Emit Proof Verification Chains**:
+  ```bash
+  zcc --emit-proof-record kernel.c
+  ```
+  This command produces:
+  - `kernel.zxr`: The deterministic execution history block.
+  - `kernel.zproof`: The SMT-verifiable transformation correctness chain.
+
+### 🔱 7.2 Symbolic ABI Invariant Proofs (`--oracle-abi-proof`)
+Instead of behavioral checking, ZCC symbolically executes argument lowering and stack allocation pathways to verify absolute SysV conformance:
+```bash
+zcc --oracle-abi-proof file.c
+```
+* **Theorems Verified**:
+  - **Register Assignment Legality**: Prove that registers assigned to parameters match the exact SystemV AMD64 eightbyte classification sequence.
+  - **Non-Overlapping Stack domains**: Prove that stack-based arguments, local variables, and spill slots possess strictly disjoint physical addresses.
+  - **Alignment Restoration**: Prove that the stack pointer remains aligned to a 16-byte boundary at every external callsite transition.
+
+### 🔱 7.3 Granular Intermediate Replay (`--replay-until-pass <pass>`)
+To support localized, time-travel debugging of compilation pipelines, execution records can be replayed up to an arbitrary optimization or lowering phase:
+```bash
+zcc --replay-until-pass regalloc kernel.zxr
+```
+This halts execution immediately at the specified phase, yielding:
+- The exact state of the Control Flow Graph (CFG) at that moment.
+- Active virtual register pressure maps.
+- Graph coloring or spilling decisions responsible for the allocation.
+
+### 🔱 7.4 Semantic vs Syntactic Determinism Invariants
+While syntactic determinism (generating byte-identical machine assembly) is an exceptional baseline, ZCC formalizes **Semantic Determinism**:
+- **Syntactic Parity**: Evaluates if instruction layouts, register mappings, and block sequences are bitwise identical.
+- **Semantic Equivalence**: Evaluates if optimization schedules (e.g. branch scheduling, loop unrolling, or register substitutions) preserve semantic control-flow dominance structures and value mappings, even when syntactic layouts vary for target architecture tuning.
+
+---
+
+## 🔱 8. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
 
 ```text
   [Self-Host Compiler]
