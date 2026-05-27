@@ -350,7 +350,33 @@ Implements ZCC’s first native SMT transformation correctness proof block, focu
 
 ---
 
-## 🔱 9. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
+## 🔱 9. SOVEREIGN SYSTEMS VERIFICATION DOCTRINE
+
+To prevent observational telemetry and proof structures from perturbing active compiler logic, ZCC establishes strict domain boundaries:
+
+### 🔱 9.1 The Separation of Observational Domains
+By isolating computation paths, ZCC guarantees that debugging hooks, telemetry emissions, and oracle evaluations have zero semantic side-effects on codegen:
+$$\text{AST Codegen} \neq \text{SSA IR Experimentation} \neq \text{Telemetry Substrate} \neq \text{Oracle Substrate} \neq \text{Proof Substrate}$$
+
+### 🔱 9.2 AST Sovereignty vs Parallel IR Observation
+* **AST Authority**: The Abstract Syntax Tree remains the canonical and sovereign authority of truth for native codegen and compiler bootstraps.
+* **Parallel IR**: The SSA intermediate representation behaves as a strictly parallel observer of truth. This prevents PHI-node instability or CFG block ordering shifts from polluting recursive Stage-2 and Stage-3 compiler self-host loops.
+
+### 🔱 9.3 Fixed-Point Convergence under Observation
+Byte-identical assembly parity (`zcc2.s == zcc3.s`) ceases to be a simple bootstrap checklist and becomes a formal **Fixed-Point Convergence Theorem**. This proof-by-induction demonstrates that the ZCC compiler remains a stable and invariant system under recursive self-compilation, even when tracing environmental variables and logging telemetry.
+
+### 🔱 9.4 The Recursive ML Cognitive Feedback Loop
+The compiler acts as its own high-fidelity dataset generator, initiating a self-hardening cognitive feedback loop:
+1. **Emit**: Target compilations generate canonicalized Intermediate Representation (IR) streams.
+2. **Train**: The emitted IR trains external ML anomaly/pattern analyzers.
+3. **Discover**: Analyzers uncover subtle optimization pathologies or semantic vulnerabilities.
+4. **Generate**: Discoveries generate new, rigorous battle sentinels.
+5. **Harden**: Sentinels automatically lock and secure compiler-native invariant domains.
+6. **Recompile**: The hardened compiler outputs structurally superior, safer IR telemetry.
+
+---
+
+## 🔱 10. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
 
 ```text
   [Self-Host Compiler]
