@@ -152,6 +152,7 @@ To ensure absolute, cross-platform reproducibility, the `.zxr` binary format enf
 ```json
 {
   "zxr_version": "1.0.0",
+  "deterministic_epoch": 1,
   "compiler_version": "zcc_prime_1.1.0",
   "source_identity": {
     "filename": "kernel.c",
@@ -188,7 +189,48 @@ To ensure absolute, cross-platform reproducibility, the `.zxr` binary format enf
 
 ---
 
-## 🔱 5. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
+## 🔱 5. STRICT CANONICAL SERIALIZATION INVARIANTS
+
+To guarantee absolute cross-machine and multi-year compilation convergence, all `.zxr` files adhere to these strict canonicalization rules:
+
+1. **Little-Endian Binary Representation**: All serialized integers, sizes, offsets, and hashes are written in strictly little-endian format.
+2. **Lexicographical Section Sorting**: All generated sections (such as `.text`, `.data`, `.rodata`, `.bss`) are serialized in strictly lexicographical order.
+3. **Deterministic CFG DFS Traversal**: Intermediate Representation (IR) graphs and Control Flow Graph (CFG) nodes are serialized following a strictly deterministic Depth-First Search (DFS) topological order.
+4. **Stable-Indexed Register Allocation Sequences**: All register allocation sequence blocks are output using stable-indexed virtual register maps.
+5. **No Heap or Temporal Pollution**: Heap-based addresses, ASLR-influenced pointers, compilation wall-clock times, and thread execution schedules are strictly banned from entering the serialization stream.
+6. **Immutable Block Architecture**: Once written, `.zxr` files are completely immutable and represent a cryptographically sealed computation block.
+
+---
+
+## 🔱 6. FORENSIC DRIFT INTROSPECTION (`zcc --explain-drift`)
+
+When comparing two compilations to debug optimization or target variations, ZCC natively introspects the structural `.zxr` deltas:
+```bash
+zcc --explain-drift run_a.zxr run_b.zxr
+```
+
+### 🔱 6.1 Explain-Drift Output Architecture
+```text
+DRIFT DETECTED: REGALLOC DIVERGENCE
+
+FUNCTION:
+  transform()
+
+STRUCTURAL DELTA:
+  vreg_41 allocated register %r12 in run_a.zxr vs spill slot stack[-40] in run_b.zxr
+
+DOWNSTREAM CASCADE:
+  Altered instructions: movq %r12, %rax (run_a) vs movq -40(%rbp), %rax (run_b)
+  Altered peephole collapse chain: 4 instructions elided vs 2 instructions elided
+  Altered binary signature: d320be44ac81... vs 8fa372eb001a...
+
+ROOT CAUSE IDENTIFIED:
+  Pass pipeline ordering divergence inside optimization block.
+```
+
+---
+
+## 🔱 7. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
 
 ```text
   [Self-Host Compiler]
