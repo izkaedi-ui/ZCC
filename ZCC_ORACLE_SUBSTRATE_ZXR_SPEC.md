@@ -268,6 +268,29 @@ While syntactic determinism (generating byte-identical machine assembly) is an e
 - **Syntactic Parity**: Evaluates if instruction layouts, register mappings, and block sequences are bitwise identical.
 - **Semantic Equivalence**: Evaluates if optimization schedules (e.g. branch scheduling, loop unrolling, or register substitutions) preserve semantic control-flow dominance structures and value mappings, even when syntactic layouts vary for target architecture tuning.
 
+### 🔱 7.5 Isolated Micro-Theorem Lattices
+To prevent combinatorial state-space explosion, ZCC breaks down mathematical proofs into highly focused, decoupled **Micro-Theorem Domains**:
+- **Domain A: Peephole Equivalence**: Confirms localized instruction merges are semantic identities.
+- **Domain B: Stack Geometry**: Proves disjoint address alignments for stack-allocated symbols.
+- **Domain C: ABI Lowering**: Certifies SystemV register mappings.
+- **Domain D: CFG Dominance**: Asserts control-flow topology is strictly preserved during block scheduling.
+- **Domain E: Regalloc Interference**: Formally verifies graph coloring validity.
+
+### 🔱 7.6 Automated Drift Bisection (`zcc --bisect-drift`)
+Drifts between sequential or distributed compiles are isolated dynamically:
+```bash
+zcc --bisect-drift run_a.zxr run_b.zxr
+```
+* **Bisection Mechanism**:
+  - Automatically performs a binary search over the `.zxr` compilation pass histories.
+  - pinpoints the first semantic or syntactic divergence.
+  - Identifies the exact optimization function or register coloring pass that triggered the theorem failure.
+
+### 🔱 7.7 Trustless Compilation & Distributed Proof Consensus
+By decoupling validation from platform environmental limits, ZCC establishes a **Verifiable Computational Substrate**:
+- **Cross-Machine Consensus**: Compiling identical C sources on heterogeneous targets (WSL, Windows, ARM64 bare-metal) produces mathematically convergent `.zproof` theorem chains, even when machine-specific instruction scheduling varies.
+- **Trustless Replay**: Remote build swarms can replay `.zxr` records and verify `.zproof` certificates natively without needing to trust the host compiler executable or execution environment.
+
 ---
 
 ## 🔱 8. THE ROADMAP TO CIVILIZATION-SCALE VERIFIABILITY
