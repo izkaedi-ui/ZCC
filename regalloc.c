@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "src/zcc_oracle_substrate.h"
 
 /* ── Physical register table ─────────────────────────────────────────── */
 
@@ -295,8 +296,18 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
             PhysReg preg = ra->intervals[i].is_float ? xmm_colors[c] : gpr_colors[c];
             ra->intervals[i].assigned = preg;
             ra->used[preg] = 1;
+            {
+                char details[256];
+                sprintf(details, "Allocated %s to register %s", ra->intervals[i].name, preg_name(preg));
+                record_transform("regalloc", (uint64_t)i, details);
+            }
         } else {
             ra->intervals[i].assigned = PREG_NONE;
+            {
+                char details[256];
+                sprintf(details, "Spilled %s to stack slot", ra->intervals[i].name);
+                record_transform("regalloc", (uint64_t)i, details);
+            }
         }
     }
 
@@ -313,9 +324,11 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
 /* ── Public entry point ──────────────────────────────────────────────── */
 
 void ra_run(RegAllocator *ra, const ir_func_t *fn) {
+    record_pass_begin("regalloc");
     build_intervals(ra, fn);
     if (ra->num_intervals > 0)
         chaitin_briggs(ra, fn);
+    record_pass_end("regalloc");
 }
 
 /* ── Query API ───────────────────────────────────────────────────────── */
