@@ -384,6 +384,103 @@ int zxr_replay_record(const char *zxr_input_filename) {
             strcpy(ev->details, details);
         }
     }
+
+    int expected_proof_count = 0;
+    static ZXRProof expected_proofs[MAX_ZXR_PROOFS];
+
+    char *proofs_start = strstr(buf, "\"proofs\":");
+    if (proofs_start) {
+        char *p_proof = proofs_start;
+        while (*p_proof) {
+            p_proof = strstr(p_proof, "\"theorem\":");
+            if (!p_proof) break;
+            p_proof += 10;
+            while (*p_proof && (*p_proof == ' ' || *p_proof == '\t' || *p_proof == '\n' || *p_proof == '\r' || *p_proof == '"' || *p_proof == ':')) p_proof++;
+            char th_name[64] = {0};
+            int idx = 0;
+            while (*p_proof && *p_proof != '"' && idx < 63) th_name[idx++] = *p_proof++;
+            th_name[idx] = '\0';
+
+            p_proof = strstr(p_proof, "\"pass\":");
+            if (!p_proof) break;
+            p_proof += 7;
+            while (*p_proof && (*p_proof == ' ' || *p_proof == '\t' || *p_proof == '\n' || *p_proof == '\r' || *p_proof == '"' || *p_proof == ':')) p_proof++;
+            char tgt_pass[64] = {0};
+            idx = 0;
+            while (*p_proof && *p_proof != '"' && idx < 63) tgt_pass[idx++] = *p_proof++;
+            tgt_pass[idx] = '\0';
+
+            uint64_t node_id = 0;
+            int verified = 0;
+            int delta_rsp = 0;
+            int preserves_register = 0;
+            int preserves_flags = 0;
+
+            char *next_obj = strstr(p_proof, "\"theorem\":");
+            #define FIELD_IN_BLOCK(field_ptr) (field_ptr && (!next_obj || field_ptr < next_obj))
+
+            if (strcmp(th_name, "cfg_topology_invariance") == 0) {
+                char *h_ptr = strstr(p_proof, "\"pre_hash\":");
+                if (FIELD_IN_BLOCK(h_ptr)) {
+                    h_ptr += 11;
+                    while (*h_ptr && (*h_ptr == ' ' || *h_ptr == '\t' || *h_ptr == '\n' || *h_ptr == '\r' || *h_ptr == '"' || *h_ptr == ':')) h_ptr++;
+                    if (h_ptr[0] == '0' && h_ptr[1] == 'x') {
+                        node_id = strtoull(h_ptr + 2, NULL, 16);
+                    } else {
+                        node_id = strtoull(h_ptr, NULL, 10);
+                    }
+                }
+                verified = 1;
+                delta_rsp = 0;
+                preserves_register = 1;
+                preserves_flags = 1;
+            } else {
+                char *nid_ptr = strstr(p_proof, "\"node_id\":");
+                if (FIELD_IN_BLOCK(nid_ptr)) {
+                    nid_ptr += 10;
+                    while (*nid_ptr && (*nid_ptr == ' ' || *nid_ptr == '\t' || *nid_ptr == '\n' || *nid_ptr == '\r' || *nid_ptr == ':')) nid_ptr++;
+                    node_id = strtoull(nid_ptr, NULL, 10);
+                }
+                char *ver_ptr = strstr(p_proof, "\"verified\":");
+                if (FIELD_IN_BLOCK(ver_ptr)) {
+                    ver_ptr += 11;
+                    while (*ver_ptr && (*ver_ptr == ' ' || *ver_ptr == '\t' || *ver_ptr == '\n' || *ver_ptr == '\r' || *ver_ptr == ':')) ver_ptr++;
+                    verified = atoi(ver_ptr);
+                }
+                char *drsp_ptr = strstr(p_proof, "\"delta_rsp\":");
+                if (FIELD_IN_BLOCK(drsp_ptr)) {
+                    drsp_ptr += 12;
+                    while (*drsp_ptr && (*drsp_ptr == ' ' || *drsp_ptr == '\t' || *drsp_ptr == '\n' || *drsp_ptr == '\r' || *drsp_ptr == ':')) drsp_ptr++;
+                    delta_rsp = atoi(drsp_ptr);
+                }
+                char *preg_ptr = strstr(p_proof, "\"preserves_register\":");
+                if (FIELD_IN_BLOCK(preg_ptr)) {
+                    preg_ptr += 21;
+                    while (*preg_ptr && (*preg_ptr == ' ' || *preg_ptr == '\t' || *preg_ptr == '\n' || *preg_ptr == '\r' || *preg_ptr == ':')) preg_ptr++;
+                    preserves_register = atoi(preg_ptr);
+                }
+                char *pflg_ptr = strstr(p_proof, "\"preserves_flags\":");
+                if (FIELD_IN_BLOCK(pflg_ptr)) {
+                    pflg_ptr += 18;
+                    while (*pflg_ptr && (*pflg_ptr == ' ' || *pflg_ptr == '\t' || *pflg_ptr == '\n' || *pflg_ptr == '\r' || *pflg_ptr == ':')) pflg_ptr++;
+                    preserves_flags = atoi(pflg_ptr);
+                }
+            }
+            #undef FIELD_IN_BLOCK
+
+            if (expected_proof_count < MAX_ZXR_PROOFS) {
+                ZXRProof *proof = &expected_proofs[expected_proof_count++];
+                strcpy(proof->theorem_name, th_name);
+                strcpy(proof->target_pass, tgt_pass);
+                proof->node_id = node_id;
+                proof->verified = verified;
+                proof->delta_rsp = delta_rsp;
+                proof->preserves_register = preserves_register;
+                proof->preserves_flags = preserves_flags;
+            }
+        }
+    }
+
     free(buf);
 
     fprintf(stderr, "[ZXR-REPLAY] Comparing %d replayed events with %d actual events...\n", expected_count, g_zxr_event_count);
@@ -409,7 +506,35 @@ int zxr_replay_record(const char *zxr_input_filename) {
         mismatch = 1;
     }
 
-    if (mismatch) {
+    fprintf(stderr, "[ZXR-REPLAY] Comparing %d replayed proofs with %d actual proofs...\n", expected_proof_count, g_zxr_proof_count);
+    int proof_mismatch = 0;
+    int proof_limit = (expected_proof_count < g_zxr_proof_count) ? expected_proof_count : g_zxr_proof_count;
+    for (int i = 0; i < proof_limit; i++) {
+        ZXRProof *exp = &expected_proofs[i];
+        ZXRProof *act = &g_zxr_proofs[i];
+        if (strcmp(exp->theorem_name, act->theorem_name) != 0 ||
+            strcmp(exp->target_pass, act->target_pass) != 0 ||
+            exp->node_id != act->node_id ||
+            exp->verified != act->verified ||
+            exp->delta_rsp != act->delta_rsp ||
+            exp->preserves_register != act->preserves_register ||
+            exp->preserves_flags != act->preserves_flags) {
+            fprintf(stderr, "[ZXR-REPLAY] PROOF DIVERGENCE at proof %d:\n", i);
+            fprintf(stderr, "  Expected: theorem=%s, pass=%s, node_id=%llu, verified=%d, delta_rsp=%d, preserves_reg=%d, preserves_flags=%d\n",
+                    exp->theorem_name, exp->target_pass, (unsigned long long)exp->node_id, exp->verified, exp->delta_rsp, exp->preserves_register, exp->preserves_flags);
+            fprintf(stderr, "  Actual:   theorem=%s, pass=%s, node_id=%llu, verified=%d, delta_rsp=%d, preserves_reg=%d, preserves_flags=%d\n",
+                    act->theorem_name, act->target_pass, (unsigned long long)act->node_id, act->verified, act->delta_rsp, act->preserves_register, act->preserves_flags);
+            proof_mismatch = 1;
+            break;
+        }
+    }
+
+    if (!proof_mismatch && expected_proof_count != g_zxr_proof_count) {
+        fprintf(stderr, "[ZXR-REPLAY] PROOF DIVERGENCE: count mismatch (%d expected vs %d actual)\n", expected_proof_count, g_zxr_proof_count);
+        proof_mismatch = 1;
+    }
+
+    if (mismatch || proof_mismatch) {
         fprintf(stderr, "[ZXR-REPLAY] VERIFICATION FAILED\n");
         return 0;
     } else {
@@ -586,6 +711,526 @@ void assert_cfg_invariance(const char *pass_name, uint64_t hash_pre, uint64_t ha
         fprintf(stderr, "[CONSTITUTIONAL-VIOLATION] Pass '%s' mutated control-flow topology! Pre: 0x%llx, Post: 0x%llx\n",
                 pass_name, (unsigned long long)hash_pre, (unsigned long long)hash_post);
         exit(1);
+    }
+}
+
+/* ================================================================= */
+/* ASSEMBLY CFG TOPOLOGY PARSER AND DFS FINGERPRINTER                */
+/* ================================================================= */
+
+static int is_asm_label(const char *line, char *out_label) {
+    while (*line == ' ' || *line == '\t') line++;
+    if (*line == '\0' || *line == '#' || *line == ';') return 0;
+    const char *p = line;
+    if (!(*p == '.' || *p == '_' || (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z'))) {
+        return 0;
+    }
+    while (*p && *p != ':') {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '.')) {
+            return 0;
+        }
+        p++;
+    }
+    if (*p == ':') {
+        int len = p - line;
+        if (len > 63) len = 63;
+        strncpy(out_label, line, len);
+        out_label[len] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int is_asm_jmp(const char *line, char *out_target) {
+    while (*line == ' ' || *line == '\t') line++;
+    if (strncmp(line, "jmp ", 4) == 0 || strncmp(line, "jmpq ", 5) == 0) {
+        const char *p = line + (line[3] == 'q' ? 5 : 4);
+        while (*p == ' ' || *p == '\t') p++;
+        int len = 0;
+        while (p[len] && ((p[len] >= 'a' && p[len] <= 'z') || (p[len] >= 'A' && p[len] <= 'Z') || (p[len] >= '0' && p[len] <= '9') || p[len] == '_' || p[len] == '.')) {
+            len++;
+        }
+        if (len == 0) return 0;
+        if (len > 63) len = 63;
+        strncpy(out_target, p, len);
+        out_target[len] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int is_asm_jcond(const char *line, char *out_target) {
+    while (*line == ' ' || *line == '\t') line++;
+    if (line[0] == 'j') {
+        if (strncmp(line, "jmp", 3) == 0) return 0;
+        const char *p = line + 1;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        while (*p == ' ' || *p == '\t') p++;
+        int len = 0;
+        while (p[len] && ((p[len] >= 'a' && p[len] <= 'z') || (p[len] >= 'A' && p[len] <= 'Z') || (p[len] >= '0' && p[len] <= '9') || p[len] == '_' || p[len] == '.')) {
+            len++;
+        }
+        if (len == 0) return 0;
+        if (len > 63) len = 63;
+        strncpy(out_target, p, len);
+        out_target[len] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int is_asm_ret(const char *line) {
+    while (*line == ' ' || *line == '\t') line++;
+    if (strncmp(line, "ret", 3) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+typedef struct {
+    char label[64];
+    char succ1[64];
+    char succ2[64];
+    int is_ret;
+} AsmBlock;
+
+static void asm_dfs(int b_idx, int *visited, int *topo_map, int *next_topo, int *topo_order, int *topo_count, int num_blocks, AsmBlock *blocks) {
+    if (visited[b_idx]) return;
+    visited[b_idx] = 1;
+    topo_map[b_idx] = (*next_topo)++;
+    topo_order[(*topo_count)++] = b_idx;
+
+    AsmBlock *b = &blocks[b_idx];
+    int s1_idx = -1;
+    if (b->succ1[0]) {
+        for (int i = 0; i < num_blocks; i++) {
+            if (strcmp(blocks[i].label, b->succ1) == 0) {
+                s1_idx = i;
+                break;
+            }
+        }
+    }
+    int s2_idx = -1;
+    if (b->succ2[0]) {
+        for (int i = 0; i < num_blocks; i++) {
+            if (strcmp(blocks[i].label, b->succ2) == 0) {
+                s2_idx = i;
+                break;
+            }
+        }
+    }
+
+    if (s1_idx != -1) {
+        asm_dfs(s1_idx, visited, topo_map, next_topo, topo_order, topo_count, num_blocks, blocks);
+    }
+    if (s2_idx != -1) {
+        asm_dfs(s2_idx, visited, topo_map, next_topo, topo_order, topo_count, num_blocks, blocks);
+    }
+}
+
+uint64_t compute_asm_cfg_hash(char **lines, int nlines) {
+    if (nlines <= 0) return 0;
+
+    unsigned long long global_hash = 1469598103934665603ULL;
+
+    int i = 0;
+    while (i < nlines) {
+        char label_buf[64];
+        while (i < nlines) {
+            if (is_asm_label(lines[i], label_buf)) {
+                if (label_buf[0] != '.') {
+                    break;
+                }
+            }
+            i++;
+        }
+        if (i >= nlines) break;
+
+        char func_name[64];
+        strcpy(func_name, label_buf);
+        int func_start = i;
+        i++;
+
+        while (i < nlines) {
+            if (is_asm_label(lines[i], label_buf)) {
+                if (label_buf[0] != '.') {
+                    break;
+                }
+            }
+            i++;
+        }
+        int func_end = i;
+
+        int instr_lines[4096];
+        int num_instr = 0;
+        for (int k = func_start; k < func_end; k++) {
+            char *line = lines[k];
+            if (line[0] == '\0') {
+                if (num_instr < 4096) {
+                    instr_lines[num_instr++] = k;
+                }
+                continue;
+            }
+            while (*line == ' ' || *line == '\t') line++;
+            if (*line == '\0' || *line == '#' || *line == ';') continue;
+            if (num_instr < 4096) {
+                instr_lines[num_instr++] = k;
+            }
+        }
+
+        if (num_instr == 0) continue;
+
+        int is_block_start[4096] = {0};
+        is_block_start[0] = 1;
+        for (int k = 1; k < num_instr; k++) {
+            char label_tmp[64];
+            if (is_asm_label(lines[instr_lines[k]], label_tmp)) {
+                is_block_start[k] = 1;
+            }
+            if (k > 0) {
+                char *prev_line = lines[instr_lines[k-1]];
+                char dummy[64];
+                if (is_asm_jmp(prev_line, dummy) || is_asm_jcond(prev_line, dummy) || is_asm_ret(prev_line)) {
+                    is_block_start[k] = 1;
+                }
+            }
+        }
+
+        static int instr_to_block[4096];
+        int temp_num_blocks = 0;
+        for (int k = 0; k < num_instr; k++) {
+            if (k > 0 && is_block_start[k]) {
+                temp_num_blocks++;
+            }
+            instr_to_block[k] = temp_num_blocks;
+        }
+
+        static AsmBlock blocks[4096];
+        int num_blocks = 0;
+
+        int current_block_start_idx = 0;
+        for (int k = 0; k <= num_instr; k++) {
+            if (k == num_instr || (k > current_block_start_idx && is_block_start[k])) {
+                if (num_blocks < 4096) {
+                    AsmBlock *b = &blocks[num_blocks++];
+                    memset(b, 0, sizeof(AsmBlock));
+
+                    char label_tmp[64];
+                    if (is_asm_label(lines[instr_lines[current_block_start_idx]], label_tmp)) {
+                        strcpy(b->label, label_tmp);
+                    } else {
+                        sprintf(b->label, "__synth_L%d", num_blocks - 1);
+                    }
+
+                    int last_instr_idx = k - 1;
+                    char *last_line = lines[instr_lines[last_instr_idx]];
+                    char target[64];
+
+                    if (is_asm_ret(last_line)) {
+                        b->is_ret = 1;
+                    } else if (is_asm_jmp(last_line, target)) {
+                        strcpy(b->succ1, target);
+                    } else if (is_asm_jcond(last_line, target)) {
+                        strcpy(b->succ1, target);
+                        if (k < num_instr) {
+                            char next_label[64];
+                            if (is_asm_label(lines[instr_lines[k]], next_label)) {
+                                strcpy(b->succ2, next_label);
+                            } else {
+                                sprintf(b->succ2, "__synth_L%d", instr_to_block[k]);
+                            }
+                        }
+                    } else {
+                        if (k < num_instr) {
+                            char next_label[64];
+                            if (is_asm_label(lines[instr_lines[k]], next_label)) {
+                                strcpy(b->succ2, next_label);
+                            } else {
+                                sprintf(b->succ2, "__synth_L%d", instr_to_block[k]);
+                            }
+                        }
+                    }
+                }
+                current_block_start_idx = k;
+            }
+        }
+
+        if (num_blocks == 0) continue;
+
+        int visited[4096] = {0};
+        int topo_map[4096];
+        int topo_order[4096];
+        int topo_count = 0;
+        int next_topo = 0;
+        for (int k = 0; k < 4096; k++) topo_map[k] = -1;
+
+        asm_dfs(0, visited, topo_map, &next_topo, topo_order, &topo_count, num_blocks, blocks);
+
+        unsigned long long func_hash = 1469598103934665603ULL;
+        for (int k = 0; k < topo_count; k++) {
+            int b_idx = topo_order[k];
+            AsmBlock *b = &blocks[b_idx];
+
+            func_hash ^= (unsigned long long)topo_map[b_idx];
+            func_hash *= 1099511628211ULL;
+
+            int succ_count = 0;
+            int s1_topo = -1;
+            int s2_topo = -1;
+
+            if (b->succ1[0]) {
+                for (int m = 0; m < num_blocks; m++) {
+                    if (strcmp(blocks[m].label, b->succ1) == 0) {
+                        s1_topo = topo_map[m];
+                        if (s1_topo != -1) succ_count++;
+                        break;
+                    }
+                }
+            }
+            if (b->succ2[0]) {
+                for (int m = 0; m < num_blocks; m++) {
+                    if (strcmp(blocks[m].label, b->succ2) == 0) {
+                        s2_topo = topo_map[m];
+                        if (s2_topo != -1) succ_count++;
+                        break;
+                    }
+                }
+            }
+
+            func_hash ^= (unsigned long long)succ_count;
+            func_hash *= 1099511628211ULL;
+
+            if (s1_topo != -1) {
+                func_hash ^= (unsigned long long)s1_topo;
+                func_hash *= 1099511628211ULL;
+            }
+            if (s2_topo != -1) {
+                func_hash ^= (unsigned long long)s2_topo;
+                func_hash *= 1099511628211ULL;
+            }
+        }
+
+        global_hash ^= func_hash;
+        global_hash *= 1099511628211ULL;
+    }
+
+    return global_hash;
+}
+
+typedef struct {
+    char name[64];
+    uint64_t hash;
+} FuncHash;
+
+static int extract_func_hashes(char **lines, int nlines, FuncHash *out_hashes, int max_funcs) {
+    int num_funcs = 0;
+    int i = 0;
+    while (i < nlines) {
+        char label_buf[64];
+        while (i < nlines) {
+            if (is_asm_label(lines[i], label_buf)) {
+                if (label_buf[0] != '.') {
+                    break;
+                }
+            }
+            i++;
+        }
+        if (i >= nlines) break;
+
+        char func_name[64];
+        strcpy(func_name, label_buf);
+        int func_start = i;
+        i++;
+
+        while (i < nlines) {
+            if (is_asm_label(lines[i], label_buf)) {
+                if (label_buf[0] != '.') {
+                    break;
+                }
+            }
+            i++;
+        }
+        int func_end = i;
+
+        int instr_lines[4096];
+        int num_instr = 0;
+        for (int k = func_start; k < func_end; k++) {
+            char *line = lines[k];
+            if (line[0] == '\0') {
+                if (num_instr < 4096) {
+                    instr_lines[num_instr++] = k;
+                }
+                continue;
+            }
+            while (*line == ' ' || *line == '\t') line++;
+            if (*line == '\0' || *line == '#' || *line == ';') continue;
+            if (num_instr < 4096) {
+                instr_lines[num_instr++] = k;
+            }
+        }
+
+        if (num_instr == 0) continue;
+
+        int is_block_start[4096] = {0};
+        is_block_start[0] = 1;
+        for (int k = 1; k < num_instr; k++) {
+            char label_tmp[64];
+            if (is_asm_label(lines[instr_lines[k]], label_tmp)) {
+                is_block_start[k] = 1;
+            }
+            if (k > 0) {
+                char *prev_line = lines[instr_lines[k-1]];
+                char dummy[64];
+                if (is_asm_jmp(prev_line, dummy) || is_asm_jcond(prev_line, dummy) || is_asm_ret(prev_line)) {
+                    is_block_start[k] = 1;
+                }
+            }
+        }
+
+        static int instr_to_block[4096];
+        int temp_num_blocks = 0;
+        for (int k = 0; k < num_instr; k++) {
+            if (k > 0 && is_block_start[k]) {
+                temp_num_blocks++;
+            }
+            instr_to_block[k] = temp_num_blocks;
+        }
+
+        static AsmBlock blocks[4096];
+        memset(blocks, 0, sizeof(blocks));
+        int num_blocks = 0;
+
+        int current_block_start_idx = 0;
+        for (int k = 0; k <= num_instr; k++) {
+            if (k == num_instr || (k > current_block_start_idx && is_block_start[k])) {
+                if (num_blocks < 4096) {
+                    AsmBlock *b = &blocks[num_blocks++];
+                    memset(b, 0, sizeof(AsmBlock));
+
+                    char label_tmp[64];
+                    if (is_asm_label(lines[instr_lines[current_block_start_idx]], label_tmp)) {
+                        strcpy(b->label, label_tmp);
+                    } else {
+                        sprintf(b->label, "__synth_L%d", num_blocks - 1);
+                    }
+
+                    int last_instr_idx = k - 1;
+                    char *last_line = lines[instr_lines[last_instr_idx]];
+                    char target[64];
+
+                    if (is_asm_ret(last_line)) {
+                        b->is_ret = 1;
+                    } else if (is_asm_jmp(last_line, target)) {
+                        strcpy(b->succ1, target);
+                    } else if (is_asm_jcond(last_line, target)) {
+                        strcpy(b->succ1, target);
+                        if (k < num_instr) {
+                            char next_label[64];
+                            if (is_asm_label(lines[instr_lines[k]], next_label)) {
+                                strcpy(b->succ2, next_label);
+                            } else {
+                                sprintf(b->succ2, "__synth_L%d", instr_to_block[k]);
+                            }
+                        }
+                    } else {
+                        if (k < num_instr) {
+                            char next_label[64];
+                            if (is_asm_label(lines[instr_lines[k]], next_label)) {
+                                strcpy(b->succ2, next_label);
+                            } else {
+                                sprintf(b->succ2, "__synth_L%d", instr_to_block[k]);
+                            }
+                        }
+                    }
+                }
+                current_block_start_idx = k;
+            }
+        }
+
+        if (num_blocks == 0) continue;
+
+        int visited[4096] = {0};
+        int topo_map[4096];
+        int topo_order[4096];
+        int topo_count = 0;
+        int next_topo = 0;
+        for (int k = 0; k < 4096; k++) topo_map[k] = -1;
+
+        asm_dfs(0, visited, topo_map, &next_topo, topo_order, &topo_count, num_blocks, blocks);
+
+        unsigned long long func_hash = 1469598103934665603ULL;
+        for (int k = 0; k < topo_count; k++) {
+            int b_idx = topo_order[k];
+            AsmBlock *b = &blocks[b_idx];
+
+            func_hash ^= (unsigned long long)topo_map[b_idx];
+            func_hash *= 1099511628211ULL;
+
+            int succ_count = 0;
+            int s1_topo = -1;
+            int s2_topo = -1;
+
+            if (b->succ1[0]) {
+                for (int m = 0; m < num_blocks; m++) {
+                    if (strcmp(blocks[m].label, b->succ1) == 0) {
+                        s1_topo = topo_map[m];
+                        if (s1_topo != -1) succ_count++;
+                        break;
+                    }
+                }
+            }
+            if (b->succ2[0]) {
+                for (int m = 0; m < num_blocks; m++) {
+                    if (strcmp(blocks[m].label, b->succ2) == 0) {
+                        s2_topo = topo_map[m];
+                        if (s2_topo != -1) succ_count++;
+                        break;
+                    }
+                }
+            }
+
+            func_hash ^= (unsigned long long)succ_count;
+            func_hash *= 1099511628211ULL;
+
+            if (s1_topo != -1) {
+                func_hash ^= (unsigned long long)s1_topo;
+                func_hash *= 1099511628211ULL;
+            }
+            if (s2_topo != -1) {
+                func_hash ^= (unsigned long long)s2_topo;
+                func_hash *= 1099511628211ULL;
+            }
+        }
+
+        if (num_funcs < max_funcs) {
+            strcpy(out_hashes[num_funcs].name, func_name);
+            out_hashes[num_funcs].hash = func_hash;
+            num_funcs++;
+        }
+    }
+    return num_funcs;
+}
+
+void verify_asm_cfg_invariance(char **pre_lines, int pre_nlines, char **post_lines, int post_nlines) {
+    static FuncHash pre_funcs[4096];
+    static FuncHash post_funcs[4096];
+
+    int num_pre = extract_func_hashes(pre_lines, pre_nlines, pre_funcs, 4096);
+    int num_post = extract_func_hashes(post_lines, post_nlines, post_funcs, 4096);
+
+    for (int i = 0; i < num_pre; i++) {
+        int found = 0;
+        for (int j = 0; j < num_post; j++) {
+            if (strcmp(pre_funcs[i].name, post_funcs[j].name) == 0) {
+                found = 1;
+                if (pre_funcs[i].hash != post_funcs[j].hash) {
+                    fprintf(stderr, "[CONSTITUTIONAL-VIOLATION] Function '%s' control-flow topology mutated by peephole! Pre: 0x%llx, Post: 0x%llx\n",
+                            pre_funcs[i].name, (unsigned long long)pre_funcs[i].hash, (unsigned long long)post_funcs[j].hash);
+                    exit(1);
+                }
+                break;
+            }
+        }
     }
 }
 
