@@ -1,0 +1,11 @@
+{
+  "manifest": {
+    "decision_tree_model.pkl": "c5370cc46349a592d55cc420369665b7b1721e9007a8aed373c56dcfeb4d7887",
+    "oracle_3k_embeddings.npy": "f86d8e2427849041368f19297bfd52c1912b41dca167827dd5182a73c58088f7",
+    "oracle_3k_faiss.index": "26c9d055d4b959208f3e70137d91830b550cd99d711f719e55457f9b23d921fb",
+    "oracle_3k_prime_scored.jsonl": "bc5395e094a8c6a86f0c35532d84b5362f7317ab1dfa1e92a34c3801757374e5",
+    "ZKAEDI_OMEGA_EDGE_int8.onnx": "97c7f7090af08251d3ec127858bb2259773010fa8c6b6e97c0b2168922c2ff8e",
+    "ZKAEDI_OMEGA_EDGE_fp32.onnx.data": "2bdeff0bacf0b32e7675bd9d466439fddd4689b42f2ed680c95f513ca820bb0d"
+  },
+  "signature": "91f9cda5d4785fc01e26c7ca4160d1b35b4d3deeabcde55e57202c0486c9e6fdf11b8b8e00ffa0b3e87e65b23481783c2dafcaf94ebd8709c21a9becb3139504"
+}
