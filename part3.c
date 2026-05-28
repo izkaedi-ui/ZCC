@@ -724,6 +724,19 @@ static Type *parse_struct_or_union_body(Compiler *cc, Type *stype, int is_union)
         }
         stype->align = final_align;
         stype->is_complete = 1;
+
+        if (stype) {
+            int already_registered = 0;
+            for (int i = 0; i < cc->num_structs; i++) {
+                if (cc->structs[i] == stype) {
+                    already_registered = 1;
+                    break;
+                }
+            }
+            if (!already_registered) {
+                register_struct(cc, stype);
+            }
+        }
     }
 
     expect(cc, TK_RBRACE);
@@ -3298,6 +3311,12 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
     func->body = parse_stmt(cc);
     func->stack_size = -cc->local_offset;
     scope_pop(cc);
+
+    if (func->body) {
+        if (cc->num_globals < MAX_GLOBALS) {
+            cc->globals[cc->num_globals++] = func;
+        }
+    }
 
     return func;
 }

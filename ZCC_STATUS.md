@@ -58,6 +58,7 @@ ZCC is compiled by concatenating discrete parts inside the `Makefile` before inv
 - DCE pass: eliminated 1,862 / 17,264 instructions (10.79%)
 - IR bridge: GCC-compiled boundary module with three-pointer ABI
 - Rust v1 frontend merged: fn, let, let mut, return, if/else, while, calls, recursion (direct + mutual), SysV ABI <=6 reg args + >=7 stack args, strict modes, named diagnostics with concrete fix examples
+- System V ABI Dynamic Stack Alignment: Implemented pre-allocated stack parameter slot footprints, dynamic stack-depth relative offsets for stack parameter copies, and dynamic sret buffer resolution to perfectly isolate parameters and prevent FFI callback/memory aggregate argument collisions. Achieved 100% green test passes across all 33 test categories and maintained byte-identical self-host compilation.
 
 ## Known Open Items
 

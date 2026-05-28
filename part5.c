@@ -1181,6 +1181,12 @@ int main(int argc, char **argv) {
   char audit_export_file[256];
   audit_export_file[0] = '\0';
 
+  int oracle_abi_mode = 0;
+  int oracle_layout_mode = 0;
+  int oracle_determinism_mode = 0;
+  int oracle_selfhost_mode = 0;
+  int oracle_stack_mode = 0;
+
   /* parse arguments */
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-o") == 0) {
@@ -1300,6 +1306,16 @@ int main(int argc, char **argv) {
           int ret = system(cmd);
           return ret;
       }
+    } else if (strcmp(argv[i], "--oracle-abi") == 0) {
+      oracle_abi_mode = 1;
+    } else if (strcmp(argv[i], "--oracle-layout") == 0) {
+      oracle_layout_mode = 1;
+    } else if (strcmp(argv[i], "--oracle-determinism") == 0) {
+      oracle_determinism_mode = 1;
+    } else if (strcmp(argv[i], "--oracle-selfhost") == 0) {
+      oracle_selfhost_mode = 1;
+    } else if (strcmp(argv[i], "--oracle-stack") == 0) {
+      oracle_stack_mode = 1;
     } else if (strcmp(argv[i], "--telemetry") == 0) {
       enable_telemetry_stdout = 1;
     } else if (strcmp(argv[i], "--audit-export") == 0) {
@@ -1355,6 +1371,11 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (oracle_selfhost_mode) {
+    run_oracle_selfhost();
+    return 0;
+  }
+
   /* Stderr policy: open by default, --quiet silences.
    * -v adds extra diagnostic output but stderr is always open unless -q. */
   if (zcc_quiet_flag) {
@@ -1397,6 +1418,11 @@ int main(int argc, char **argv) {
 
   if (!output_file)
     output_file = "a.out";
+
+  if (oracle_determinism_mode) {
+    run_oracle_determinism(NULL, input_file, include_paths, define_flags);
+    return 0;
+  }
 
   frontend_lang = FRONTEND_LANG_C;
   if (strlen(input_file) >= 5 && strcmp(input_file + strlen(input_file) - 5, ".html") == 0) {
@@ -1712,6 +1738,31 @@ int main(int argc, char **argv) {
   }
 
   if (!enable_telemetry_stdout) printf("OK\n");
+
+  if (oracle_abi_mode) {
+    run_oracle_abi(cc, prog);
+    fclose(cc->out);
+    free(source);
+    free(cc);
+    ir_telem_shutdown();
+    return 0;
+  }
+  if (oracle_layout_mode) {
+    run_oracle_layout(cc);
+    fclose(cc->out);
+    free(source);
+    free(cc);
+    ir_telem_shutdown();
+    return 0;
+  }
+  if (oracle_stack_mode) {
+    run_oracle_stack(cc, prog);
+    fclose(cc->out);
+    free(source);
+    free(cc);
+    ir_telem_shutdown();
+    return 0;
+  }
 
   /* generate code */
   if (!enable_telemetry_stdout) printf("[Phase 3] Native AST Constant Folding... OK\n");

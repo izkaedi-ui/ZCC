@@ -2918,6 +2918,7 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     int has_sret = 0;
     int sret_size = 0;
+    int sret_stack_depth = cc->stack_depth;
     if (node->type && (node->type->kind == TY_STRUCT || node->type->kind == TY_UNION)) {
         abi_class_t eb[2];
         classify_aggregate(node->type, eb);
@@ -2996,6 +2997,25 @@ void codegen_expr(Compiler *cc, Node *node) {
       cc->stack_depth++;
     }
 
+    if (args_on_stack > 0) {
+      fprintf(cc->out, "    subq $%d, %%rsp\n", args_on_stack * 8);
+      cc->stack_depth += args_on_stack;
+    }
+
+    int arg_stack_offset[64];
+    {
+      int current_stack_slot = 0;
+      for (i = 0; i < nargs; i++) {
+        if (arg_is_stack[i]) {
+          arg_stack_offset[i] = current_stack_slot * 8;
+          Type *at = node->args[i]->type;
+          current_stack_slot += (at ? (type_size(at) + 7) / 8 : 1);
+        }
+      }
+    }
+
+    int stack_depth_at_reservation = cc->stack_depth;
+
     /* for indirect calls, evaluate callee first and save on stack */
     if (node->func_name[0] == 0 && node->lhs) {
       codegen_expr_checked(cc, node->lhs);
@@ -3010,17 +3030,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       Type *atype = node->args[i]->type;
+      int current_pushed_bytes = (cc->stack_depth - stack_depth_at_reservation) * 8;
       if (arg_is_stack[i]) {
           if (atype && (atype->kind == TY_STRUCT || atype->kind == TY_UNION)) {
-              /* Move aggregate data to stack in 8-byte chunks */
+              /* Copy aggregate to reserved stack slots */
               int j, n_slots = (type_size(atype) + 7) / 8;
               fprintf(cc->out, "    movq %%rax, %%r10\n");
-              for (j = n_slots - 1; j >= 0; j--) {
-                  fprintf(cc->out, "    pushq %d(%%r10)\n", j * 8);
-                  cc->stack_depth++;
+              for (j = 0; j < n_slots; j++) {
+                  fprintf(cc->out, "    movq %d(%%r10), %%rax\n", j * 8);
+                  fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i] + j * 8);
               }
           } else {
-              push_reg(cc, "rax");
+              fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i]);
           }
           ir_save_result(&args_ir_1d[i * 32]);
           continue;
@@ -3145,7 +3166,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
       }
       if (has_sret) {
-          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", args_on_stack * 8 + alignment_pad);
+          int sret_offset = (cc->stack_depth - sret_stack_depth) * 8 - sret_size;
+          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", sret_offset);
       }
 
       if (!backend_ops) {
@@ -3859,7 +3881,16 @@ static int allocate_registers(Node *func) {
 
   for (i = 0; i < num_ra_locals; i++) {
     Symbol *sym = ra_locals[i];
-    if (sym->stack_offset >= param_limit && sym->stack_offset < 0) {
+    int is_param = 0;
+    if (func->func_params) {
+      for (int p = 0; p < func->num_params; p++) {
+        if (sym->name && strcmp(sym->name, func->func_params->names[p]) == 0) {
+          is_param = 1;
+          break;
+        }
+      }
+    }
+    if (is_param || (sym->stack_offset >= param_limit && sym->stack_offset < 0)) {
       sym->live_start = -1; /* never alloc parameters for safety */
     }
     if (sym->live_start != -1 && sym->type && sym->type->kind != TY_ARRAY &&
@@ -4384,6 +4415,9 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
 static void emit_global_var(Compiler *cc, Node *gvar) {
   int size;
 
+  if (gvar->kind != ND_GLOBAL_VAR)
+    return;
+
   if (gvar->is_extern)
     return; /* no emission for extern */
 
@@ -4881,7 +4915,7 @@ int node_ptr_elem_size(struct Node *n) {
 void codegen_emit_globals_and_strings(Compiler *cc) {
   int i;
   for (i = 0; i < cc->num_globals; i++) {
-    if (cc->globals[i]) {
+    if (cc->globals[i] && cc->globals[i]->kind == ND_GLOBAL_VAR) {
       fold_constants(cc, cc->globals[i]->initializer);
       emit_global_var(cc, cc->globals[i]);
     }

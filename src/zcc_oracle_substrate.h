@@ -157,4 +157,10 @@ typedef struct {
     int slot;
 } AbiLane;
 
+void run_oracle_abi(void *cc, void *prog);
+void run_oracle_layout(void *cc);
+void run_oracle_determinism(void *cc, const char *input_file, const char *include_paths, const char *define_flags);
+void run_oracle_selfhost(void);
+void run_oracle_stack(void *cc, void *prog);
+
 #endif /* ZCC_ORACLE_SUBSTRATE_H */
