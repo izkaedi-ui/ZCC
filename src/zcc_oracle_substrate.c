@@ -512,6 +512,21 @@ int zxr_replay_record(const char *zxr_input_filename) {
     for (int i = 0; i < proof_limit; i++) {
         ZXRProof *exp = &expected_proofs[i];
         ZXRProof *act = &g_zxr_proofs[i];
+        
+        // Enforce verified status as a first-class failure boundary
+        if (act->verified != 1) {
+            fprintf(stderr, "[ZXR-REPLAY] CRITICAL FAILURE: Actual proof for theorem '%s' in pass '%s' at node/hash %llu is UNVERIFIED (verified=%d)!\n",
+                    act->theorem_name, act->target_pass, (unsigned long long)act->node_id, act->verified);
+            proof_mismatch = 1;
+            break;
+        }
+        if (exp->verified != 1) {
+            fprintf(stderr, "[ZXR-REPLAY] CRITICAL FAILURE: Ledger expected proof for theorem '%s' in pass '%s' at node/hash %llu is UNVERIFIED (verified=%d)!\n",
+                    exp->theorem_name, exp->target_pass, (unsigned long long)exp->node_id, exp->verified);
+            proof_mismatch = 1;
+            break;
+        }
+
         if (strcmp(exp->theorem_name, act->theorem_name) != 0 ||
             strcmp(exp->target_pass, act->target_pass) != 0 ||
             exp->node_id != act->node_id ||
@@ -527,6 +542,9 @@ int zxr_replay_record(const char *zxr_input_filename) {
             proof_mismatch = 1;
             break;
         }
+        
+        fprintf(stderr, "[ZXR-REPLAY] Verified ledger theorem '%s' [pass=%s] (status: certified/VERIFIED)\n",
+                act->theorem_name, act->target_pass);
     }
 
     if (!proof_mismatch && expected_proof_count != g_zxr_proof_count) {
