@@ -86,6 +86,26 @@ int zxr_replay_record(const char *zxr_input_filename);
 /* ================================================================= */
 
 typedef struct {
+    char theorem_name[64];
+    char target_pass[64];
+    uint64_t node_id;
+    int verified;
+    int delta_rsp;
+    int preserves_register;
+    int preserves_flags;
+} ZXRProof;
+
+void record_proof(
+    const char *theorem_name,
+    const char *target_pass,
+    uint64_t node_id,
+    int verified,
+    int delta_rsp,
+    int preserves_register,
+    int preserves_flags
+);
+
+typedef struct {
     int stack_delta;
     int preserves_rax;
     int preserves_flags;

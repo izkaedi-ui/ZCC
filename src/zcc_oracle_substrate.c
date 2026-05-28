@@ -98,6 +98,32 @@ void record_transform(const char *pass_name, uint64_t node_id, const char *trans
     ev->details[255] = '\0';
 }
 
+#define MAX_ZXR_PROOFS 65536
+static ZXRProof g_zxr_proofs[MAX_ZXR_PROOFS];
+static int g_zxr_proof_count = 0;
+
+void record_proof(
+    const char *theorem_name,
+    const char *target_pass,
+    uint64_t node_id,
+    int verified,
+    int delta_rsp,
+    int preserves_register,
+    int preserves_flags
+) {
+    if (g_zxr_proof_count >= MAX_ZXR_PROOFS) return;
+    ZXRProof *p = &g_zxr_proofs[g_zxr_proof_count++];
+    strncpy(p->theorem_name, theorem_name, 63);
+    p->theorem_name[63] = '\0';
+    strncpy(p->target_pass, target_pass, 63);
+    p->target_pass[63] = '\0';
+    p->node_id = node_id;
+    p->verified = verified;
+    p->delta_rsp = delta_rsp;
+    p->preserves_register = preserves_register;
+    p->preserves_flags = preserves_flags;
+}
+
 /* --- SHA-256 implementation --- */
 typedef struct {
     uint8_t data[64];
@@ -256,10 +282,24 @@ void zxr_emit_record(const char *source_filename, const char *zxr_output_filenam
         fprintf(f, "    }%s\n", (i == g_zxr_event_count - 1) ? "" : ",");
     }
 
+    fprintf(f, "  ],\n");
+    fprintf(f, "  \"proofs\": [\n");
+    for (int i = 0; i < g_zxr_proof_count; i++) {
+        ZXRProof *p = &g_zxr_proofs[i];
+        fprintf(f, "    {\n");
+        fprintf(f, "      \"theorem\": \"%s\",\n", p->theorem_name);
+        fprintf(f, "      \"pass\": \"%s\",\n", p->target_pass);
+        fprintf(f, "      \"node_id\": %llu,\n", (unsigned long long)p->node_id);
+        fprintf(f, "      \"verified\": %d,\n", p->verified);
+        fprintf(f, "      \"delta_rsp\": %d,\n", p->delta_rsp);
+        fprintf(f, "      \"preserves_register\": %d,\n", p->preserves_register);
+        fprintf(f, "      \"preserves_flags\": %d\n", p->preserves_flags);
+        fprintf(f, "    }%s\n", (i == g_zxr_proof_count - 1) ? "" : ",");
+    }
     fprintf(f, "  ]\n");
     fprintf(f, "}\n");
     fclose(f);
-    fprintf(stderr, "[ZXR] Successfully wrote %d events to %s\n", g_zxr_event_count, zxr_output_filename);
+    fprintf(stderr, "[ZXR] Successfully wrote %d events and %d proofs to %s\n", g_zxr_event_count, g_zxr_proof_count, zxr_output_filename);
 }
 
 int zxr_replay_record(const char *zxr_input_filename) {

@@ -587,6 +587,15 @@ static void peephole_optimize(char *filename) {
             sprintf(details, "Elided redundant push/pop for %s", tmp1);
             record_transform("peephole", (uint64_t)i, details);
           }
+          record_proof(
+              "push_pop_elision",
+              "peephole",
+              (uint64_t)i,
+              1,
+              0,
+              1,
+              1
+          );
           i += 2;
           continue;
         } else {
