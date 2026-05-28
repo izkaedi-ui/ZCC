@@ -124,6 +124,10 @@ struct CFGNode {
     int visited;
 };
 
+uint64_t compute_cfg_topology_hash(void *fn_ptr);
+void assert_cfg_invariance(const char *pass_name, uint64_t hash_pre, uint64_t hash_post);
+
+
 /* ================================================================= */
 /* OBSERVATIONAL DOMAIN SEPARATION                                   */
 /* ================================================================= */

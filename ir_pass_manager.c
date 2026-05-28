@@ -283,8 +283,10 @@ static ir_pass_result_t ir_pass_const_fold(void *fn_ptr) {
     ir_pass_result_t r;
     ir_node_t *n;
     int modified = 0;
+    uint64_t hash_pre;
 
     record_pass_begin("constant_folding");
+    hash_pre = compute_cfg_topology_hash(fn);
 
     memset(&r, 0, sizeof(r));
     r.nodes_before = count_nodes(fn);
@@ -462,6 +464,9 @@ static ir_pass_result_t ir_pass_const_fold(void *fn_ptr) {
     r.nodes_modified = modified;
     r.changed = modified > 0;
 
+    uint64_t hash_post = compute_cfg_topology_hash(fn);
+    assert_cfg_invariance("constant_folding", hash_pre, hash_post);
+    record_proof("cfg_topology_invariance", "constant_folding", hash_pre, 1, 0, 1, 1);
     record_pass_end("constant_folding");
 
     return r;

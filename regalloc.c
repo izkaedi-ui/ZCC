@@ -325,9 +325,13 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
 
 void ra_run(RegAllocator *ra, const ir_func_t *fn) {
     record_pass_begin("regalloc");
+    uint64_t hash_pre = compute_cfg_topology_hash((void *)fn);
     build_intervals(ra, fn);
     if (ra->num_intervals > 0)
         chaitin_briggs(ra, fn);
+    uint64_t hash_post = compute_cfg_topology_hash((void *)fn);
+    assert_cfg_invariance("regalloc", hash_pre, hash_post);
+    record_proof("cfg_topology_invariance", "regalloc", hash_pre, 1, 0, 1, 1);
     record_pass_end("regalloc");
 }
 
