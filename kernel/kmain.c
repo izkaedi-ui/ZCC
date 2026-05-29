@@ -256,26 +256,10 @@ void kmain(void) {
 
     /* Load IDT Register */
     {
-        unsigned char idt_p[10];
-        unsigned short limit;
-        unsigned long base;
-        
-        limit = (sizeof(struct idt_entry_64) * 256) - 1;
-        base = (unsigned long)&idt;
-        
-        idt_p[0] = limit & 0xFF;
-        idt_p[1] = (limit >> 8) & 0xFF;
-        
-        idt_p[2] = base & 0xFF;
-        idt_p[3] = (base >> 8) & 0xFF;
-        idt_p[4] = (base >> 16) & 0xFF;
-        idt_p[5] = (base >> 24) & 0xFF;
-        idt_p[6] = (base >> 32) & 0xFF;
-        idt_p[7] = (base >> 40) & 0xFF;
-        idt_p[8] = (base >> 48) & 0xFF;
-        idt_p[9] = (base >> 56) & 0xFF;
-        
-        lidt_native((struct idt_ptr_64 *)idt_p);
+        struct idt_ptr_64 idt_p;
+        idt_p.limit = (sizeof(struct idt_entry_64) * 256) - 1;
+        idt_p.base = (unsigned long)&idt;
+        lidt_native(&idt_p);
     }
     kprint_string("[SYSTEM] 64-bit IDT descriptors registered.\n");
 
