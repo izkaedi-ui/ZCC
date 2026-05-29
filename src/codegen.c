@@ -47,22 +47,22 @@ static Reloc relocs[4096];
 static size_t reloc_count = 0;
 
 static int parse_reg(const char *s) {
-    if (strcmp(s, "%rax") == 0 || strcmp(s, "%eax") == 0 || strcmp(s, "%al") == 0) return 0;
-    if (strcmp(s, "%rcx") == 0 || strcmp(s, "%ecx") == 0 || strcmp(s, "%cl") == 0) return 1;
-    if (strcmp(s, "%rdx") == 0 || strcmp(s, "%edx") == 0) return 2;
-    if (strcmp(s, "%rbx") == 0 || strcmp(s, "%ebx") == 0) return 3;
-    if (strcmp(s, "%rsp") == 0 || strcmp(s, "%esp") == 0) return 4;
-    if (strcmp(s, "%rbp") == 0 || strcmp(s, "%ebp") == 0) return 5;
-    if (strcmp(s, "%rsi") == 0 || strcmp(s, "%esi") == 0) return 6;
-    if (strcmp(s, "%rdi") == 0 || strcmp(s, "%edi") == 0) return 7;
-    if (strcmp(s, "%r8") == 0 || strcmp(s, "%r8d") == 0) return 8;
-    if (strcmp(s, "%r9") == 0 || strcmp(s, "%r9d") == 0) return 9;
-    if (strcmp(s, "%r10") == 0 || strcmp(s, "%r10d") == 0) return 10;
-    if (strcmp(s, "%r11") == 0 || strcmp(s, "%r11d") == 0) return 11;
-    if (strcmp(s, "%r12") == 0 || strcmp(s, "%r12d") == 0) return 12;
-    if (strcmp(s, "%r13") == 0 || strcmp(s, "%r13d") == 0) return 13;
-    if (strcmp(s, "%r14") == 0 || strcmp(s, "%r14d") == 0) return 14;
-    if (strcmp(s, "%r15") == 0 || strcmp(s, "%r15d") == 0) return 15;
+    if (strcmp(s, "%rax") == 0 || strcmp(s, "%eax") == 0 || strcmp(s, "%ax") == 0 || strcmp(s, "%al") == 0) return 0;
+    if (strcmp(s, "%rcx") == 0 || strcmp(s, "%ecx") == 0 || strcmp(s, "%cx") == 0 || strcmp(s, "%cl") == 0) return 1;
+    if (strcmp(s, "%rdx") == 0 || strcmp(s, "%edx") == 0 || strcmp(s, "%dx") == 0 || strcmp(s, "%dl") == 0) return 2;
+    if (strcmp(s, "%rbx") == 0 || strcmp(s, "%ebx") == 0 || strcmp(s, "%bx") == 0 || strcmp(s, "%bl") == 0) return 3;
+    if (strcmp(s, "%rsp") == 0 || strcmp(s, "%esp") == 0 || strcmp(s, "%sp") == 0 || strcmp(s, "%spl") == 0) return 4;
+    if (strcmp(s, "%rbp") == 0 || strcmp(s, "%ebp") == 0 || strcmp(s, "%bp") == 0 || strcmp(s, "%bpl") == 0) return 5;
+    if (strcmp(s, "%rsi") == 0 || strcmp(s, "%esi") == 0 || strcmp(s, "%si") == 0 || strcmp(s, "%sil") == 0) return 6;
+    if (strcmp(s, "%rdi") == 0 || strcmp(s, "%edi") == 0 || strcmp(s, "%di") == 0 || strcmp(s, "%dil") == 0) return 7;
+    if (strcmp(s, "%r8") == 0 || strcmp(s, "%r8d") == 0 || strcmp(s, "%r8w") == 0 || strcmp(s, "%r8b") == 0) return 8;
+    if (strcmp(s, "%r9") == 0 || strcmp(s, "%r9d") == 0 || strcmp(s, "%r9w") == 0 || strcmp(s, "%r9b") == 0) return 9;
+    if (strcmp(s, "%r10") == 0 || strcmp(s, "%r10d") == 0 || strcmp(s, "%r10w") == 0 || strcmp(s, "%r10b") == 0) return 10;
+    if (strcmp(s, "%r11") == 0 || strcmp(s, "%r11d") == 0 || strcmp(s, "%r11w") == 0 || strcmp(s, "%r11b") == 0) return 11;
+    if (strcmp(s, "%r12") == 0 || strcmp(s, "%r12d") == 0 || strcmp(s, "%r12w") == 0 || strcmp(s, "%r12b") == 0) return 12;
+    if (strcmp(s, "%r13") == 0 || strcmp(s, "%r13d") == 0 || strcmp(s, "%r13w") == 0 || strcmp(s, "%r13b") == 0) return 13;
+    if (strcmp(s, "%r14") == 0 || strcmp(s, "%r14d") == 0 || strcmp(s, "%r14w") == 0 || strcmp(s, "%r14b") == 0) return 14;
+    if (strcmp(s, "%r15") == 0 || strcmp(s, "%r15d") == 0 || strcmp(s, "%r15w") == 0 || strcmp(s, "%r15b") == 0) return 15;
     return -1;
 }
 
@@ -99,8 +99,13 @@ static void encode_movq(Segment *seg, int src_reg, int dst_reg, int is_mem_src, 
     unsigned char opcode;
     unsigned char modrm;
     
-    if (src_reg & 8) rex |= 0x04;
-    if (dst_reg & 8) rex |= 0x01;
+    if (is_mem_src) {
+        if (src_reg & 8) rex |= 0x01;
+        if (dst_reg & 8) rex |= 0x04;
+    } else {
+        if (src_reg & 8) rex |= 0x04;
+        if (dst_reg & 8) rex |= 0x01;
+    }
     
     if (is_mem_src) {
         opcode = 0x8b;
@@ -158,8 +163,8 @@ static void encode_leaq(Segment *seg, int src_reg, int dst_reg, long long disp) 
     unsigned char opcode = 0x8d;
     unsigned char modrm;
     
-    if (src_reg & 8) rex |= 0x04;
-    if (dst_reg & 8) rex |= 0x01;
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
     
     if (disp >= -128 && disp <= 127) {
         modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
@@ -200,7 +205,7 @@ static void encode_movq_imm(Segment *seg, long long imm, int dst_reg) {
 
 static void encode_rip_relative(Segment *seg, const char *label_name, int reg, int is_load) {
     unsigned char rex = 0x48;
-    unsigned char opcode = is_load ? 0x8b : 0x89;
+    unsigned char opcode = (is_load == 2) ? 0x8d : (is_load ? 0x8b : 0x89);
     unsigned char modrm = 0x05 | ((reg & 7) << 3);
     if (reg & 8) rex |= 0x04;
     
@@ -341,6 +346,8 @@ static void encode_shift(Segment *seg, const char *op, int dst_reg) {
     if (dst_reg & 8) rex |= 0x01;
     if (strcmp(op, "sarq") == 0) {
         modrm = 0xf8 | (dst_reg & 7);
+    } else if (strcmp(op, "shrq") == 0) {
+        modrm = 0xe8 | (dst_reg & 7);
     } else {
         modrm = 0xe0 | (dst_reg & 7);
     }
@@ -352,11 +359,141 @@ static void encode_shift(Segment *seg, const char *op, int dst_reg) {
 static void encode_idivq(Segment *seg, int reg) {
     unsigned char rex = 0x48;
     unsigned char opcode = 0xf7;
+    unsigned char modrm = 0xf8 | (reg & 7);
+    if (reg & 8) rex |= 0x01;
+    seg_append(seg, &rex, 1);
+    seg_append(seg, &opcode, 1);
+    seg_append(seg, &modrm, 1);
+}
+
+static void encode_divq(Segment *seg, int reg) {
+    unsigned char rex = 0x48;
+    unsigned char opcode = 0xf7;
     unsigned char modrm = 0xf0 | (reg & 7);
     if (reg & 8) rex |= 0x01;
     seg_append(seg, &rex, 1);
     seg_append(seg, &opcode, 1);
     seg_append(seg, &modrm, 1);
+}
+
+static void encode_negq(Segment *seg, int reg) {
+    unsigned char rex = 0x48;
+    unsigned char opcode = 0xf7;
+    unsigned char modrm = 0xd8 | (reg & 7);
+    if (reg & 8) rex |= 0x01;
+    seg_append(seg, &rex, 1);
+    seg_append(seg, &opcode, 1);
+    seg_append(seg, &modrm, 1);
+}
+
+static void encode_movl(Segment *seg, int src_reg, int dst_reg, int is_mem_src, int is_mem_dst, long long disp) {
+    unsigned char rex = 0x40;
+    unsigned char opcode;
+    unsigned char modrm;
+    
+    if (is_mem_src) {
+        if (src_reg & 8) rex |= 0x01;
+        if (dst_reg & 8) rex |= 0x04;
+    } else {
+        if (src_reg & 8) rex |= 0x04;
+        if (dst_reg & 8) rex |= 0x01;
+    }
+    
+    if (is_mem_src) {
+        opcode = 0x8b;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else if (is_mem_dst) {
+        opcode = 0x89;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        opcode = 0x89;
+        modrm = (0x03 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+        if (rex != 0x40) seg_append(seg, &rex, 1);
+        seg_append(seg, &opcode, 1);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movl_imm(Segment *seg, long long imm, int dst_reg) {
+    unsigned char rex = 0x40;
+    unsigned char opcode = 0xc7;
+    unsigned char modrm = 0xc0 | (dst_reg & 7);
+    if (dst_reg & 8) rex |= 0x01;
+    if (rex != 0x40) seg_append(seg, &rex, 1);
+    seg_append(seg, &opcode, 1);
+    seg_append(seg, &modrm, 1);
+    unsigned char d[4];
+    d[0] = imm & 0xFF;
+    d[1] = (imm >> 8) & 0xFF;
+    d[2] = (imm >> 16) & 0xFF;
+    d[3] = (imm >> 24) & 0xFF;
+    seg_append(seg, d, 4);
+}
+
+static void encode_movzwq(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x48;
+    unsigned char opcode[2] = {0x0f, 0xb7};
+    unsigned char modrm;
+    
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+    
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
 }
 
 static void encode_movslq(Segment *seg, int src_reg, int dst_reg) {
@@ -385,11 +522,305 @@ static void encode_set(Segment *seg, const char *mnemonic) {
     seg_append(seg, bytes, 3);
 }
 
-static void encode_movzbl(Segment *seg, int reg) {
+static void encode_movb(Segment *seg, int src_reg, int dst_reg, int is_mem_src, int is_mem_dst, long long disp) {
+    unsigned char rex = 0x40;
+    unsigned char opcode;
+    unsigned char modrm;
+    
+    if (is_mem_src) {
+        if (src_reg & 8) rex |= 0x01;
+        if (dst_reg & 8) rex |= 0x04;
+    } else {
+        if (src_reg & 8) rex |= 0x04;
+        if (dst_reg & 8) rex |= 0x01;
+    }
+    
+    if (is_mem_src) {
+        opcode = 0x8a;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40 || dst_reg >= 4 || src_reg >= 4) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40 || dst_reg >= 4 || src_reg >= 4) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else if (is_mem_dst) {
+        opcode = 0x88;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40 || src_reg >= 4 || dst_reg >= 4) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40 || src_reg >= 4 || dst_reg >= 4) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        opcode = 0x88;
+        modrm = 0xc0 | ((src_reg & 7) << 3) | (dst_reg & 7);
+        if (rex != 0x40 || src_reg >= 4 || dst_reg >= 4) seg_append(seg, &rex, 1);
+        seg_append(seg, &opcode, 1);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movw(Segment *seg, int src_reg, int dst_reg, int is_mem_src, int is_mem_dst, long long disp) {
+    unsigned char prefix = 0x66;
+    unsigned char rex = 0x40;
+    unsigned char opcode;
+    unsigned char modrm;
+    
+    if (is_mem_src) {
+        if (src_reg & 8) rex |= 0x01;
+        if (dst_reg & 8) rex |= 0x04;
+    } else {
+        if (src_reg & 8) rex |= 0x04;
+        if (dst_reg & 8) rex |= 0x01;
+    }
+    
+    seg_append(seg, &prefix, 1);
+    
+    if (is_mem_src) {
+        opcode = 0x8b;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else if (is_mem_dst) {
+        opcode = 0x89;
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((src_reg & 7) << 3) | (dst_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, &opcode, 1);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        opcode = 0x89;
+        modrm = 0xc0 | ((src_reg & 7) << 3) | (dst_reg & 7);
+        if (rex != 0x40) seg_append(seg, &rex, 1);
+        seg_append(seg, &opcode, 1);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movswq(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x48;
+    unsigned char opcode[2] = {0x0f, 0xbf};
+    unsigned char modrm;
+    
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+    
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF;
+            d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF;
+            d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movzbl(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x40;
     unsigned char opcode[2] = {0x0f, 0xb6};
-    unsigned char modrm = 0xc0 | ((reg & 7) << 3);
-    seg_append(seg, opcode, 2);
-    seg_append(seg, &modrm, 1);
+    unsigned char modrm;
+    
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+    
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF;
+            d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF;
+            d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        if (rex != 0x40) seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movzwl(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x40;
+    unsigned char opcode[2] = {0x0f, 0xb7};
+    unsigned char modrm;
+
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            if (rex != 0x40) seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF; d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF; d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        if (rex != 0x40) seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movsbq(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x48;
+    unsigned char opcode[2] = {0x0f, 0xbe};
+    unsigned char modrm;
+    
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+    
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF;
+            d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF;
+            d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
+}
+
+static void encode_movzbq(Segment *seg, int src_reg, int dst_reg, int is_mem_src, long long disp) {
+    unsigned char rex = 0x48;
+    unsigned char opcode[2] = {0x0f, 0xb6};
+    unsigned char modrm;
+    
+    if (src_reg & 8) rex |= 0x01;
+    if (dst_reg & 8) rex |= 0x04;
+    
+    if (is_mem_src) {
+        if (disp >= -128 && disp <= 127) {
+            modrm = (0x01 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d = (unsigned char)disp;
+            seg_append(seg, &d, 1);
+        } else {
+            modrm = (0x02 << 6) | ((dst_reg & 7) << 3) | (src_reg & 7);
+            seg_append(seg, &rex, 1);
+            seg_append(seg, opcode, 2);
+            seg_append(seg, &modrm, 1);
+            unsigned char d[4];
+            d[0] = disp & 0xFF;
+            d[1] = (disp >> 8) & 0xFF;
+            d[2] = (disp >> 16) & 0xFF;
+            d[3] = (disp >> 24) & 0xFF;
+            seg_append(seg, d, 4);
+        }
+    } else {
+        modrm = 0xc0 | ((dst_reg & 7) << 3) | (src_reg & 7);
+        seg_append(seg, &rex, 1);
+        seg_append(seg, opcode, 2);
+        seg_append(seg, &modrm, 1);
+    }
 }
 
 /* Trim helper */
@@ -619,7 +1050,7 @@ static int assemble(const char *in_s_filename, const char *out_o_filename) {
         } else if (strcmp(mnemonic, "leave") == 0) {
             unsigned char b = 0xc9;
             seg_append(&text_seg, &b, 1);
-        } else if (strcmp(mnemonic, "cqto") == 0) {
+        } else if (strcmp(mnemonic, "cqto") == 0 || strcmp(mnemonic, "cqo") == 0) {
             unsigned char b[2] = {0x48, 0x99};
             seg_append(&text_seg, b, 2);
         } else if (strcmp(mnemonic, "cltq") == 0) {
@@ -663,6 +1094,14 @@ static int assemble(const char *in_s_filename, const char *out_o_filename) {
             char *op = args_start ? trim(args_start) : "";
             int reg = parse_reg(op);
             encode_idivq(&text_seg, reg);
+        } else if (strcmp(mnemonic, "divq") == 0) {
+            char *op = args_start ? trim(args_start) : "";
+            int reg = parse_reg(op);
+            encode_divq(&text_seg, reg);
+        } else if (strcmp(mnemonic, "negq") == 0) {
+            char *op = args_start ? trim(args_start) : "";
+            int reg = parse_reg(op);
+            encode_negq(&text_seg, reg);
         }
         /* 2-operand instructions */
         else if (args_start) {
@@ -699,13 +1138,72 @@ static int assemble(const char *in_s_filename, const char *out_o_filename) {
                         if (parse_mem_operand(op2, &reg2, &disp2)) is_mem2 = 1;
                         encode_movq(&text_seg, reg1, reg2, is_mem1, is_mem2, is_mem1 ? disp1 : disp2);
                     }
+                } else if (strcmp(mnemonic, "movl") == 0) {
+                    if (op1[0] == '$') {
+                        long long imm = atoll(op1 + 1);
+                        encode_movl_imm(&text_seg, imm, reg2);
+                    } else {
+                        int is_mem1 = 0, is_mem2 = 0;
+                        long long disp1 = 0, disp2 = 0;
+                        if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                        if (parse_mem_operand(op2, &reg2, &disp2)) is_mem2 = 1;
+                        encode_movl(&text_seg, reg1, reg2, is_mem1, is_mem2, is_mem1 ? disp1 : disp2);
+                    }
                 } else if (strcmp(mnemonic, "leaq") == 0) {
+                    if (strstr(op1, "(%rip)")) {
+                        char lbl[128];
+                        char *rip = strstr(op1, "(%rip)");
+                        *rip = '\0';
+                        strcpy(lbl, trim(op1));
+                        encode_rip_relative(&text_seg, lbl, reg2, 2);
+                    } else {
+                        int is_mem1 = 0;
+                        long long disp1 = 0;
+                        if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                        encode_leaq(&text_seg, reg1, reg2, disp1);
+                    }
+                } else if (strcmp(mnemonic, "movb") == 0) {
+                    int is_mem1 = 0, is_mem2 = 0;
+                    long long disp1 = 0, disp2 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    if (parse_mem_operand(op2, &reg2, &disp2)) is_mem2 = 1;
+                    encode_movb(&text_seg, reg1, reg2, is_mem1, is_mem2, is_mem1 ? disp1 : disp2);
+                } else if (strcmp(mnemonic, "movw") == 0) {
+                    int is_mem1 = 0, is_mem2 = 0;
+                    long long disp1 = 0, disp2 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    if (parse_mem_operand(op2, &reg2, &disp2)) is_mem2 = 1;
+                    encode_movw(&text_seg, reg1, reg2, is_mem1, is_mem2, is_mem1 ? disp1 : disp2);
+                } else if (strcmp(mnemonic, "movswq") == 0) {
                     int is_mem1 = 0;
                     long long disp1 = 0;
                     if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
-                    encode_leaq(&text_seg, reg1, reg2, disp1);
+                    encode_movswq(&text_seg, reg1, reg2, is_mem1, disp1);
                 } else if (strcmp(mnemonic, "movzbl") == 0) {
-                    encode_movzbl(&text_seg, reg2);
+                    int is_mem1 = 0;
+                    long long disp1 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    encode_movzbl(&text_seg, reg1, reg2, is_mem1, disp1);
+                } else if (strcmp(mnemonic, "movzwl") == 0) {
+                    int is_mem1 = 0;
+                    long long disp1 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    encode_movzwl(&text_seg, reg1, reg2, is_mem1, disp1);
+                } else if (strcmp(mnemonic, "movzwq") == 0) {
+                    int is_mem1 = 0;
+                    long long disp1 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    encode_movzwq(&text_seg, reg1, reg2, is_mem1, disp1);
+                } else if (strcmp(mnemonic, "movsbq") == 0) {
+                    int is_mem1 = 0;
+                    long long disp1 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    encode_movsbq(&text_seg, reg1, reg2, is_mem1, disp1);
+                } else if (strcmp(mnemonic, "movzbq") == 0) {
+                    int is_mem1 = 0;
+                    long long disp1 = 0;
+                    if (parse_mem_operand(op1, &reg1, &disp1)) is_mem1 = 1;
+                    encode_movzbq(&text_seg, reg1, reg2, is_mem1, disp1);
                 } else if (strcmp(mnemonic, "movslq") == 0) {
                     int is_mem1 = 0;
                     long long disp1 = 0;
@@ -759,14 +1257,100 @@ static int assemble(const char *in_s_filename, const char *out_o_filename) {
                     } else {
                         encode_binop(&text_seg, mnemonic, reg1, reg2);
                     }
-                } else if (strcmp(mnemonic, "sarq") == 0 || strcmp(mnemonic, "shlq") == 0) {
-                    encode_shift(&text_seg, mnemonic, reg2);
+                } else if (strcmp(mnemonic, "sarq") == 0 || strcmp(mnemonic, "shlq") == 0 || strcmp(mnemonic, "shrq") == 0) {
+                    if (op1[0] == '$') {
+                        long long imm = atoll(op1 + 1);
+                        unsigned char rex = 0x48;
+                        unsigned char opcode = 0xc1;
+                        unsigned char modrm;
+                        if (reg2 & 8) rex |= 0x01;
+                        if (strcmp(mnemonic, "sarq") == 0) {
+                            modrm = 0xf8 | (reg2 & 7);
+                        } else if (strcmp(mnemonic, "shrq") == 0) {
+                            modrm = 0xe8 | (reg2 & 7);
+                        } else {
+                            modrm = 0xe0 | (reg2 & 7);
+                        }
+                        seg_append(&text_seg, &rex, 1);
+                        seg_append(&text_seg, &opcode, 1);
+                        seg_append(&text_seg, &modrm, 1);
+                        unsigned char b = (unsigned char)imm;
+                        seg_append(&text_seg, &b, 1);
+                    } else {
+                        encode_shift(&text_seg, mnemonic, reg2);
+                    }
+                } else if (strcmp(mnemonic, "cmpl") == 0) {
+                    if (op1[0] == '$') {
+                        long long imm = atoll(op1 + 1);
+                        unsigned char rex = 0x40;
+                        unsigned char opcode = 0x81;
+                        unsigned char modrm = 0xf8 | (reg2 & 7);
+                        if (reg2 & 8) rex |= 0x01;
+                        
+                        if (imm >= -128 && imm <= 127) {
+                            opcode = 0x83;
+                            if (rex != 0x40) seg_append(&text_seg, &rex, 1);
+                            seg_append(&text_seg, &opcode, 1);
+                            seg_append(&text_seg, &modrm, 1);
+                            unsigned char b = (unsigned char)imm;
+                            seg_append(&text_seg, &b, 1);
+                        } else {
+                            if (rex != 0x40) seg_append(&text_seg, &rex, 1);
+                            seg_append(&text_seg, &opcode, 1);
+                            seg_append(&text_seg, &modrm, 1);
+                            unsigned char b[4];
+                            b[0] = imm & 0xFF; b[1] = (imm >> 8) & 0xFF;
+                            b[2] = (imm >> 16) & 0xFF; b[3] = (imm >> 24) & 0xFF;
+                            seg_append(&text_seg, b, 4);
+                        }
+                    } else {
+                        unsigned char rex = 0x40;
+                        unsigned char opcode = 0x39;
+                        unsigned char modrm = 0xc0 | ((reg1 & 7) << 3) | (reg2 & 7);
+                        if (reg1 & 8) rex |= 0x04;
+                        if (reg2 & 8) rex |= 0x01;
+                        if (rex != 0x40) seg_append(&text_seg, &rex, 1);
+                        seg_append(&text_seg, &opcode, 1);
+                        seg_append(&text_seg, &modrm, 1);
+                    }
                 }
             }
         }
     }
     fclose(in);
     printf("codegen: PASS 1 DONE, text_seg.size=%d, data_seg.size=%d, labels=%d, relocs=%d\n", (int)text_seg.size, (int)data_seg.size, (int)label_count, (int)reloc_count);
+
+    /* Pass 1.5: Register external symbols that were called but not defined */
+    {
+        size_t i;
+        for (i = 0; i < reloc_count; i++) {
+            size_t j;
+            int found = 0;
+            for (j = 0; j < label_count; j++) {
+                if (strcmp(labels[j].name, relocs[i].target_name) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                /* Add external target as an undefined global symbol */
+                size_t idx;
+                if (label_count >= 4096) {
+                    fprintf(stderr, "error: assembler label table limit exceeded (max 4096)\n");
+                    free(text_seg.data);
+                    free(data_seg.data);
+                    return -1;
+                }
+                idx = label_count++;
+                strncpy(labels[idx].name, relocs[i].target_name, sizeof(labels[idx].name) - 1);
+                labels[idx].name[sizeof(labels[idx].name) - 1] = '\0';
+                labels[idx].is_global = 1;
+                labels[idx].segment = 0; /* SHN_UNDEF */
+                labels[idx].size = 0;
+                labels[idx].offset = 0;
+            }
+        }
+    }
 
     /* Pass 2: Local relocation resolution */
     size_t i;
