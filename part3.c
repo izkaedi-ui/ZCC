@@ -1061,7 +1061,90 @@ static void parse_or_skip_gcc_attributes(Compiler *cc, Type *dtype) {
     }
 }
 
+static void recompute_struct_layout(Type *stype) {
+    if (!stype || (stype->kind != TY_STRUCT && stype->kind != TY_UNION) || !stype->is_complete) return;
+    
+    int is_union = (stype->kind == TY_UNION);
+    int offset = 0;
+    int max_size = 0;
+    int max_align = 1;
+    int bf_active = 0;
+    int bf_unit_size = 0;
+    int bf_current_bit = 0;
+    int bf_unit_offset = 0;
+    
+    StructField *field = stype->fields;
+    while (field) {
+        Type *ftype = field->type;
+        int falign = type_align(ftype);
+        if (stype->is_packed) falign = 1;
+        if (falign > max_align) max_align = falign;
+        
+        if (is_union) {
+            field->offset = 0;
+            if (type_size(ftype) > max_size) max_size = type_size(ftype);
+        } else {
+            if (field->is_bitfield) {
+                int bf_size = field->bit_size;
+                int fsize = type_size(ftype);
+                if (bf_active && fsize == bf_unit_size && bf_size > 0 && bf_current_bit + bf_size <= fsize * 8) {
+                    field->offset = bf_unit_offset;
+                    field->bit_offset = bf_current_bit;
+                    bf_current_bit += bf_size;
+                } else {
+                    bf_active = 1;
+                    bf_unit_size = fsize;
+                    bf_current_bit = 0;
+                    if (falign > 1) {
+                        offset = (offset + falign - 1) & ~(falign - 1);
+                    }
+                    bf_unit_offset = offset;
+                    if (bf_size > 0) {
+                        field->offset = bf_unit_offset;
+                        field->bit_offset = 0;
+                        bf_current_bit = bf_size;
+                        offset += fsize;
+                    } else {
+                        bf_active = 0;
+                        bf_unit_size = 0;
+                        bf_current_bit = 0;
+                    }
+                }
+            } else {
+                bf_active = 0;
+                if (falign > 1) {
+                    offset = (offset + falign - 1) & ~(falign - 1);
+                }
+                field->offset = offset;
+                offset = offset + type_size(ftype);
+            }
+        }
+        field = field->next;
+    }
+    
+    if (is_union) {
+        stype->size = max_size;
+    } else {
+        stype->size = offset;
+    }
+    
+    int final_align = max_align;
+    if (stype->explicit_align > 0) {
+        final_align = stype->explicit_align;
+    } else if (stype->is_packed) {
+        final_align = 1;
+    }
+    
+    if (final_align > 1) {
+        stype->size = (stype->size + final_align - 1) & ~(final_align - 1);
+    }
+    stype->align = final_align;
+}
+
 static void inject_attribute_parser(Compiler *cc, Type *dtype) {
+    int was_packed = dtype ? dtype->is_packed : 0;
+    int was_explicit = dtype ? dtype->explicit_align : 0;
+
     if (cc->pending_packed) {
         if (dtype) dtype->is_packed = 1;
         cc->pending_packed = 0;
@@ -1076,6 +1159,12 @@ static void inject_attribute_parser(Compiler *cc, Type *dtype) {
     if (cc->tk == TK_IDENT &&
         (strcmp(cc->tk_text, "__attribute__") == 0 || strcmp(cc->tk_text, "__attribute") == 0)) {
         parse_or_skip_gcc_attributes(cc, dtype);
+    }
+
+    if (dtype && dtype->is_complete) {
+        if (dtype->is_packed != was_packed || dtype->explicit_align != was_explicit) {
+            recompute_struct_layout(dtype);
+        }
     }
 }
 
