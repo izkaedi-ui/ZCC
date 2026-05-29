@@ -32,7 +32,8 @@ Fault and Triple Fault loop on the first timer interrupt.
 ---
 
 ## Status
-OPEN — workaround active, root cause unfixed.
+RESOLVED — root cause fixed in part3.c (recompute_struct_layout), commit 142b783d.
+Kernel migrated off the idt_p[10] workaround in 72a90cd4.
 
 ## Workaround
 kernel/kmain.c builds the IDT descriptor as a manual 10-byte stack array (unsigned char idt_p[10]) instead of relying on struct idt_ptr_64 with __attribute__((packed)). Zero runtime overhead; does not address the compiler defect.

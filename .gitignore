@@ -519,3 +519,18 @@ gen_report.py
 task.md
 zcc_pp.c
 
+governance/*.pem
+*.gguf
+*.onnx
+*.onnx.data
+*.npy
+*.index
+kernel/*.elf
+kernel/*.o
+seamfuzz/
+.tmp_zcc_tests/
+.forge0/
+phase*_gcc
+phase*_zcc
+interop_*
+zcc4
