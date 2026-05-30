@@ -535,3 +535,6 @@ phase*_zcc
 interop_*
 zcc4
 dreams/dream_state.json
+governance/
+identity/
+*.pem
