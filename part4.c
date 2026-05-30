@@ -1749,6 +1749,7 @@ void codegen_expr(Compiler *cc, Node *node) {
   }
 
   case ND_SHR: {
+    printf("ZCC:AST ND_SHR line=%d, lhs_kind=%d, type_size=%d, lhs_type_size=%d\n", node->line, node->lhs ? node->lhs->kind : -1, node->type ? node->type->size : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char lhs_ir[32];
     char rhs_ir[32];
     codegen_expr_checked(cc, node->lhs);
@@ -2331,6 +2332,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
 
   case ND_CAST: {
+    printf("ZCC:AST ND_CAST line=%d, target_size=%d, lhs_kind=%d, lhs_type_size=%d\n", node->line, node->cast_type ? node->cast_type->size : -1, node->lhs ? node->lhs->kind : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char src_ir[32];
     if (!node->lhs) {
       error_at(cc, node->line, "codegen_expr: ND_CAST null lhs");

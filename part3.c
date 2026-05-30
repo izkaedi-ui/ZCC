@@ -1472,19 +1472,7 @@ Node *parse_primary(Compiler *cc) {
     if (cc->tk == TK_LPAREN) {
         next_token(cc);
 
-        /* check for cast expression */
-        if (is_type_token(cc)) {
-            Type *cast_type;
-            char dummy[MAX_IDENT];
-            cast_type = parse_type(cc);
-            cast_type = parse_declarator(cc, cast_type, dummy);
-            expect(cc, TK_RPAREN);
-            n = node_new(cc, ND_CAST, line);
-            n->cast_type = cast_type;
-            n->lhs = parse_unary(cc);
-            n->type = cast_type;
-            return n;
-        }
+
 
         n = parse_expr(cc);
         expect(cc, TK_RPAREN);
@@ -1992,14 +1980,23 @@ Node *parse_unary(Compiler *cc) {
     }
 
     if (cc->tk == TK_LPAREN) {
-        int pk = peek_token(cc);
-        int is_cast = 0;
-        if (pk == TK_INT || pk == TK_CHAR || pk == TK_VOID || pk == TK_STRUCT || pk == TK_UNION || pk == TK_ENUM || pk == TK_LONG || pk == TK_SHORT || pk == TK_UNSIGNED || pk == TK_SIGNED || pk == TK_FLOAT || pk == TK_DOUBLE) {
-            is_cast = 1;
-        } else if (pk == TK_IDENT) {
-            Symbol *sym = scope_find(cc, cc->peek_text);
-            if (sym && sym->is_typedef) is_cast = 1;
-        }
+        int pk;
+        int is_cast;
+        int curr_tk;
+        char curr_txt[MAX_IDENT];
+        
+        pk = peek_token(cc);
+        is_cast = 0;
+        curr_tk = cc->tk;
+        strncpy(curr_txt, cc->tk_text, MAX_IDENT - 1);
+        curr_txt[MAX_IDENT - 1] = 0;
+        cc->tk = pk;
+        strncpy(cc->tk_text, cc->peek_text, MAX_IDENT - 1);
+        cc->tk_text[MAX_IDENT - 1] = 0;
+        if (is_type_token(cc)) is_cast = 1;
+        cc->tk = curr_tk;
+        strncpy(cc->tk_text, curr_txt, MAX_IDENT - 1);
+        cc->tk_text[MAX_IDENT - 1] = 0;
         
         if (is_cast) {
             char dummy[MAX_IDENT];
