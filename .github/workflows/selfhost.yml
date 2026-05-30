@@ -17,21 +17,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc make
+          sudo apt-get install -y gcc make python3
 
-      - name: Bootstrap Stage 1 — gcc builds zcc
+      - name: Build zcc from parts
         run: |
-          gcc -O2 -o zcc zcc.c
-          echo "Stage 1: gcc -> zcc OK"
+          make zcc
+          echo "Stage 1: parts -> zcc.c -> zcc OK"
 
       - name: Self-Host Verification — zcc2.s == zcc3.s
         run: |
           make selfhost
-        id: selfhost
-
-      - name: Confirm parity
-        run: |
-          diff zcc2.s zcc3.s && echo "SELF-HOST VERIFIED (assembly identical)" || (echo "SELF-HOST FAILED"; exit 1)
 
       - name: Upload assembly artifacts
         uses: actions/upload-artifact@v4
