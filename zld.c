@@ -204,6 +204,18 @@ static char      g_output[256] = "a.out";
 static OutSection g_out[8];  /* .text .rodata .data .bss */
 static int        g_nout = 0;
 
+typedef struct {
+    char name[64];
+    char val_str[128];
+    uint64_t value;
+    int resolved;
+} LdSymbol;
+
+static LdSymbol g_ld_syms[64];
+static int      g_nld_syms = 0;
+
+static OutSection *get_out_section(const char *name, uint64_t flags);
+
 /* ── Utilities ─────────────────────────────────────────────────────────── */
 static void die(const char *msg) {
     fprintf(stderr, "zld: fatal: %s\n", msg);
@@ -306,21 +318,31 @@ static void parse_ld_script(const char *path) {
 
         if (!in_sections) { p++; continue; }
 
-        /* ". = ADDR;" */
+        /* ". = ADDR;" or ". = ALIGN(ADDR);" */
         if (p[0] == '.' && p[1] == ' ' && p[2] == '=') {
             p += 3;
             while (*p == ' ' || *p == '\t') p++;
-            cur_addr = (uint64_t)strtoull(p, &p, 0);
-            if (*p == 'M' || *p == 'm') { cur_addr *= 1024 * 1024; p++; }
-            else if (*p == 'K' || *p == 'k') { cur_addr *= 1024; p++; }
-            else if (*p == 'G' || *p == 'g') { cur_addr *= 1024 * 1024 * 1024; p++; }
+            if (strncmp(p, "ALIGN(", 6) == 0) {
+                p += 6;
+                uint64_t align_val = (uint64_t)strtoull(p, &p, 0);
+                if (*p == 'K' || *p == 'k') { align_val *= 1024; p++; }
+                else if (*p == 'M' || *p == 'm') { align_val *= 1024 * 1024; p++; }
+                cur_addr = ALIGN_UP(cur_addr, align_val);
+                while (*p && *p != ')') p++;
+                if (*p) p++;
+            } else {
+                cur_addr = (uint64_t)strtoull(p, &p, 0);
+                if (*p == 'M' || *p == 'm') { cur_addr *= 1024 * 1024; p++; }
+                else if (*p == 'K' || *p == 'k') { cur_addr *= 1024; p++; }
+                else if (*p == 'G' || *p == 'g') { cur_addr *= 1024 * 1024 * 1024; p++; }
+            }
             while (*p && *p != ';') p++;
             if (*p) p++;
             has_pending_addr = 1;
             continue;
         }
 
-        /* ".secname : {" */
+        /* ".secname : {" or ".secname : ALIGN(...) {" */
         if (p[0] == '.' && (p[1] == 't' || p[1] == 'r' || p[1] == 'd' || p[1] == 'b' || p[1] == 'n')) {
             char *start = p;
             while (*p && *p != ':' && *p != '\n') p++;
@@ -334,6 +356,65 @@ static void parse_ld_script(const char *path) {
                 while (i >= 0 && (tmp[i] == ' ' || tmp[i] == '\t')) tmp[i--] = 0;
                 strncpy(cur_out, tmp, sizeof(cur_out)-1);
                 p++; /* skip ':' */
+
+                /* Parse section alignment if present (e.g. ALIGN(4K) before '{') */
+                char *brace = strchr(p, '{');
+                if (brace) {
+                    char *align_ptr = strstr(p, "ALIGN(");
+                    if (align_ptr && align_ptr < brace) {
+                        align_ptr += 6;
+                        uint64_t align_val = (uint64_t)strtoull(align_ptr, &align_ptr, 0);
+                        if (*align_ptr == 'K' || *align_ptr == 'k') align_val *= 1024;
+                        else if (*align_ptr == 'M' || *align_ptr == 'm') align_val *= 1024 * 1024;
+                        
+                        /* Save this alignment for cur_out */
+                        OutSection *os = get_out_section(cur_out, SHF_ALLOC);
+                        os->align = align_val;
+                        printf("zld: parsed section '%s' explicit alignment: %llu\n", cur_out, (unsigned long long)align_val);
+                    }
+                }
+                continue;
+            } else {
+                p = start + 1;
+                continue;
+            }
+        }
+
+        /* "symbol_name = ...;" inside SECTIONS block */
+        if (in_sections && p[0] != '.' && isalpha((unsigned char)p[0])) {
+            char *start = p;
+            while (*p && *p != '=' && *p != ';' && *p != '\n') p++;
+            if (*p == '=') {
+                char sym_name[64];
+                int len = (int)(p - start);
+                if (len >= 64) len = 63;
+                strncpy(sym_name, start, len); sym_name[len] = 0;
+                /* trim spaces */
+                int i = len-1;
+                while (i >= 0 && (sym_name[i] == ' ' || sym_name[i] == '\t')) sym_name[i--] = 0;
+                
+                p++; /* skip '=' */
+                while (*p == ' ' || *p == '\t') p++;
+                char expr_buf[128];
+                char *expr_start = p;
+                while (*p && *p != ';') p++;
+                int expr_len = (int)(p - expr_start);
+                if (expr_len >= 128) expr_len = 127;
+                strncpy(expr_buf, expr_start, expr_len); expr_buf[expr_len] = 0;
+                /* trim spaces */
+                i = expr_len-1;
+                while (i >= 0 && (expr_buf[i] == ' ' || expr_buf[i] == '\t' || expr_buf[i] == '\r' || expr_buf[i] == '\n')) expr_buf[i--] = 0;
+                
+                /* Register this custom symbol */
+                if (g_nld_syms < 64) {
+                    LdSymbol *ls = &g_ld_syms[g_nld_syms++];
+                    strncpy(ls->name, sym_name, sizeof(ls->name)-1);
+                    strncpy(ls->val_str, expr_buf, sizeof(ls->val_str)-1);
+                    ls->resolved = 0;
+                    ls->value = 0;
+                    printf("zld: registered linker script symbol '%s' = '%s'\n", ls->name, ls->val_str);
+                }
+                if (*p) p++;
                 continue;
             } else {
                 p = start + 1;
@@ -511,15 +592,13 @@ static void layout(void) {
             uint64_t prev_end = 0x100000;
             for (prev_idx = 0; prev_idx < oi; prev_idx++) {
                 OutSection *prev_sec = get_out_section(out_order[prev_idx], SHF_ALLOC);
-                if (prev_sec->vma + prev_sec->size > prev_end) {
+                if (prev_sec->size > 0 && prev_sec->vma + prev_sec->size > prev_end) {
                     prev_end = prev_sec->vma + prev_sec->size;
                 }
             }
-            if (strcmp(oname, ".note") == 0 || strcmp(oname, ".rodata") == 0) {
-                base = ALIGN_UP(prev_end, 16);
-            } else {
-                base = ALIGN_UP(prev_end, 0x1000);
-            }
+            OutSection *sec = get_out_section(oname, SHF_ALLOC);
+            uint64_t sec_align = sec->align ? sec->align : 16;
+            base = ALIGN_UP(prev_end, sec_align);
         }
         
         {
@@ -713,19 +792,38 @@ static void collect_symbols(void) {
         }
     }
 
-    /* resolve _kernel_end */
-    GlobalSym *ke_sym = find_sym("_kernel_end");
-    if (!ke_sym) ke_sym = find_sym("__kernel_end");
-    if (ke_sym) {
+    /* resolve custom linker script symbols */
+    {
         uint64_t end_va = 0x100000;
         int s;
+        int j;
         for (s = 0; s < g_nout; s++) {
             if (g_out[s].vma + g_out[s].size > end_va) {
                 end_va = g_out[s].vma + g_out[s].size;
             }
         }
-        ke_sym->value = end_va;
-        ke_sym->defined = 1;
+        
+        for (j = 0; j < g_nld_syms; j++) {
+            LdSymbol *ls = &g_ld_syms[j];
+            uint64_t val = 0;
+            if (strcmp(ls->val_str, ".") == 0) {
+                val = end_va;
+            } else if (strncmp(ls->val_str, "ALIGN(", 6) == 0) {
+                char *ptr = ls->val_str + 6;
+                uint64_t align_val = (uint64_t)strtoull(ptr, &ptr, 0);
+                if (*ptr == 'K' || *ptr == 'k') align_val *= 1024;
+                else if (*ptr == 'M' || *ptr == 'm') align_val *= 1024 * 1024;
+                val = ALIGN_UP(end_va, align_val);
+            } else {
+                val = (uint64_t)strtoull(ls->val_str, NULL, 0);
+            }
+            
+            GlobalSym *gs = find_sym(ls->name);
+            if (!gs) gs = add_sym(ls->name);
+            gs->value = val;
+            gs->defined = 1;
+            printf("zld: resolved linker script symbol '%s' = 0x%llx\n", gs->name, (unsigned long long)val);
+        }
     }
 
     /* resolve entry point */
@@ -974,6 +1072,9 @@ static void write_output(const char *path) {
         phdrs[ph_idx].p_filesz = rx_filesz;
         phdrs[ph_idx].p_memsz  = rx_memsz;
         phdrs[ph_idx].p_align  = 0x1000;
+        printf("zld segment: RX_SEG, VMA=0x%llx, memsz=0x%llx, filesz=0x%llx, flags=%d\n",
+               (unsigned long long)rx_vaddr, (unsigned long long)rx_memsz,
+               (unsigned long long)rx_filesz, (int)rx_flags);
         ph_idx++;
     }
 
@@ -1002,6 +1103,9 @@ static void write_output(const char *path) {
         phdrs[ph_idx].p_filesz = rw_filesz;
         phdrs[ph_idx].p_memsz  = rw_memsz;
         phdrs[ph_idx].p_align  = 0x1000;
+        printf("zld segment: RW_SEG, VMA=0x%llx, memsz=0x%llx, filesz=0x%llx, flags=%d\n",
+               (unsigned long long)rw_vaddr, (unsigned long long)rw_memsz,
+               (unsigned long long)rw_filesz, (int)rw_flags);
         ph_idx++;
     }
 
@@ -1016,6 +1120,9 @@ static void write_output(const char *path) {
         phdrs[ph_idx].p_filesz = note_sec->size;
         phdrs[ph_idx].p_memsz  = note_sec->size;
         phdrs[ph_idx].p_align  = 4;
+        printf("zld segment: PT_NOTE, VMA=0x%llx, memsz=0x%llx, filesz=0x%llx, flags=%d\n",
+               (unsigned long long)note_sec->vma, (unsigned long long)note_sec->size,
+               (unsigned long long)note_sec->size, (int)PF_R);
         ph_idx++;
     }
 
@@ -1080,6 +1187,7 @@ static void write_output(const char *path) {
            path, (unsigned long long)g_entry, phnum);
 }
 
+
 /* ── main ───────────────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
     char *ld_script = NULL;
@@ -1105,11 +1213,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* 1. Parse linker script */
+    printf("[zld] Initiating static link campaign: output=%s\n", g_output);
     if (ld_script) {
         parse_ld_script(ld_script);
     } else {
-        /* Default layout for zkernel */
+        /* Default hardcoded layout rules */
         LdRule *r;
         strncpy(g_entry_name, "_start", sizeof(g_entry_name)-1);
         r = &g_rules[g_nrules++];
@@ -1129,24 +1237,15 @@ int main(int argc, char *argv[]) {
         r->addr = 0; r->has_addr = 0;
     }
 
-    /* 2. Load objects */
     g_nobj = ninput;
-    for (i = 0; i < ninput; i++)
+    for (i = 0; i < ninput; i++) {
         load_obj(inputs[i], i);
+    }
 
-    /* 3. Layout: assign VMAs */
     layout();
-
-    /* 4. Collect symbols */
     collect_symbols();
-
-    /* 5. Copy section data */
     copy_sections();
-
-    /* 6. Apply relocations */
     apply_relocations();
-
-    /* 7. Write output ELF */
     write_output(g_output);
 
     return 0;

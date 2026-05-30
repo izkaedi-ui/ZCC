@@ -2039,6 +2039,9 @@ link_phase:
     } else {
       sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file, extra_link_args);
     }
+    fflush(stdout);
+    fflush(stderr);
+    fflush(NULL);
     ret = system(cmd);
     long p6_end = clock();
     int p6_us = (int)((p6_end - p6_start) * 1000000 / 1000000);
