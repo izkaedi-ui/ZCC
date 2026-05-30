@@ -1,0 +1,43 @@
+name: ZCC Self-Host Verification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  selfhost:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc make
+
+      - name: Bootstrap Stage 1 — gcc builds zcc
+        run: |
+          gcc -O2 -o zcc zcc.c
+          echo "Stage 1: gcc -> zcc OK"
+
+      - name: Self-Host Verification — zcc2.s == zcc3.s
+        run: |
+          make selfhost
+        id: selfhost
+
+      - name: Confirm parity
+        run: |
+          diff zcc2.s zcc3.s && echo "SELF-HOST VERIFIED (assembly identical)" || (echo "SELF-HOST FAILED"; exit 1)
+
+      - name: Upload assembly artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfhost-assembly-${{ github.sha }}
+          path: |
+            zcc2.s
+            zcc3.s
+          retention-days: 90
