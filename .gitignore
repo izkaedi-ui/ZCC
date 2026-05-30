@@ -367,6 +367,8 @@ src/fake_csmith.h
 
 # IR target tmps (if in src/)
 src/ir_*.c
+# Exception: ir_serialization.c is source, not a tmp
+!src/ir_serialization.c
 src/ir_*.h
 src/ir_to_*.c
 
