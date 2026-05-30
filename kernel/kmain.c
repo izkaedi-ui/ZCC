@@ -15,6 +15,74 @@ volatile unsigned long long tick_count = 0;
 /* Global IDT table carrying 256 gates */
 struct idt_entry_64 idt[256];
 
+/* Managing 32,768 page blocks (128MB) via 4,096 bytes (4KB) static bitmap */
+static unsigned char pmm_bitmap[4096];
+static unsigned long long pmm_total_blocks = 32768;
+static unsigned long long pmm_free_blocks = 32768;
+
+void pmm_init(unsigned long kernel_end_addr) {
+    unsigned long long i;
+    unsigned long long kernel_end_block;
+    
+    /* Initially mark all blocks as free (0) */
+    for (i = 0; i < 4096; i++) {
+        pmm_bitmap[i] = 0;
+    }
+    
+    /* Mark everything below 1MB (256 blocks) as reserved (1) */
+    for (i = 0; i < 256; i++) {
+        pmm_bitmap[i / 8] |= (1 << (i % 8));
+    }
+    pmm_free_blocks -= 256;
+    
+    /* Calculate block index of kernel end address */
+    kernel_end_block = (kernel_end_addr + 4095) / 4096;
+    if (kernel_end_block < 256) {
+        kernel_end_block = 256;
+    }
+    
+    /* Mark kernel space (from 1MB to kernel_end_block) as reserved */
+    for (i = 256; i < kernel_end_block && i < pmm_total_blocks; i++) {
+        pmm_bitmap[i / 8] |= (1 << (i % 8));
+        pmm_free_blocks--;
+    }
+    
+    /* Mark blocks beyond 128MB as allocated to prevent out-of-bounds allocations */
+    for (i = pmm_total_blocks; i < 32768; i++) {
+        pmm_bitmap[i / 8] |= (1 << (i % 8));
+    }
+}
+
+void *pmm_alloc_page(void) {
+    unsigned long long i, j;
+    for (i = 0; i < 4096; i++) {
+        if (pmm_bitmap[i] != 0xFF) { /* At least one free block in this byte */
+            for (j = 0; j < 8; j++) {
+                if ((pmm_bitmap[i] & (1 << j)) == 0) {
+                    pmm_bitmap[i] |= (1 << j);
+                    pmm_free_blocks--;
+                    return (void *)((i * 8 + j) * 4096);
+                }
+            }
+        }
+    }
+    return (void *)0; /* Out of memory */
+}
+
+void pmm_free_page(void *addr) {
+    unsigned long long block = (unsigned long long)addr / 4096;
+    if (block < pmm_total_blocks) {
+        if ((pmm_bitmap[block / 8] & (1 << (block % 8))) != 0) {
+            pmm_bitmap[block / 8] &= ~(1 << (block % 8));
+            pmm_free_blocks++;
+        }
+    }
+}
+
+unsigned long long pmm_get_free_blocks(void) {
+    return pmm_free_blocks;
+}
+
 /* Helper to clear visual screen */
 void kclear_screen(void) {
     int i;
@@ -216,6 +284,72 @@ void kwrite_serial(const char *msg) {
     }
 }
 
+/* Print hex formatting value directly to COM1 serial port */
+void kwrite_serial_hex(unsigned long long val) {
+    char buf[32];
+    int idx = 0;
+    if (val == 0) {
+        kwrite_serial("0");
+        return;
+    }
+    while (val > 0) {
+        int rem = val % 16;
+        buf[idx++] = (rem < 10) ? '0' + rem : 'A' + (rem - 10);
+        val /= 16;
+    }
+    while (idx > 0) {
+        char ch = buf[--idx];
+        outb(0x3F8, ch);
+    }
+}
+
+/* Master CPU Exception State Handler called by exception_common_stub */
+void handle_exception_state(struct interrupt_frame *frame) {
+    const char *name = "UNKNOWN EXCEPTION";
+    if (frame->vector == 0) name = "DIVIDE-BY-ZERO (#DE)";
+    else if (frame->vector == 8) name = "DOUBLE FAULT (#DF)";
+    else if (frame->vector == 13) name = "GENERAL PROTECTION FAULT (#GP)";
+    else if (frame->vector == 14) name = "PAGE FAULT (#PF)";
+
+    /* 1. Print bold visual failure state on the VGA console */
+    kprint_string("\n================================================================================\n");
+    kprint_string("                    !!! BARE-METAL CPU EXCEPTION DETECTED !!!                   \n");
+    kprint_string("================================================================================\n");
+    kprint_string("EXCEPTION: ");
+    kprint_string(name);
+    kprint_string(" (Vector: ");
+    kprint_dec(frame->vector);
+    kprint_string(")\n");
+    kprint_string("ERROR CODE: 0x");
+    kprint_hex(frame->error_code);
+    kprint_string("\n\n");
+
+    /* 2. Dump register states in hexadecimal formatting */
+    kprint_string("RAX: 0x"); kprint_hex(frame->rax); kprint_string("  RBX: 0x"); kprint_hex(frame->rbx); kprint_string("  RCX: 0x"); kprint_hex(frame->rcx); kprint_string("  RDX: 0x"); kprint_hex(frame->rdx); kprint_string("\n");
+    kprint_string("RSI: 0x"); kprint_hex(frame->rsi); kprint_string("  RDI: 0x"); kprint_hex(frame->rdi); kprint_string("  RBP: 0x"); kprint_hex(frame->rbp); kprint_string("  RSP: 0x"); kprint_hex(frame->rsp); kprint_string("\n");
+    kprint_string("R8:  0x"); kprint_hex(frame->r8);  kprint_string("  R9:  0x"); kprint_hex(frame->r9);  kprint_string("  R10: 0x"); kprint_hex(frame->r10); kprint_string("  R11: 0x"); kprint_hex(frame->r11); kprint_string("\n");
+    kprint_string("R12: 0x"); kprint_hex(frame->r12); kprint_string("  R13: 0x"); kprint_hex(frame->r13); kprint_string("  R14: 0x"); kprint_hex(frame->r14); kprint_string("  R15: 0x"); kprint_hex(frame->r15); kprint_string("\n\n");
+    
+    kprint_string("RIP: 0x"); kprint_hex(frame->rip); kprint_string("  CS: 0x"); kprint_hex(frame->cs); kprint_string("  RFLAGS: 0x"); kprint_hex(frame->rflags); kprint_string("\n");
+    kprint_string("================================================================================\n");
+    kprint_string("                     SYSTEM HALTED. CLI/HLT ACTIVE.                             \n");
+    kprint_string("================================================================================\n");
+
+    /* 3. Output registration events to the COM1 serial port */
+    kwrite_serial("\n*** BARE-METAL CPU EXCEPTION DETECTED ***\n");
+    kwrite_serial("Exception Name: "); kwrite_serial(name); kwrite_serial("\n");
+    kwrite_serial("Vector: "); kprint_dec(frame->vector); kwrite_serial("\n");
+    kwrite_serial("RIP: 0x"); kwrite_serial_hex(frame->rip); kwrite_serial("\n");
+    kwrite_serial("RAX: 0x"); kwrite_serial_hex(frame->rax); kwrite_serial("  RBX: 0x"); kwrite_serial_hex(frame->rbx); kwrite_serial("\n");
+    kwrite_serial("[ZKAEDI_V2_EXCEPTION_SUCCESS]\n");
+
+    /* 4. Infinite CPU halt loop */
+    while (1) {
+        cli_native();
+        __asm__ __volatile__("hlt");
+    }
+}
+
 void kmain(void) {
     /* 1. Initialize COM1 port */
     outb(0x3F8 + 1, 0x00);    /* Disable all interrupts */
@@ -234,7 +368,34 @@ void kmain(void) {
     kprint_string("[SYSTEM] VGA Monitor identity mapped at 0xB8000.\n");
     kprint_string("[SYSTEM] Display Engine loaded cleanly. No varargs overhead.\n");
 
-    /* 3. Interrupt Descriptors Setup */
+    /* 3. Physical Memory Manager Setup & Self-Test */
+    kprint_string("[SYSTEM] PMM: Initializing Page Frame Allocator...\n");
+    pmm_init((unsigned long)&_kernel_end);
+    kprint_string("[SYSTEM] PMM: Free blocks managed: ");
+    kprint_dec(pmm_get_free_blocks());
+    kprint_string(" (");
+    kprint_dec(pmm_get_free_blocks() * 4);
+    kprint_string(" KB free)\n");
+
+    {
+        void *p1 = pmm_alloc_page();
+        void *p2 = pmm_alloc_page();
+        
+        kprint_string("[SYSTEM] PMM: Allocated page 1 at physical address: 0x");
+        kprint_hex((unsigned long)p1);
+        kprint_string("\n");
+        kprint_string("[SYSTEM] PMM: Allocated page 2 at physical address: 0x");
+        kprint_hex((unsigned long)p2);
+        kprint_string("\n");
+        
+        pmm_free_page(p1);
+        pmm_free_page(p2);
+        kprint_string("[SYSTEM] PMM: Pages freed successfully. Free blocks: ");
+        kprint_dec(pmm_get_free_blocks());
+        kprint_string("\n");
+    }
+
+    /* 4. Interrupt Descriptors Setup */
     pic_remap();
     kprint_string("[SYSTEM] 8259 PIC remapped to vectors 32-47.\n");
 
@@ -263,17 +424,25 @@ void kmain(void) {
     }
     kprint_string("[SYSTEM] 64-bit IDT descriptors registered.\n");
 
-    /* 4. Programmable Interval Timer Setup (100 Hz) */
+    /* 5. Programmable Interval Timer Setup (100 Hz) */
     outb(0x43, 0x36);         /* Mode 3: Square Wave */
     outb(0x40, 0x9C);         /* Divisor low: 0x9C */
     outb(0x40, 0x2E);         /* Divisor high: 0x2E */
     kprint_string("[SYSTEM] PIT scheduled for 100 Hz clock ticks.\n");
 
-    /* 5. Enable CPU Interrupts & Run Idle Scheduler Tick Loop */
+    /* 6. Enable CPU Interrupts & Run E2E Diagnostics */
     sti_native();
     kwrite_serial("[ZKAEDI_V2_BOOT_SUCCESS]\n");
     kprint_string("[SYSTEM] interrupts active. Clock loop online. Boot successful.\n\n");
     kprint_string("kmain console input echo > ");
+    
+    kprint_string("\n[TESTING] Triggering intentional Division-by-Zero CPU exception...\n");
+    {
+        volatile int a = 1;
+        volatile int b = 0;
+        volatile int c = a / b;
+        (void)c;
+    }
 
     while (1) {
         __asm__ __volatile__("hlt");

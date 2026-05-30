@@ -1139,6 +1139,11 @@ static void security_bounds_scan(Compiler *cc, char *filename) {
 /* Forward declaration for IR pass manager (linked separately) */
 void ir_pm_run_default(void *mod_ptr, int verbose);
 
+static int g_run_zld = 0;
+static const char *g_zld_objs[128];
+static int g_zld_obj_count = 0;
+static const char *g_zld_script = NULL;
+
 int zcc_main(int argc, char **argv) {
   Compiler *cc;
   FrontendLang frontend_lang;
@@ -1422,6 +1427,20 @@ int zcc_main(int argc, char **argv) {
       }
     } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-O", 2) == 0) {
       /* ignore linker flags */
+    } else if (strcmp(argv[i], "-zld") == 0) {
+      g_run_zld = 1;
+    } else if (strcmp(argv[i], "-T") == 0) {
+      i++;
+      if (i < argc) {
+        g_zld_script = argv[i];
+      }
+    } else if (strlen(argv[i]) > 2 && strcmp(argv[i] + strlen(argv[i]) - 2, ".o") == 0) {
+      if (g_zld_obj_count < 128) {
+        g_zld_objs[g_zld_obj_count++] = argv[i];
+      } else {
+        fprintf(stderr, "zcc: too many object files\n");
+        exit(1);
+      }
     } else if (strncmp(argv[i], "-Wl,", 4) == 0) {
       /* pass through linker flags */
       if (extra_link_args[0]) strncat(extra_link_args, " ", 4095 - (int)strlen(extra_link_args));
@@ -1491,6 +1510,13 @@ int zcc_main(int argc, char **argv) {
   if (oracle_selfhost_mode) {
     run_oracle_selfhost();
     return 0;
+  }
+
+  if (g_run_zld) {
+    extern int zld_link(const char **obj_files, int obj_count, const char *out_path, const char *script_path);
+    if (!output_file) output_file = "zkernel.elf";
+    if (!g_zld_script) g_zld_script = "linker.ld";
+    return zld_link(g_zld_objs, g_zld_obj_count, output_file, g_zld_script);
   }
 
   /* Stderr policy: open by default, --quiet silences.
@@ -2009,7 +2035,7 @@ link_phase:
     if (compile_only) {
       sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c src/zcc_oracle_substrate.c src/elf_emit.c src/codegen.c src/ir_serialization.c src/zcc_smt_prover.c src/gguf_emit.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c src/zcc_oracle_substrate.c src/elf_emit.c src/codegen.c src/ir_serialization.c src/zcc_smt_prover.c src/gguf_emit.c src/zld.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file, extra_link_args);
     }
