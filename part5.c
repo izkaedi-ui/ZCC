@@ -6,6 +6,7 @@
 extern long clock(void);
 extern int rand(void);
 #include "ir_emit_dispatch.h"
+#include "src/zcc_smt_prover.h"
 
 #ifndef ZCC_AST_BRIDGE_H
 /* 
@@ -49,6 +50,10 @@ static int  g_security_787 = 0;
 
 static const char *g_emit_zxr_path = NULL;
 static const char *g_replay_zxr_path = NULL;
+
+static int         g_emit_gguf = 0;
+static const char *g_gguf_out_path = NULL;
+static int         g_quantize_type = 0;
 
 #ifndef PPCONFIG_DEF
 #define PPCONFIG_DEF
@@ -579,6 +584,9 @@ static void peephole_optimize(char *filename) {
         sscanf(l1, "    pushq %s", tmp1);
         sscanf(l2, "    popq %s", tmp2);
         if (strcmp(tmp1, tmp2) == 0) {
+          if (g_emit_smt_proofs) {
+              smt_prove_push_pop_elision(tmp1, tmp2, 0, i);
+          }
           line_ptrs[i][0] = 0;
           line_ptrs[i + 1][0] = 0;
           eliminated += 2;
@@ -599,6 +607,9 @@ static void peephole_optimize(char *filename) {
           i += 2;
           continue;
         } else {
+          if (g_emit_smt_proofs) {
+              smt_prove_push_pop_elision(tmp1, tmp2, 1, i);
+          }
           sprintf(line_ptrs[i], "    movq %s, %s\n", tmp1, tmp2);
           line_ptrs[i + 1][0] = 0;
           eliminated += 2;
@@ -618,6 +629,9 @@ static void peephole_optimize(char *filename) {
         strcmp(l1, "    subq $0, %rax\n") == 0 ||
         strcmp(l1, "    addq $0, %rsp\n") == 0 ||
         strcmp(l1, "    subq $0, %rsp\n") == 0) {
+      if (g_emit_smt_proofs) {
+          smt_prove_arith_nullification(l1, strstr(l1, "%rsp") ? "rsp" : "rax", i);
+      }
       line_ptrs[i][0] = 0;
       eliminated += 1;
       {
@@ -637,6 +651,9 @@ static void peephole_optimize(char *filename) {
           strncmp(l3, "    popq ", 9) == 0) {
         char pop_reg[64];
         sscanf(l3, "    popq %s", pop_reg);
+        if (g_emit_smt_proofs) {
+            smt_prove_push_lea_pop_triad(l2, pop_reg, i);
+        }
         sprintf(line_ptrs[i], "    movq %%rax, %s\n", pop_reg);
         line_ptrs[i + 2][0] = 0;
         eliminated += 3;
@@ -1122,7 +1139,7 @@ static void security_bounds_scan(Compiler *cc, char *filename) {
 /* Forward declaration for IR pass manager (linked separately) */
 void ir_pm_run_default(void *mod_ptr, int verbose);
 
-int main(int argc, char **argv) {
+int zcc_main(int argc, char **argv) {
   Compiler *cc;
   FrontendLang frontend_lang;
   char *input_file;
@@ -1137,6 +1154,8 @@ int main(int argc, char **argv) {
   int i;
   int al;
 
+  cc = 0;
+  source = 0;
   input_file = 0;
   output_file = 0;
   include_paths[0] = '\0';
@@ -1186,6 +1205,10 @@ int main(int argc, char **argv) {
   int oracle_determinism_mode = 0;
   int oracle_selfhost_mode = 0;
   int oracle_stack_mode = 0;
+  char *g_emit_ir_graph_path = NULL;
+  char *g_replay_ir_path = NULL;
+  char *g_diff_ir_path_a = NULL;
+  char *g_diff_ir_path_b = NULL;
 
   /* parse arguments */
   for (i = 1; i < argc; i++) {
@@ -1318,6 +1341,49 @@ int main(int argc, char **argv) {
       oracle_stack_mode = 1;
     } else if (strcmp(argv[i], "--telemetry") == 0) {
       enable_telemetry_stdout = 1;
+    } else if (strcmp(argv[i], "--emit-ir-graph") == 0) {
+      g_emit_ir = 1;
+      g_ir_primary = 1;
+      i++;
+      if (i < argc) {
+        g_emit_ir_graph_path = argv[i];
+      }
+    } else if (strcmp(argv[i], "--replay-ir") == 0) {
+      i++;
+      if (i < argc) {
+        g_replay_ir_path = argv[i];
+      }
+    } else if (strcmp(argv[i], "--diff-ir") == 0) {
+      i++;
+      if (i < argc) {
+        g_diff_ir_path_a = argv[i];
+      }
+      i++;
+      if (i < argc) {
+        g_diff_ir_path_b = argv[i];
+      }
+    } else if (strcmp(argv[i], "--emit-smt-proofs") == 0) {
+      g_emit_smt_proofs = 1;
+      i++;
+      if (i < argc) {
+        strncpy(g_smt_proofs_dir, argv[i], 255);
+        g_smt_proofs_dir[255] = '\0';
+      }
+    } else if (strcmp(argv[i], "--emit-gguf") == 0) {
+      g_emit_gguf = 1;
+    } else if (strcmp(argv[i], "--quantize") == 0) {
+      i++;
+      if (i < argc) {
+        if (strcmp(argv[i], "fp16") == 0) {
+          g_quantize_type = 1;
+        } else if (strcmp(argv[i], "q4_0") == 0) {
+          g_quantize_type = 2;
+        } else if (strcmp(argv[i], "q8_0") == 0) {
+          g_quantize_type = 3;
+        } else {
+          g_quantize_type = 0;
+        }
+      }
     } else if (strcmp(argv[i], "--audit-export") == 0) {
       /* ForgeZero audit receipt to stdout — defensive analysis only */
       audit_export_mode = 1;
@@ -1369,6 +1435,57 @@ int main(int argc, char **argv) {
         strncat(extra_link_args, argv[i], 4095 - (int)strlen(extra_link_args));
       }
     }
+  }
+
+  if (g_emit_gguf) {
+      if (!output_file) {
+          output_file = "model.gguf";
+      }
+      g_gguf_out_path = output_file;
+      compile_only = 1;
+  }
+
+  if (g_diff_ir_path_a && g_diff_ir_path_b) {
+      extern int ir_diff_json(const char *path_a, const char *path_b);
+      return ir_diff_json(g_diff_ir_path_a, g_diff_ir_path_b);
+  }
+
+  if (g_replay_ir_path) {
+      extern int ir_deserialize_json(ir_module_t *mod, const char *in_filename);
+      ZCC_IR_INIT();
+      g_ir_module = ir_module_create();
+      int parse_ret = ir_deserialize_json(g_ir_module, g_replay_ir_path);
+      if (parse_ret != 0) {
+          fprintf(stderr, "zcc: failed to deserialize IR graph '%s'\n", g_replay_ir_path);
+          return 1;
+      }
+      
+      cc = (Compiler *)calloc(1, sizeof(Compiler));
+      cc->filename = "replayed_ir";
+      if (!output_file) output_file = "a.out";
+      sprintf(asm_file, "%s.s", output_file);
+      cc->out = fopen(asm_file, "w");
+      if (!cc->out) {
+          fprintf(stderr, "zcc: cannot open output file '%s'\n", asm_file);
+          return 1;
+      }
+      
+      /* Run the standard optimization passes if requested! */
+      ir_pm_run_default(g_ir_module, 1);
+      
+      /* Lower to x86-64 assembly! */
+      extern void ir_module_lower_x86(const ir_module_t *mod, FILE *out);
+      ir_module_lower_x86(g_ir_module, cc->out);
+      extern void codegen_emit_globals_and_strings(Compiler *cc);
+      codegen_emit_globals_and_strings(cc);
+      fclose(cc->out);
+      
+       /* cc will be freed and telemetry shut down cleanly at the end of link_phase */
+      
+      /* Now go to linking phase cleanly! */
+      int stop_at_asm = 0;
+      if (compile_only) stop_at_asm = 1;
+      goto link_phase;
   }
 
   if (oracle_selfhost_mode) {
@@ -1739,6 +1856,16 @@ int main(int argc, char **argv) {
 
   if (!enable_telemetry_stdout) printf("OK\n");
 
+  if (g_emit_gguf) {
+    extern int zcc_emit_gguf(void *cc, const char *out_path, int quantize_type);
+    int emit_ret = zcc_emit_gguf(cc, g_gguf_out_path, g_quantize_type);
+    fclose(cc->out);
+    free(source);
+    free(cc);
+    ir_telem_shutdown();
+    return emit_ret;
+  }
+
   if (oracle_abi_mode) {
     run_oracle_abi(cc, prog);
     fclose(cc->out);
@@ -1783,6 +1910,10 @@ int main(int argc, char **argv) {
 
       if (!enable_telemetry_stdout) printf("[Phase IR] IR Pass Manager...\n");
       ir_pm_run_default(g_ir_module, 1);
+      if (g_emit_ir_graph_path) {
+          extern int ir_serialize_json(const ir_module_t *mod, const char *out_filename, const char *source_file);
+          ir_serialize_json(g_ir_module, g_emit_ir_graph_path, input_file);
+      }
       
       cc->out = fopen(asm_file, "w");
       extern void ir_module_lower_x86(const ir_module_t *mod, FILE *out);
@@ -1878,7 +2009,7 @@ link_phase:
     if (compile_only) {
       sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -c -o %s %s 2>&1", output_file, asm_file);
     } else if (strcmp(input_file, "zcc.c") == 0 || (strlen(input_file) >= 6 && strcmp(input_file + strlen(input_file) - 6, "/zcc.c") == 0)) {
-      sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c src/zcc_oracle_substrate.c -lm 2>&1", output_file, asm_file);
+      sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c src/zcc_oracle_substrate.c src/elf_emit.c src/codegen.c src/ir_serialization.c src/zcc_smt_prover.c src/gguf_emit.c -lm 2>&1", output_file, asm_file);
     } else {
       sprintf(cmd, "gcc -O0 -no-pie -fno-asynchronous-unwind-tables -Wa,--noexecstack -fno-unwind-tables -o %s %s %s -lm -lpthread -ldl 2>&1", output_file, asm_file, extra_link_args);
     }
