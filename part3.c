@@ -952,6 +952,14 @@ static long long eval_const_expr(Node *n) {
     if (n->kind == ND_BAND) return eval_const_expr(n->lhs) & eval_const_expr(n->rhs);
     if (n->kind == ND_BOR) return eval_const_expr(n->lhs) | eval_const_expr(n->rhs);
     if (n->kind == ND_BXOR) return eval_const_expr(n->lhs) ^ eval_const_expr(n->rhs);
+    if (n->kind == ND_EQ)   return eval_const_expr(n->lhs) == eval_const_expr(n->rhs);
+    if (n->kind == ND_NE)   return eval_const_expr(n->lhs) != eval_const_expr(n->rhs);
+    if (n->kind == ND_LT)   return eval_const_expr(n->lhs) <  eval_const_expr(n->rhs);
+    if (n->kind == ND_LE)   return eval_const_expr(n->lhs) <= eval_const_expr(n->rhs);
+    if (n->kind == ND_GT)   return eval_const_expr(n->lhs) >  eval_const_expr(n->rhs);
+    if (n->kind == ND_GE)   return eval_const_expr(n->lhs) >= eval_const_expr(n->rhs);
+    if (n->kind == ND_LAND) return eval_const_expr(n->lhs) && eval_const_expr(n->rhs);
+    if (n->kind == ND_LOR)  return eval_const_expr(n->lhs) || eval_const_expr(n->rhs);
     if (n->kind == ND_CAST) return eval_const_expr(n->lhs);
     /* Unary operators — critical for negative switch cases like case (-15): */
     if (n->kind == ND_NEG)  return -eval_const_expr(n->lhs);
