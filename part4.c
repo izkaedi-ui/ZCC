@@ -10,9 +10,6 @@
 #include "ir_emit_dispatch.h"
 #include "ir_bridge.h"
 
-/* Forward declaration — defined ~4200 lines below, used in ND_DIV const-fold guard */
-static long long eval_const_expr_p4(Node *elem, int *ok);
-
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdangling-else"
 #pragma clang diagnostic ignored "-Wmisleading-indentation"
@@ -1587,22 +1584,6 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
 
-    /* CG-SIGFPE-001: constant-fold both operands before emitting idiv.
-       INT_MIN / -1 is signed integer overflow — emitting idiv causes SIGFPE
-       on x86. GCC folds this at compile time; ZCC must too when both sides
-       are compile-time constants (e.g. Csmith seed498).
-       NOTE: float path has already returned above, so this is integers only. */
-    if (!backend_ops) {
-      int lhs_ok = 1, rhs_ok = 1;
-      long long lhs_cv = eval_const_expr_p4(node->lhs, &lhs_ok);
-      long long rhs_cv = eval_const_expr_p4(node->rhs, &rhs_ok);
-      if (lhs_ok && rhs_ok && rhs_cv != 0) {
-        long long result = lhs_cv / rhs_cv;
-        fprintf(cc->out, "    movq $%lld, %%rax\n", result);
-        ir_emit_binary_op(ND_DIV, node->type, "$const_lhs", "$const_rhs", node->line);
-        return;
-      }
-    }
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lhs_ir);
     push_reg(cc, "rax");
@@ -1768,6 +1749,7 @@ void codegen_expr(Compiler *cc, Node *node) {
   }
 
   case ND_SHR: {
+    printf("ZCC:AST ND_SHR line=%d, lhs_kind=%d, type_size=%d, lhs_type_size=%d\n", node->line, node->lhs ? node->lhs->kind : -1, node->type ? node->type->size : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char lhs_ir[32];
     char rhs_ir[32];
     codegen_expr_checked(cc, node->lhs);
@@ -1957,22 +1939,11 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
 
-    /* CG-MISMATCH-1003697: C99 §6.4.4.1 Table 5 — unsuffixed hex literals that
-       exceed INT_MAX (e.g. 0xA6D0CABD) have type 'unsigned int', not 'int'.
-       ZCC stores them as ty_long (signed) for codegen width purposes, so
-       is_unsigned_type() returns 0. Detect this case via ND_NUM int_val and
-       force unsigned comparison instructions (setb/seta vs setl/setg). */
     uns = (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) ||
-          (node->rhs && node->rhs->type && is_unsigned_type(node->rhs->type)) ||
-          /* Large unsuffixed hex/octal constant: value > INT_MAX, <= UINT_MAX */
-          (node->lhs && node->lhs->kind == ND_NUM &&
-           node->lhs->int_val > 2147483647LL && node->lhs->int_val <= 4294967295LL) ||
-          (node->rhs && node->rhs->kind == ND_NUM &&
-           node->rhs->int_val > 2147483647LL && node->rhs->int_val <= 4294967295LL);
+          (node->rhs && node->rhs->type && is_unsigned_type(node->rhs->type));
     use32 = node->lhs && node->lhs->type && node->rhs &&
             node->rhs->type && type_size(node->lhs->type) == 4 &&
             type_size(node->rhs->type) == 4;
-
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lhs_ir);
     push_reg(cc, "rax");
@@ -2361,6 +2332,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
 
   case ND_CAST: {
+    printf("ZCC:AST ND_CAST line=%d, target_size=%d, lhs_kind=%d, lhs_type_size=%d\n", node->line, node->cast_type ? node->cast_type->size : -1, node->lhs ? node->lhs->kind : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char src_ir[32];
     if (!node->lhs) {
       error_at(cc, node->line, "codegen_expr: ND_CAST null lhs");
@@ -2948,6 +2920,7 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     int has_sret = 0;
     int sret_size = 0;
+    int sret_stack_depth = cc->stack_depth;
     if (node->type && (node->type->kind == TY_STRUCT || node->type->kind == TY_UNION)) {
         abi_class_t eb[2];
         classify_aggregate(node->type, eb);
@@ -3026,6 +2999,25 @@ void codegen_expr(Compiler *cc, Node *node) {
       cc->stack_depth++;
     }
 
+    if (args_on_stack > 0) {
+      fprintf(cc->out, "    subq $%d, %%rsp\n", args_on_stack * 8);
+      cc->stack_depth += args_on_stack;
+    }
+
+    int arg_stack_offset[64];
+    {
+      int current_stack_slot = 0;
+      for (i = 0; i < nargs; i++) {
+        if (arg_is_stack[i]) {
+          arg_stack_offset[i] = current_stack_slot * 8;
+          Type *at = node->args[i]->type;
+          current_stack_slot += (at ? (type_size(at) + 7) / 8 : 1);
+        }
+      }
+    }
+
+    int stack_depth_at_reservation = cc->stack_depth;
+
     /* for indirect calls, evaluate callee first and save on stack */
     if (node->func_name[0] == 0 && node->lhs) {
       codegen_expr_checked(cc, node->lhs);
@@ -3040,17 +3032,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       Type *atype = node->args[i]->type;
+      int current_pushed_bytes = (cc->stack_depth - stack_depth_at_reservation) * 8;
       if (arg_is_stack[i]) {
           if (atype && (atype->kind == TY_STRUCT || atype->kind == TY_UNION)) {
-              /* Move aggregate data to stack in 8-byte chunks */
+              /* Copy aggregate to reserved stack slots */
               int j, n_slots = (type_size(atype) + 7) / 8;
               fprintf(cc->out, "    movq %%rax, %%r10\n");
-              for (j = n_slots - 1; j >= 0; j--) {
-                  fprintf(cc->out, "    pushq %d(%%r10)\n", j * 8);
-                  cc->stack_depth++;
+              for (j = 0; j < n_slots; j++) {
+                  fprintf(cc->out, "    movq %d(%%r10), %%rax\n", j * 8);
+                  fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i] + j * 8);
               }
           } else {
-              push_reg(cc, "rax");
+              fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i]);
           }
           ir_save_result(&args_ir_1d[i * 32]);
           continue;
@@ -3175,7 +3168,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
       }
       if (has_sret) {
-          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", args_on_stack * 8 + alignment_pad);
+          int sret_offset = (cc->stack_depth - sret_stack_depth) * 8 - sret_size;
+          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", sret_offset);
       }
 
       if (!backend_ops) {
@@ -3889,7 +3883,16 @@ static int allocate_registers(Node *func) {
 
   for (i = 0; i < num_ra_locals; i++) {
     Symbol *sym = ra_locals[i];
-    if (sym->stack_offset >= param_limit && sym->stack_offset < 0) {
+    int is_param = 0;
+    if (func->func_params) {
+      for (int p = 0; p < func->num_params; p++) {
+        if (sym->name && strcmp(sym->name, func->func_params->names[p]) == 0) {
+          is_param = 1;
+          break;
+        }
+      }
+    }
+    if (is_param || (sym->stack_offset >= param_limit && sym->stack_offset < 0)) {
       sym->live_start = -1; /* never alloc parameters for safety */
     }
     if (sym->live_start != -1 && sym->type && sym->type->kind != TY_ARRAY &&
@@ -4281,19 +4284,6 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
     }
     if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
     if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
-    /* Relational + logical ops — needed for ternary denominator patterns */
-    if (elem->kind == ND_EQ)   return eval_const_expr_p4(elem->lhs, ok) == eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_NE)   return eval_const_expr_p4(elem->lhs, ok) != eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_LT)   return eval_const_expr_p4(elem->lhs, ok) <  eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_LE)   return eval_const_expr_p4(elem->lhs, ok) <= eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_GT)   return eval_const_expr_p4(elem->lhs, ok) >  eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_GE)   return eval_const_expr_p4(elem->lhs, ok) >= eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_LAND) return eval_const_expr_p4(elem->lhs, ok) && eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_LOR)  return eval_const_expr_p4(elem->lhs, ok) || eval_const_expr_p4(elem->rhs, ok);
-    /* Ternary constant folding — closes seed498: INT_MIN / (cond==0 ? 1 : cond) */
-    if (elem->kind == ND_TERNARY && elem->cond && elem->then_body && elem->else_body)
-        return eval_const_expr_p4(elem->cond, ok) ? eval_const_expr_p4(elem->then_body, ok)
-                                                   : eval_const_expr_p4(elem->else_body, ok);
     /* CG-GINIT-FLOAT-001: float/double literals in aggregate initializers */
     if (elem->kind == ND_FLIT) {
         if (elem->type && elem->type->kind == TY_FLOAT) {
@@ -4487,6 +4477,9 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
 
 static void emit_global_var(Compiler *cc, Node *gvar) {
   int size;
+
+  if (gvar->kind != ND_GLOBAL_VAR)
+    return;
 
   if (gvar->is_extern)
     return; /* no emission for extern */
@@ -4979,7 +4972,7 @@ int node_ptr_elem_size(struct Node *n) {
 void codegen_emit_globals_and_strings(Compiler *cc) {
   int i;
   for (i = 0; i < cc->num_globals; i++) {
-    if (cc->globals[i]) {
+    if (cc->globals[i] && cc->globals[i]->kind == ND_GLOBAL_VAR) {
       fold_constants(cc, cc->globals[i]->initializer);
       emit_global_var(cc, cc->globals[i]);
     }
