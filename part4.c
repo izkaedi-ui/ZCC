@@ -4301,6 +4301,75 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
     return 0;
 }
 
+static int resolve_global_addr(Node *node, char **out_name, long long *out_offset) {
+    if (!node) return 0;
+    while (node && node->kind == ND_CAST) {
+        node = node->lhs;
+    }
+    if (!node) return 0;
+
+    if (node->kind == ND_VAR) {
+        if (node->sym && node->sym->is_global) {
+            *out_name = node->name;
+            *out_offset = 0;
+            return 1;
+        }
+        if (node->sym && !node->sym->is_local) {
+            *out_name = node->name;
+            *out_offset = 0;
+            return 1;
+        }
+        return 0;
+    }
+    if (node->kind == ND_ADDR) {
+        return resolve_global_addr(node->lhs, out_name, out_offset);
+    }
+    if (node->kind == ND_DEREF) {
+        return resolve_global_addr(node->lhs, out_name, out_offset);
+    }
+    if (node->kind == ND_MEMBER) {
+        if (resolve_global_addr(node->lhs, out_name, out_offset)) {
+            *out_offset += node->member_offset;
+            return 1;
+        }
+        return 0;
+    }
+    if (node->kind == ND_ADD) {
+        int const_ok = 1;
+        long long val = 0;
+        Node *base = NULL;
+        if (node->rhs && node->rhs->kind == ND_NUM) {
+            val = node->rhs->int_val;
+            base = node->lhs;
+        } else if (node->lhs && node->lhs->kind == ND_NUM) {
+            val = node->lhs->int_val;
+            base = node->rhs;
+        } else {
+            val = eval_const_expr_p4(node->rhs, &const_ok);
+            if (const_ok) {
+                base = node->lhs;
+            } else {
+                val = eval_const_expr_p4(node->lhs, &const_ok);
+                if (const_ok) {
+                    base = node->rhs;
+                }
+            }
+        }
+        if (base && resolve_global_addr(base, out_name, out_offset)) {
+            int scale = 1;
+            if (base->type && base->type->kind == TY_PTR && base->type->base) {
+                scale = type_size(base->type->base);
+            } else if (base->type && base->type->kind == TY_ARRAY && base->type->base) {
+                scale = type_size(base->type->base);
+            }
+            *out_offset += val * scale;
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
 static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int base_offset, int *emitted) {
     if (type->kind == TY_ARRAY) {
         Type *elem_type = type->base;
@@ -4330,24 +4399,20 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
                     } else if (elem->kind == ND_ADDR_LABEL) {
                         if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
                         else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
-                    } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                        else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                    } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                        long long offset = elem->lhs->lhs->rhs->int_val;
-                        if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                        else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                        long long offset = elem->rhs->int_val;
-                        if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                        else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                    } else if (elem->kind == ND_VAR) {
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                        else fprintf(cc->out, "    .quad %s\n", elem->name);
                     } else {
-                        fprintf(cc->out, "    .zero %d\n", elem_size);
+                        char *g_name = NULL;
+                        long long g_off = 0;
+                        if (resolve_global_addr(elem, &g_name, &g_off)) {
+                            if (g_off == 0) {
+                                if (elem_size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+                                else fprintf(cc->out, "    .quad %s\n", g_name);
+                            } else {
+                                if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+                                else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+                            }
+                        } else {
+                            fprintf(cc->out, "    .zero %d\n", elem_size);
+                        }
                     }
                     *emitted += elem_size;
                 }
@@ -4384,24 +4449,20 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
                 } else if (elem->kind == ND_ADDR_LABEL) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
                     else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                    long long offset = elem->lhs->lhs->rhs->int_val;
-                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                    long long offset = elem->rhs->int_val;
-                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                } else if (elem->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->name);
                 } else {
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
+                    char *g_name = NULL;
+                    long long g_off = 0;
+                    if (resolve_global_addr(elem, &g_name, &g_off)) {
+                        if (g_off == 0) {
+                            if (elem_size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+                            else fprintf(cc->out, "    .quad %s\n", g_name);
+                        } else {
+                            if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+                            else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+                        }
+                    } else {
+                        fprintf(cc->out, "    .zero %d\n", elem_size);
+                    }
                 }
                 *emitted += elem_size;
             }
@@ -4502,26 +4563,20 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, init->label_name);
       else
         fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, init->label_name);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
-      if (size == 4)
-        fprintf(cc->out, "    .long %s\n", init->lhs->name);
-      else
-        fprintf(cc->out, "    .quad %s\n", init->lhs->name);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_DEREF && init->lhs->lhs && init->lhs->lhs->kind == ND_ADD && init->lhs->lhs->lhs && init->lhs->lhs->lhs->kind == ND_VAR && init->lhs->lhs->rhs && init->lhs->lhs->rhs->kind == ND_NUM) {
-      long long offset = init->lhs->lhs->rhs->int_val;
-      if (init->lhs->lhs->lhs->type && init->lhs->lhs->lhs->type->base) offset *= type_size(init->lhs->lhs->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-    } else if (init->kind == ND_ADD && init->lhs && init->lhs->kind == ND_VAR && init->rhs && init->rhs->kind == ND_NUM) {
-      long long offset = init->rhs->int_val;
-      if (init->lhs->type && init->lhs->type->base) offset *= type_size(init->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->name, offset);
-    } else if (init->kind == ND_VAR) {
-      if (size == 4)
-        fprintf(cc->out, "    .long %s\n", init->name);
-      else
-        fprintf(cc->out, "    .quad %s\n", init->name);
+    } else if (init->kind == ND_ADDR || init->kind == ND_DEREF || init->kind == ND_ADD || init->kind == ND_VAR || init->kind == ND_MEMBER) {
+      char *g_name = NULL;
+      long long g_off = 0;
+      if (resolve_global_addr(init, &g_name, &g_off)) {
+        if (g_off == 0) {
+          if (size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+          else fprintf(cc->out, "    .quad %s\n", g_name);
+        } else {
+          if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+          else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+        }
+      } else {
+        fprintf(cc->out, "    .zero %d\n", size);
+      }
     } else if (init->kind == ND_STR) {
       if (gvar->type && gvar->type->kind == TY_ARRAY) {
           int j;
