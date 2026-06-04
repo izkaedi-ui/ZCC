@@ -265,7 +265,12 @@ static void pp_emit_str(PPState *state, const char *str, int len) {
  * advance. The pop_barrier guard in pp_parse_ident (7d049358) still constrains
  * this. */
 static void pp_drain_frames(PPState *state) {
-  while (state->pos >= state->len && state->input_depth > state->pop_barrier) {
+  while (state->pos >= state->len && state->input_depth > 0) {
+    int can_pop = (state->input_depth > state->pop_barrier) ||
+                  (state->input_stack[state->input_depth - 1].expanding_macro == NULL);
+    if (!can_pop)
+      break;
+
     if (state->alloc_buf)
       free(state->alloc_buf);
     state->input_depth--;
@@ -403,8 +408,9 @@ static void pp_parse_ident(PPState *state, char *out, int max) {
 static PPMacro *pp_find_macro(PPState *state, const char *name) {
   int i;
   for (i = state->num_macros - 1; i >= 0; i--) {
-    if (state->macros[i].active && strcmp(state->macros[i].name, name) == 0)
+    if (state->macros[i].active && strcmp(state->macros[i].name, name) == 0) {
       return &state->macros[i];
+    }
   }
   return 0;
 }
@@ -1148,11 +1154,11 @@ static long long pp_eval_expr_str(PPState *state, const char *s, int depth) {
 }
 
 static void pp_parse_directive(PPState *state) {
-  char dir[1024];
+  char dir[16384];
   int active = pp_is_active(state);
 
   pp_skip_whitespace(state);
-  pp_parse_ident(state, dir, 1024);
+  pp_parse_ident(state, dir, 16384);
   pp_skip_whitespace(state);
 
   if (strcmp(dir, "ifdef") == 0 || strcmp(dir, "ifndef") == 0) {
@@ -1173,11 +1179,11 @@ static void pp_parse_directive(PPState *state) {
     }
     state->cond_satisfied[state->cond_depth] =
         state->cond_stack[state->cond_depth];
-    pp_read_line(state, dir, 1024);
+    pp_read_line(state, dir, 16384);
   } else if (strcmp(dir, "if") == 0) {
-    char expr[256];
+    char expr[16384];
     pp_skip_whitespace(state);
-    pp_read_line(state, expr, 256);
+    pp_read_line(state, expr, 16384);
     state->cond_depth++;
     state->cond_else_seen[state->cond_depth] = 0;
     if (!active) {
@@ -1189,8 +1195,8 @@ static void pp_parse_directive(PPState *state) {
         state->cond_stack[state->cond_depth];
   } else if (strcmp(dir, "elif") == 0) {
     if (state->cond_depth > 0 && !state->cond_else_seen[state->cond_depth]) {
-      char expr[256];
-      pp_read_line(state, expr, 256);
+      char expr[16384];
+      pp_read_line(state, expr, 16384);
       if (state->cond_satisfied[state->cond_depth]) {
         state->cond_stack[state->cond_depth] = 0;
       } else {
@@ -1209,7 +1215,7 @@ static void pp_parse_directive(PPState *state) {
         }
       }
     } else {
-      pp_read_line(state, dir, 1024);
+      pp_read_line(state, dir, 16384);
     }
   } else if (strcmp(dir, "else") == 0) {
     if (state->cond_depth > 0) {
@@ -1230,7 +1236,7 @@ static void pp_parse_directive(PPState *state) {
         state->cond_stack[state->cond_depth] = 0;
       }
     }
-    pp_read_line(state, dir, 1024);
+    pp_read_line(state, dir, 16384);
   } else if (strcmp(dir, "endif") == 0) {
     if (state->cond_depth > 0) {
       state->cond_satisfied[state->cond_depth] = 0;
@@ -1238,7 +1244,7 @@ static void pp_parse_directive(PPState *state) {
       state->cond_depth--;
     }
 
-    pp_read_line(state, dir, 1024);
+    pp_read_line(state, dir, 16384);
   } else if (active) {
     if (strcmp(dir, "define") == 0) {
       char name[128];
@@ -1259,9 +1265,9 @@ static void pp_parse_directive(PPState *state) {
       char name[128];
       pp_parse_ident(state, name, 128);
       pp_undef_macro(state, name);
-      pp_read_line(state, dir, 1024);
+      pp_read_line(state, dir, 16384);
     } else if (strcmp(dir, "include") == 0) {
-      char inc_path[256];
+      char inc_path[4096];
       int is_system = 0;
       if (pp_peek(state) == '<') {
         is_system = 1;
@@ -1269,7 +1275,7 @@ static void pp_parse_directive(PPState *state) {
       } else if (pp_peek(state) == '"') {
         pp_next(state);
       }
-      pp_read_line(state, inc_path, 256);
+      pp_read_line(state, inc_path, 4096);
       /* Strip trailing \r from Windows line endings */
       {
         int plen = strlen(inc_path);
@@ -1283,14 +1289,14 @@ static void pp_parse_directive(PPState *state) {
       }
       pp_process_include(state, inc_path, is_system);
     } else if (strcmp(dir, "error") == 0) {
-      char msg[256];
-      pp_read_line(state, msg, 256);
+      char msg[8192];
+      pp_read_line(state, msg, 8192);
       fprintf(stderr, "zcc preprocessor error: #error %s\n", msg);
     } else {
-      pp_read_line(state, dir, 1024);
+      pp_read_line(state, dir, 16384);
     }
   } else {
-    pp_read_line(state, dir, 1024);
+    pp_read_line(state, dir, 16384);
   }
 
   if (pp_peek(state) == '\n')
