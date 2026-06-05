@@ -49,6 +49,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from zcc_dream_mutations import MutationEngine, Mutation
+from zcc_criticality import (
+    topology_eta_search, prime_free_energy, SpectralArrestDetector,
+    relaxation_phase, universality_class, boltzmann_acceptance,
+)
+from zcc_cfg_extract import extract_cfg, cfg_spectral_dim, cfg_stats
 
 # ═══════════════════════════════════════════════════════════════════════
 # CONSTANTS
@@ -78,9 +83,9 @@ PASSES = ["compiler_passes.c", "compiler_passes_ir.c", "ir_pass_manager.c",
           "src/evm/yul_frontend.c", "src/gfx/sdf_compiler.c",
           "src/gfx/mesh_warden.c", "src/evm/evm_symbolic_harness.c",
           "src/zcc_oracle_substrate.c",
-          "src/elf_emit.c", "src/codegen.c", "src/ir_serialization.c",
+          "src/elf_emit.c", "src/ir_serialization.c",
           "src/zcc_smt_prover.c", "src/gguf_emit.c", "src/zld.c",
-          "src/zcc_resource_oracle.c"]
+          "src/zcc_resource_oracle.c", "transient_state.c"]
 
 # ANSI colour palette
 _R = "\033[91m"; _G = "\033[92m"; _Y = "\033[93m"
@@ -215,7 +220,7 @@ class FitnessOracle:
             samples.sort()
             fitness['benchmark_time_ns'] = samples[len(samples) // 2]  # median
 
-        # Composite score: weighted sum (lower is better)
+        # Composite score: weighted sum (lower is better) — LEGACY
         fitness['score'] = (
             fitness['inst_count']     * 10.0 * cls.W_INSTR +
             fitness['asm_size']       * 1.0  * cls.W_SIZE +
@@ -223,6 +228,14 @@ class FitnessOracle:
             fitness['stack_depth_sum'] * 0.5 * cls.W_STACK +
             fitness['benchmark_time_ns'] / 1e6
         )
+
+        # Free energy: F = E - TS (Wilson-Fisher universal fitness)
+        # eta and T are injected via class-level defaults or overridden
+        eta = getattr(cls, '_eta_c', 0.4407)
+        T_eff = getattr(cls, '_T_eff', 1.0)
+        fitness['free_energy'] = prime_free_energy(fitness, eta, T_eff)
+        fitness['eta_c'] = eta
+
         return fitness
 
 
@@ -250,7 +263,7 @@ class SelfHostGate:
         # symbol clashes that arise when linking zcc_pp.c with extra .c files
         zcc_full = str(REPO_ROOT / 'zcc.c')
         gate_src = zcc_full if os.path.exists(zcc_full) else zcc_pp_c
-        s3_p_args = p_args
+        s3_p_args = [p for p in p_args if not p.endswith("codegen.c")]
 
         try:
             r = subprocess.run([mutant_bin, gate_src, '-o', s3_s],
@@ -336,8 +349,10 @@ class HamiltonianTelemetry:
     def set_baseline(self, score: float):
         self._baseline_score = max(score, 1.0)
 
-    def emit(self, result: CycleResult, island_id: int = 0):
-        """Non-blocking dual-emit — UDP datagram to both telemetry channels."""
+    def emit(self, result: CycleResult, island_id: int = 0,
+             eta_c: float = 0.0, phase: str = "", spectral_gap: float = 0.0):
+        """Non-blocking dual-emit — UDP datagram to both telemetry channels.
+        Now includes Wilson-Fisher criticality fields."""
         try:
             parent_score = result.parent_fitness.get('score', self._baseline_score)
             mutant_score = result.mutant_fitness.get('score', parent_score)
@@ -366,6 +381,12 @@ class HamiltonianTelemetry:
                 "state_vector": [round(sv0, 6), round(sv1, 6)],
                 "hamiltonian_energy": round(
                     (mutant_score - baseline) / baseline, 6),
+                # Wilson-Fisher criticality fields
+                "eta_c": round(eta_c, 4),
+                "free_energy": round(result.mutant_fitness.get('free_energy', 0), 4),
+                "delta_free_energy": round(result.delta.get('free_energy', 0), 4),
+                "spectral_gap": round(spectral_gap, 6),
+                "phase": phase,
                 "elapsed_s": round(result.elapsed_s, 2),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
@@ -383,6 +404,10 @@ class HamiltonianTelemetry:
                 "mutations": len(result.mutations_applied),
                 "elapsed": round(result.elapsed_s, 2),
                 "survived": result.survived,
+                "eta_c": round(eta_c, 4),
+                "free_energy": round(result.mutant_fitness.get('free_energy', 0), 4),
+                "phase": phase,
+                "spectral_gap": round(spectral_gap, 6),
                 "ts": datetime.now(timezone.utc).isoformat(),
             }).encode()
             self._gods_sock.sendto(gods_pkt, (self.host, self.GODS_EYE_PORT))
@@ -418,7 +443,8 @@ class Island:
 
         # Measure initial fitness
         with tempfile.TemporaryDirectory(prefix='island_init_') as td:
-            self.state.parent_score = self._build_and_score(island_asm, td)
+            self.parent_fitness = self._build_and_measure(island_asm, td)
+            self.state.parent_score = self.parent_fitness['score']
 
     def step(self, mutation_engine: MutationEngine,
              max_mutations: int, force_sweep: bool,
@@ -460,9 +486,7 @@ class Island:
         n_pt = self.rng.randint(1, max(1, min(len(points), max_mutations)))
         selected.extend(self.rng.sample(points, min(len(points), n_pt)))
 
-        parent_fitness = {'score': self.state.parent_score,
-                          'asm_size': os.path.getsize(self.state.parent_asm_path),
-                          'bin_size': 0, 'inst_count': 0}
+        parent_fitness = self.parent_fitness
 
         if dry_run:
             return CycleResult(
@@ -533,13 +557,20 @@ class Island:
             'asm_size':   mutant_fitness['asm_size']   - parent_fitness['asm_size'],
             'inst_count': mutant_fitness['inst_count'] - parent_fitness.get('inst_count', 0),
             'score':      mutant_fitness['score']      - parent_fitness['score'],
+            'free_energy': mutant_fitness.get('free_energy', 0) -
+                           parent_fitness.get('free_energy', 0),
         }
 
-        survived = delta['score'] < 0
+        # Wilson-Fisher: Boltzmann acceptance on free energy delta
+        # Falls back to greedy (T=0) if free_energy not available
+        delta_F = delta.get('free_energy', delta['score'])
+        T_eff = getattr(FitnessOracle, '_T_eff', 1.0)
+        survived = boltzmann_acceptance(delta_F, T_eff)
 
         if survived:
             self.state.generation = gen
             self.state.parent_score = mutant_fitness['score']
+            self.parent_fitness = mutant_fitness
             self.state.survived += 1
             shutil.copy2(mutant_asm, self.state.parent_asm_path)
             self.state.lineage.append({
@@ -559,8 +590,8 @@ class Island:
             delta=delta, elapsed_s=time.time() - t0,
         )
 
-    def _build_and_score(self, asm_path: str, tmpdir: str) -> float:
-        """Build + score an assembly file. Returns composite score."""
+    def _build_and_measure(self, asm_path: str, tmpdir: str) -> dict:
+        """Build + measure an assembly file. Returns fitness dict."""
         bin_path = os.path.join(tmpdir, 'init_bin')
         p_args = [str(REPO_ROOT / p) for p in PASSES]
         try:
@@ -570,12 +601,15 @@ class Island:
                  '-o', bin_path, asm_path] + p_args + ['-lm'],
                 capture_output=True, timeout=60)
             if r.returncode != 0:
-                return float('inf')
+                return {'score': float('inf'), 'free_energy': float('inf'), 'asm_size': 0, 'inst_count': 0}
         except Exception:
-            return float('inf')
+            return {'score': float('inf'), 'free_energy': float('inf'), 'asm_size': 0, 'inst_count': 0}
 
-        fit = FitnessOracle.measure(bin_path, str(BENCHMARK_FILE), asm_path, tmpdir)
-        return fit['score']
+        return FitnessOracle.measure(bin_path, str(BENCHMARK_FILE), asm_path, tmpdir)
+
+    def _build_and_score(self, asm_path: str, tmpdir: str) -> float:
+        """Build + score an assembly file. Returns composite score."""
+        return self._build_and_measure(asm_path, tmpdir)['score']
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -619,6 +653,14 @@ class DreamEngine:
 
         # Telemetry
         self.telem = HamiltonianTelemetry() if visualize else None
+
+        # ── Wilson-Fisher criticality state ──
+        self.eta_c: float = 0.4407       # Default: 2D Ising
+        self.T_eff: float = 1.0          # Effective temperature
+        self.spectral_detector = SpectralArrestDetector(window=10, threshold=0.01)
+        self._fitness_scores: list = []  # For relaxation_phase()
+        self._phase: str = "explore"     # Current phase
+        self._uclass = None              # Universality class info
 
     # ──────────────────────────────────────────────────────────────────
 
@@ -847,6 +889,49 @@ int main(void) {
         with tempfile.TemporaryDirectory(prefix='dream_canon_') as canon_tmp:
             _, zcc2_asm, zcc_pp_c = self._prepare_canonical(canon_tmp)
 
+            # ── Wilson-Fisher: extract CFG and compute η_c ──
+            print(f"  {_C}[WF]{_W} Extracting CFG from parent assembly…")
+            try:
+                with open(zcc2_asm) as f:
+                    asm_lines = f.readlines()
+                cfg = extract_cfg(asm_lines)
+                stats = cfg_stats(cfg)
+                print(f"  {_C}[WF]{_W} CFG: {stats['nodes']} nodes, "
+                      f"{stats['edges']} edges, avg_degree={stats['avg_degree']}")
+
+                # Compute spectral dimension
+                d_s = cfg_spectral_dim(cfg)
+                print(f"  {_C}[WF]{_W} Spectral dimension: d_s={d_s:.3f}")
+
+                # Search for η_c (use subset for speed if graph is large)
+                if stats['nodes'] > 500:
+                    # Subsample: take first 500 nodes for tractability
+                    sub_nodes = sorted(cfg.keys())[:500]
+                    sub_cfg = {n: [t for t in cfg[n] if t in sub_nodes]
+                               for n in sub_nodes if n in cfg}
+                    self.eta_c = topology_eta_search(sub_cfg, tol=1e-3,
+                                                     max_sweeps=80, n_samples=3)
+                else:
+                    self.eta_c = topology_eta_search(cfg, tol=1e-3,
+                                                     max_sweeps=100, n_samples=3)
+
+                # Classify universality class
+                self._uclass = universality_class(self.eta_c, d_s)
+                print(f"  {_C}[WF]{_W} η_c={self.eta_c:.4f} │ "
+                      f"class={self._uclass.label} │ "
+                      f"ν={self._uclass.nu:.3f} β={self._uclass.beta:.3f} "
+                      f"γ={self._uclass.gamma:.3f}")
+
+                # Inject η_c into FitnessOracle class-level state
+                FitnessOracle._eta_c = self.eta_c
+                FitnessOracle._T_eff = self.T_eff
+
+            except Exception as e:
+                print(f"  {_Y}[WF]{_W} CFG extraction failed ({e}), using defaults")
+                self.eta_c = 0.4407
+                FitnessOracle._eta_c = self.eta_c
+                FitnessOracle._T_eff = self.T_eff
+
             # Initialise islands
             print(f"  {_C}[INIT]{_W} Spawning {self.n_islands} island(s)…")
             islands = []
@@ -855,7 +940,8 @@ int main(void) {
                 with tempfile.TemporaryDirectory(prefix=f'island_init_{i}_') as it:
                     isl = Island(i, island_seed, zcc2_asm, zcc_pp_c, self.blacklist)
                 islands.append(isl)
-                print(f"    Island {i}: score={isl.state.parent_score:.0f}")
+                print(f"    Island {i}: score={isl.state.parent_score:.0f} "
+                      f"F={getattr(isl, '_last_fe', '?')}")
 
             # Baseline for Hamiltonian telemetry
             if self.telem:
@@ -864,9 +950,21 @@ int main(void) {
             survived_total = 0; rejected_total = 0
             t_start = time.time()
 
-            print(f"\n  {_B}═══ DREAMING ════════════════════════════════════════{_W}\n")
+            print(f"\n  {_B}═══ DREAMING ════════════════════════════════════════{_W}")
+            print(f"  {_B}    η_c={self.eta_c:.4f}  T={self.T_eff:.2f}  "
+                  f"class={self._uclass.label if self._uclass else '?'}{_W}\n")
 
             for cycle in range(num_cycles):
+                # ── Relaxation phase: modulate mutation aggressiveness ──
+                self._phase = relaxation_phase(self._fitness_scores,
+                                               tau=5.0)
+                if self._phase == "explore":
+                    cycle_max_muts = self.max_mutations + 2
+                    cycle_force_sweep = True
+                else:
+                    cycle_max_muts = max(1, self.max_mutations - 1)
+                    cycle_force_sweep = self.force_sweep
+
                 # Round-robin across islands
                 island = islands[cycle % self.n_islands]
                 mutation_engine = MutationEngine(
@@ -875,16 +973,40 @@ int main(void) {
                 with tempfile.TemporaryDirectory(prefix='dream_step_') as td:
                     result = island.step(
                         mutation_engine,
-                        max_mutations=self.max_mutations,
-                        force_sweep=self.force_sweep,
+                        max_mutations=cycle_max_muts,
+                        force_sweep=cycle_force_sweep,
                         dry_run=self.dry_run,
                         tmpdir=td)
 
                 self._print_result(result)
 
-                # Emit telemetry
+                # Emit telemetry (with criticality fields)
                 if self.telem:
-                    self.telem.emit(result, island.island_id)
+                    self.telem.emit(result, island.island_id,
+                                    eta_c=self.eta_c,
+                                    phase=self._phase,
+                                    spectral_gap=self.spectral_detector.spectral_gap)
+
+                # ── Spectral arrest: track convergence ──
+                if result.mutant_fitness:
+                    fv = [
+                        result.mutant_fitness.get('inst_count', 0),
+                        result.mutant_fitness.get('branch_density', 0),
+                        result.mutant_fitness.get('stack_depth_sum', 0),
+                        result.mutant_fitness.get('asm_size', 0),
+                    ]
+                    self.spectral_detector.record(fv)
+                    self._fitness_scores.append(
+                        result.mutant_fitness.get('free_energy',
+                            result.mutant_fitness.get('score', 0)))
+
+                    if (not self.dry_run and cycle > 20 and
+                            self.spectral_detector.arrested()):
+                        print(f"\n  {_C}[WF]{_W} {_G}SPECTRAL ARREST{_W} — "
+                              f"fixed point reached at cycle {cycle+1}")
+                        print(f"      gap={self.spectral_detector.spectral_gap:.6f}  "
+                              f"phase={self._phase}")
+                        # Don't break — log it but keep going if cycles remain
 
                 if result.survived:
                     survived_total += 1
