@@ -16,8 +16,8 @@
 html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;overflow-x:hidden;cursor:none}
 
 /* ── Cursor ── */
-#cur{position:fixed;width:18px;height:18px;border:1.5px solid var(--cyan);border-radius:50%;pointer-events:none;z-index:99999;transform:translate(-50%,-50%);transition:width .12s,height .12s,border-color .12s;mix-blend-mode:difference}
-#cur2{position:fixed;width:5px;height:5px;background:var(--cyan);border-radius:50%;pointer-events:none;z-index:99999;transform:translate(-50%,-50%)}
+#cur{position:fixed;width:18px;height:18px;border:1.5px solid var(--cyan);border-radius:50%;pointer-events:none;z-index:99999;transform:translate(-50%,-50%);transition:width .12s,height .12s,border-color .12s;box-shadow:0 0 8px rgba(0,255,204,.6),inset 0 0 4px rgba(0,255,204,.15)}
+#cur2{position:fixed;width:5px;height:5px;background:var(--cyan);border-radius:50%;pointer-events:none;z-index:99999;transform:translate(-50%,-50%);box-shadow:0 0 6px var(--cyan)}
 body:has(.card:hover) #cur{width:36px;height:36px;border-color:var(--pink)}
 
 /* ── GLSL Canvas ── */
