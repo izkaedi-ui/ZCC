@@ -14,7 +14,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [2/3] Launching Visual SVG Diff Dashboard (localhost:8082)...
-start cmd /c "wsl -e bash -c \"cd /mnt/g/zccMAIN/zcc && make visualize-svg-diffs\""
+start wsl -e bash -c "cd /mnt/g/zccMAIN/zcc && make visualize-svg-diffs"
 
 echo.
 echo [3/3] Launching Interactive ZJS REPL...
