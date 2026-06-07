@@ -117,6 +117,25 @@ body::after{content:'';position:fixed;inset:0;z-index:1;pointer-events:none;
   padding:.4rem .9rem;z-index:60;display:none;transition:opacity .3s;
 }
 
+/* Physics tuner panel */
+#physics-panel{right:1rem;top:50%;transform:translateY(-50%);width:220px}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;padding:.6rem .8rem .4rem}
+.pbtn{
+  font-family:'JetBrains Mono',monospace;font-size:.58rem;padding:.28rem .4rem;
+  border-radius:4px;border:1px solid var(--border2);background:transparent;
+  color:var(--muted);cursor:pointer;transition:all .15s;text-align:center;letter-spacing:.03em;
+}
+.pbtn:hover{border-color:var(--violet);color:var(--violet);background:rgba(155,93,229,.06)}
+.pbtn.active{border-color:var(--cyan);color:var(--cyan);background:rgba(0,255,204,.07);box-shadow:0 0 8px rgba(0,255,204,.15)}
+.pbtn.full{grid-column:1/-1}
+.slider-section{padding:.3rem .8rem .8rem;display:flex;flex-direction:column;gap:.55rem;border-top:1px solid var(--border)}
+.slider-row{display:flex;flex-direction:column;gap:.18rem}
+.slider-lbl{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:.55rem}
+.slider-lbl span:first-child{color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.slider-lbl .slv{color:var(--cyan)}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border2);border-radius:99px;cursor:pointer;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 5px var(--cyan)}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:var(--border2)}
 
@@ -200,6 +219,32 @@ int main() {
     <div class="leg-row"><div class="leg-dot" style="background:#ff3366"></div>IF / WHILE</div>
     <div class="leg-row"><div class="leg-dot" style="background:#fff"></div>IDENTIFIER</div>
     <div class="leg-row"><div class="leg-dot" style="background:#4a4468"></div>BLOCK</div>
+  </div>
+</div>
+
+<!-- Physics Tuner -->
+<div class="panel" id="physics-panel">
+  <div class="phdr"><span>⬡ PHYSICS TUNER</span><span class="pbadge" id="preset-badge">1: TIGHT</span></div>
+  <div class="preset-grid">
+    <button class="pbtn active" id="pb1" onclick="applyPreset(1)">1 TIGHT</button>
+    <button class="pbtn" id="pb2" onclick="applyPreset(2)">2 CLOUD</button>
+    <button class="pbtn" id="pb3" onclick="applyPreset(3)">3 ORBIT</button>
+    <button class="pbtn" id="pb4" onclick="applyPreset(4)">4 HIERACHY</button>
+    <button class="pbtn full" id="pb5" onclick="applyPreset(5)">5 CHAOS</button>
+  </div>
+  <div class="slider-section">
+    <div class="slider-row">
+      <div class="slider-lbl"><span>LINK DIST</span><span class="slv" id="sv-ld">65</span></div>
+      <input type="range" id="sl-ld" min="30" max="180" value="65" oninput="liveTune()">
+    </div>
+    <div class="slider-row">
+      <div class="slider-lbl"><span>CHARGE</span><span class="slv" id="sv-ch">-620</span></div>
+      <input type="range" id="sl-ch" min="-900" max="-80" value="-620" oninput="liveTune()">
+    </div>
+    <div class="slider-row">
+      <div class="slider-lbl"><span>VEL DECAY</span><span class="slv" id="sv-vd">0.65</span></div>
+      <input type="range" id="sl-vd" min="0.01" max="0.99" step="0.01" value="0.65" oninput="liveTune()">
+    </div>
   </div>
 </div>
 
@@ -779,6 +824,62 @@ function renderGraph(root){
 }
 
 // ═══════════════════════════════════════════
+//  PHYSICS PRESETS
+// ═══════════════════════════════════════════
+const PRESETS={
+  1:{label:'1: TIGHT', link:65,  charge:-620, vel:.65, xStr:.22, yStr:.22, alpha:.8},
+  2:{label:'2: CLOUD', link:110, charge:-280, vel:.28, xStr:.04, yStr:.04, alpha:.4},
+  3:{label:'3: ORBIT', link:95,  charge:-420, vel:.55, xStr:.06, yStr:.06, alpha:.8, radial:160},
+  4:{label:'4: HIER',  link:80,  charge:-510, vel:.72, xStr:.35, yStr:.10, alpha:.9},
+  5:{label:'5: CHAOS', link:140, charge:-180, vel:.12, xStr:.02, yStr:.02, alpha:.3},
+};
+let activePreset=1;
+
+function applyPreset(p){
+  if(!simulation)return;
+  const ps=PRESETS[p];if(!ps)return;
+  activePreset=p;
+  simulation.force('link').distance(ps.link).strength(.85);
+  simulation.force('charge').strength(d=>ps.charge-(d._r||7)*4);
+  simulation.velocityDecay(ps.vel);
+  simulation.alphaDecay(.022);
+  if(ps.radial){
+    simulation.force('radial',d3.forceRadial(ps.radial,0,0).strength(.5));
+  } else {
+    simulation.force('radial',null);
+  }
+  if(ps.xStr!==undefined)simulation.force('x',d3.forceX().strength(ps.xStr));
+  if(ps.yStr!==undefined)simulation.force('y',d3.forceY().strength(ps.yStr));
+  simulation.alpha(ps.alpha).alphaTarget(0).restart();
+  // Update UI
+  document.querySelectorAll('.pbtn').forEach((b,i)=>b.classList.toggle('active',i+1===p));
+  document.getElementById('preset-badge').textContent=ps.label;
+  document.getElementById('sl-ld').value=ps.link;
+  document.getElementById('sl-ch').value=ps.charge;
+  document.getElementById('sl-vd').value=ps.vel;
+  document.getElementById('sv-ld').textContent=ps.link;
+  document.getElementById('sv-ch').textContent=ps.charge;
+  document.getElementById('sv-vd').textContent=ps.vel;
+}
+
+function liveTune(){
+  if(!simulation)return;
+  const ld=+document.getElementById('sl-ld').value;
+  const ch=+document.getElementById('sl-ch').value;
+  const vd=+document.getElementById('sl-vd').value;
+  document.getElementById('sv-ld').textContent=ld;
+  document.getElementById('sv-ch').textContent=ch;
+  document.getElementById('sv-vd').textContent=vd;
+  simulation.force('link').distance(ld);
+  simulation.force('charge').strength(ch);
+  simulation.velocityDecay(vd);
+  simulation.alpha(.5).restart();
+  // deselect preset buttons when manually tuned
+  document.querySelectorAll('.pbtn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('preset-badge').textContent='CUSTOM';
+}
+
+// ═══════════════════════════════════════════
 //  PARSE + RENDER PIPELINE
 // ═══════════════════════════════════════════
 let lastGoodAst=null;
@@ -961,9 +1062,11 @@ document.getElementById('btn-example').addEventListener('click',()=>{
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();parseSrc(document.getElementById('code-input').value);}
-  if(e.key==='f'&&!e.ctrlKey&&!e.metaKey&&document.activeElement!==document.getElementById('code-input')){document.getElementById('btn-freeze').click();}
-  if(e.key==='l'&&document.activeElement!==document.getElementById('code-input')){document.getElementById('btn-labels').click();}
-  if(e.key==='r'&&document.activeElement!==document.getElementById('code-input')){document.getElementById('btn-reset').click();}
+  const notInput=document.activeElement!==document.getElementById('code-input');
+  if(notInput&&e.key>='1'&&e.key<='5'){applyPreset(+e.key);return;}
+  if(notInput&&(e.key==='f'||e.key==='F')&&!e.ctrlKey){document.getElementById('btn-freeze').click();}
+  if(notInput&&(e.key==='l'||e.key==='L')){document.getElementById('btn-labels').click();}
+  if(notInput&&(e.key==='r'||e.key==='R')){document.getElementById('btn-reset').click();}
 });
 
 // ═══════════════════════════════════════════
@@ -975,7 +1078,10 @@ d3s.onload=()=>{
   d3Loaded=true;
   document.getElementById('bridge-pill').textContent=
     (typeof ZJS!=='undefined'&&ZJS.zccParseToJson)?'ZJS BRIDGE LIVE':'PARSER ONLINE';
-  parseSrc(document.getElementById('code-input').value);
+  parseSrc(document.getElementById('code-input').value).then(()=>{
+    // Apply TIGHT TREE default after first render — best for ASTs
+    setTimeout(()=>applyPreset(1), 80);
+  });
 };
 d3s.onerror=()=>showError('D3 load failed — check network');
 document.head.appendChild(d3s);
