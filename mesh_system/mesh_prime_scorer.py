@@ -152,9 +152,74 @@ class PrimeConsensus:
         }
         return b"ZPK_C:" + pickle.dumps(data)
 
+    def serialize_c_struct(self) -> bytes:
+        import struct
+        if not self.state:
+            raise ValueError("State is missing")
+        
+        history = list(self.state.history)
+        history_count = len(history)
+        if len(history) < 128:
+            history += [0.0] * (128 - len(history))
+        elif len(history) > 128:
+            history = history[:128]
+            
+        metrics = self.state.metrics or {}
+        a_score = metrics.get("agent_a_score", 0.0)
+        b_score = metrics.get("agent_b_score", 0.0)
+        c_score = metrics.get("agent_c_score", 0.0)
+        
+        context_bytes = self.state.context.encode('utf-8')[:127]
+        context_bytes += b'\x00' * (128 - len(context_bytes))
+        
+        alerts_str = ",".join(self.alerts)
+        alerts_bytes = alerts_str.encode('utf-8')[:511]
+        alerts_bytes += b'\x00' * (512 - len(alerts_bytes))
+        
+        fmt = "@6d2Q128dQ3d128s2dI512s"
+        packed = struct.pack(
+            fmt,
+            self.state.h, self.state.h0, self.state.eta, self.state.gamma, self.state.epsilon, self.state.beta,
+            self.state.seed, self.state.timestamp,
+            *history,
+            history_count,
+            a_score, b_score, c_score,
+            context_bytes,
+            self.consensus_score, self.drift, self.jackpot,
+            alerts_bytes
+        )
+        return b"ZCS:" + packed
+
     @classmethod
     def deserialize(cls, data: bytes):
-        if data.startswith(b"ZPB_C:"):
+        if data.startswith(b"ZCS:"):
+            import struct
+            payload = data[4:]
+            fmt = "@6d2Q128dQ3d128s2dI512s"
+            struct_size = struct.calcsize(fmt)
+            unpacked = struct.unpack(fmt, payload[:struct_size])
+            
+            h, h0, eta, gamma, epsilon, beta, seed, timestamp = unpacked[0:8]
+            history = list(unpacked[8:136])
+            history_count = unpacked[136]
+            history = history[:history_count]
+            agent_a_score, agent_b_score, agent_c_score = unpacked[137:140]
+            context = unpacked[140].split(b'\x00')[0].decode('utf-8', errors='ignore')
+            consensus_score, drift, jackpot = unpacked[141:144]
+            alerts_raw = unpacked[144].split(b'\x00')[0].decode('utf-8', errors='ignore')
+            alerts = [a.strip() for a in alerts_raw.split(',') if a.strip()]
+            
+            state = PrimeVector(
+                h=h, h0=h0, eta=eta, gamma=gamma, epsilon=epsilon, beta=beta,
+                seed=seed, timestamp=timestamp, history=history,
+                metrics={"agent_a_score": agent_a_score, "agent_b_score": agent_b_score, "agent_c_score": agent_c_score},
+                context=context
+            )
+            return cls(
+                state=state, consensus_score=consensus_score, drift=drift,
+                jackpot=jackpot, alerts=alerts
+            )
+        elif data.startswith(b"ZPB_C:"):
             if not HAS_PROTO:
                 raise ImportError("Cannot deserialize protobuf payload: prime_vector_pb2 not found.")
             pb_con = prime_vector_pb2.PrimeConsensus()
