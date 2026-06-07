@@ -949,7 +949,8 @@ function drawForceGraph(){
     const hit=graphNodes.find(n=>{const dx=n.x-cx,dy=n.y-cy;return dx*dx+dy*dy<n.r*n.r*4});
     if(hit)openModal(hit.id);
   });
-}
+  } // end if(!graphClickAttached)
+} // end drawForceGraph
 
 // ══════════════════════════════════════════════════════════════
 //  RADAR
