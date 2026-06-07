@@ -44,7 +44,7 @@ int zcc_prime_serialize_json(const zcc_prime_consensus_t *consensus, char *buf, 
     
     offset += snprintf(history_str + offset, sizeof(history_str) - offset, "[");
     for (size_t i = 0; i < consensus->state.history_count; i++) {
-        offset += snprintf(history_str + offset, sizeof(history_str) - offset, "%.6f", consensus->state.history[i]);
+        offset += snprintf(history_str + offset, sizeof(history_str) - offset, "%.17g", consensus->state.history[i]);
         if (i < consensus->state.history_count - 1) {
             offset += snprintf(history_str + offset, sizeof(history_str) - offset, ", ");
         }
@@ -53,23 +53,23 @@ int zcc_prime_serialize_json(const zcc_prime_consensus_t *consensus, char *buf, 
 
     int written = snprintf(buf, max_len,
         "{\n"
-        "  \"consensus_score\": %.6f,\n"
-        "  \"drift\": %.6f,\n"
+        "  \"consensus_score\": %.17g,\n"
+        "  \"drift\": %.17g,\n"
         "  \"jackpot\": %u,\n"
         "  \"alerts\": \"%s\",\n"
         "  \"state\": {\n"
-        "    \"h\": %.6f,\n"
-        "    \"h0\": %.6f,\n"
-        "    \"eta\": %.6f,\n"
-        "    \"gamma\": %.6f,\n"
-        "    \"epsilon\": %.6f,\n"
-        "    \"beta\": %.6f,\n"
+        "    \"h\": %.17g,\n"
+        "    \"h0\": %.17g,\n"
+        "    \"eta\": %.17g,\n"
+        "    \"gamma\": %.17g,\n"
+        "    \"epsilon\": %.17g,\n"
+        "    \"beta\": %.17g,\n"
         "    \"seed\": %lu,\n"
         "    \"timestamp\": %lu,\n"
         "    \"history\": %s,\n"
-        "    \"agent_a_score\": %.6f,\n"
-        "    \"agent_b_score\": %.6f,\n"
-        "    \"agent_c_score\": %.6f,\n"
+        "    \"agent_a_score\": %.17g,\n"
+        "    \"agent_b_score\": %.17g,\n"
+        "    \"agent_c_score\": %.17g,\n"
         "    \"context\": \"%s\"\n"
         "  }\n"
         "}",
@@ -131,20 +131,20 @@ int zcc_prime_deserialize_json(const char *json_str, zcc_prime_consensus_t *cons
         }
     }
     
-    if ((p = find_json_key(json_str, "\"h\"")))         consensus->state.h = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"h0\"")))        consensus->state.h0 = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"eta\"")))       consensus->state.eta = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"gamma\"")))     consensus->state.gamma = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"epsilon\"")))   consensus->state.epsilon = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"beta\"")))      consensus->state.beta = strtod(p, NULL);
-    if ((p = find_json_key(json_str, "\"seed\"")))      consensus->state.seed = (uint64_t)strtoull(p, NULL, 10);
-    if ((p = find_json_key(json_str, "\"timestamp\""))) consensus->state.timestamp = (uint64_t)strtoull(p, NULL, 10);
+    if ((p = find_json_key(json_str, "h")))         consensus->state.h = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "h0")))        consensus->state.h0 = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "eta")))       consensus->state.eta = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "gamma")))     consensus->state.gamma = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "epsilon")))   consensus->state.epsilon = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "beta")))      consensus->state.beta = strtod(p, NULL);
+    if ((p = find_json_key(json_str, "seed")))      consensus->state.seed = (uint64_t)strtoull(p, NULL, 10);
+    if ((p = find_json_key(json_str, "timestamp"))) consensus->state.timestamp = (uint64_t)strtoull(p, NULL, 10);
     
     if ((p = find_json_key(json_str, "agent_a_score"))) consensus->state.agent_a_score = strtod(p, NULL);
     if ((p = find_json_key(json_str, "agent_b_score"))) consensus->state.agent_b_score = strtod(p, NULL);
     if ((p = find_json_key(json_str, "agent_c_score"))) consensus->state.agent_c_score = strtod(p, NULL);
     
-    if ((p = find_json_key(json_str, "\"context\""))) {
+    if ((p = find_json_key(json_str, "context"))) {
         if (*p == '"') {
             p++;
             size_t i = 0;
@@ -156,7 +156,7 @@ int zcc_prime_deserialize_json(const char *json_str, zcc_prime_consensus_t *cons
     }
     
     /* Parse history array */
-    if ((p = find_json_key(json_str, "\"history\""))) {
+    if ((p = find_json_key(json_str, "history"))) {
         if (*p == '[') {
             p++;
             consensus->state.history_count = 0;

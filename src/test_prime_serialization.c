@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include "prime_serialization.h"
 
@@ -75,11 +76,61 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (fabs(parsed.consensus_score - consensus.consensus_score) < 1e-5 && parsed.jackpot == consensus.jackpot) {
-        printf("🟢 [C-TEST] JSON Roundtrip verification: PASSED!\n");
+    int verification_failed = 0;
+    
+    #define CHECK_DOUBLE(field) \
+        if (fabs(parsed.field - consensus.field) >= 1e-12) { \
+            fprintf(stderr, "🔴 [C-TEST] Verification failed for " #field " (parsed: %.17g, original: %.17g)\n", parsed.field, consensus.field); \
+            verification_failed = 1; \
+        }
+        
+    #define CHECK_INT(field) \
+        if (parsed.field != consensus.field) { \
+            fprintf(stderr, "🔴 [C-TEST] Verification failed for " #field " (parsed: %lu, original: %lu)\n", (unsigned long)parsed.field, (unsigned long)consensus.field); \
+            verification_failed = 1; \
+        }
+
+    #define CHECK_STR(field) \
+        if (strcmp(parsed.field, consensus.field) != 0) { \
+            fprintf(stderr, "🔴 [C-TEST] Verification failed for " #field " (parsed: '%s', original: '%s')\n", parsed.field, consensus.field); \
+            verification_failed = 1; \
+        }
+
+    CHECK_DOUBLE(consensus_score);
+    CHECK_DOUBLE(drift);
+    CHECK_INT(jackpot);
+    CHECK_STR(alerts);
+    
+    CHECK_DOUBLE(state.h);
+    CHECK_DOUBLE(state.h0);
+    CHECK_DOUBLE(state.eta);
+    CHECK_DOUBLE(state.gamma);
+    CHECK_DOUBLE(state.epsilon);
+    CHECK_DOUBLE(state.beta);
+    CHECK_INT(state.seed);
+    CHECK_INT(state.timestamp);
+    CHECK_STR(state.context);
+    
+    CHECK_INT(state.history_count);
+    if (!verification_failed) {
+        for (size_t i = 0; i < consensus.state.history_count; i++) {
+            if (fabs(parsed.state.history[i] - consensus.state.history[i]) >= 1e-12) {
+                fprintf(stderr, "🔴 [C-TEST] Verification failed for state.history[%lu] (parsed: %.17g, original: %.17g)\n",
+                        (unsigned long)i, parsed.state.history[i], consensus.state.history[i]);
+                verification_failed = 1;
+                break;
+            }
+        }
+    }
+    
+    CHECK_DOUBLE(state.agent_a_score);
+    CHECK_DOUBLE(state.agent_b_score);
+    CHECK_DOUBLE(state.agent_c_score);
+
+    if (!verification_failed) {
+        printf("🟢 [C-TEST] High-precision JSON Roundtrip verification: PASSED!\n");
     } else {
-        fprintf(stderr, "🔴 [C-TEST] JSON Roundtrip verification: FAILED! (Parsed score: %.6f, original: %.6f)\n",
-                parsed.consensus_score, consensus.consensus_score);
+        fprintf(stderr, "🔴 [C-TEST] JSON Roundtrip verification: FAILED!\n");
         return 1;
     }
 
