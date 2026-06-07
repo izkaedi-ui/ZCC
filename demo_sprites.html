@@ -831,7 +831,8 @@ document.getElementById('vt-graph').addEventListener('click',()=>{
   document.getElementById('graph-view').style.display='';
   document.getElementById('vt-grid').classList.remove('active');
   document.getElementById('vt-graph').classList.add('active');
-  drawForceGraph();
+  // Delay so browser layout completes before reading offsetWidth
+  setTimeout(drawForceGraph, 50);
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -839,10 +840,13 @@ document.getElementById('vt-graph').addEventListener('click',()=>{
 // ══════════════════════════════════════════════════════════════
 let graphNodes=[], graphEdges=[], graphRunning=false;
 
+let graphClickAttached = false;
 function initGraph(){
   const canvas=document.getElementById('graph-canvas');
-  const W=canvas.width=canvas.offsetWidth;
-  const H=canvas.height=canvas.offsetHeight||560;
+  // Use parent container width as fallback when canvas was previously display:none
+  const parentW = canvas.parentElement ? canvas.parentElement.clientWidth : 0;
+  const W=canvas.width = canvas.offsetWidth || parentW || 900;
+  const H=canvas.height = canvas.offsetHeight || 560;
   graphNodes=TOPOS.map((t,i)=>({
     id:t.id,name:t.name,color:t.color,sev:t.sev,
     x:W/2+(Math.cos(i*Math.PI*2/TOPOS.length)*180),
@@ -862,6 +866,7 @@ function initGraph(){
 }
 
 function drawForceGraph(){
+  if(graphRunning){graphRunning=false} // signal any existing loop to stop
   const {canvas,ctx,W,H}=initGraph();
   graphRunning=true;
 
@@ -935,7 +940,9 @@ function drawForceGraph(){
   }
   requestAnimationFrame(step);
 
-  // Click on graph node
+  // Click on graph node — attach only once
+  if(!graphClickAttached){
+  graphClickAttached=true;
   canvas.addEventListener('click',e=>{
     const r=canvas.getBoundingClientRect();
     const cx=e.clientX-r.left,cy=e.clientY-r.top;
