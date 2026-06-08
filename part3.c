@@ -2453,7 +2453,7 @@ Node *parse_assign(Compiler *cc) {
             ca = node_new(cc, ND_COMPOUND_ASSIGN, line);
             ca->compound_op = op;
             ca->lhs = n;
-            ca->rhs = parse_assign(cc);
+            ca->rhs = ensure_type(cc, parse_assign(cc), n->type);
             ca->type = n->type;
             return ca;
         }
@@ -3788,13 +3788,20 @@ Node *parse_program(Compiler *cc) {
             }
 
             /* array dimensions after name */
-            while (cc->tk == TK_LBRACKET) {
-                int alen;
-                next_token(cc);
-                alen = 0;
-                if (cc->tk != TK_RBRACKET) alen = (int)parse_const_expr(cc);
-                expect(cc, TK_RBRACKET);
-                dtype = type_array(cc, dtype, alen);
+            if (cc->tk == TK_LBRACKET) {
+                int arr_lens[16];
+                int arr_num = 0;
+                while (cc->tk == TK_LBRACKET) {
+                    int alen = 0;
+                    next_token(cc);
+                    if (cc->tk != TK_RBRACKET) alen = (int)parse_const_expr(cc);
+                    expect(cc, TK_RBRACKET);
+                    if (arr_num < 16) arr_lens[arr_num++] = alen;
+                }
+                while (arr_num > 0) {
+                    arr_num--;
+                    dtype = type_array(cc, dtype, arr_lens[arr_num]);
+                }
             }
         }
 
