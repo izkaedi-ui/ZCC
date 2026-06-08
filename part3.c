@@ -2,6 +2,7 @@
 /* Exclusively for standalone IDE analysis */
 #include "part1.c"
 #endif
+#include "zcc_telemetry.h"
 
 /* ================================================================ */
 /* PARSER                                                            */
@@ -724,6 +725,19 @@ static Type *parse_struct_or_union_body(Compiler *cc, Type *stype, int is_union)
         }
         stype->align = final_align;
         stype->is_complete = 1;
+
+        if (stype) {
+            int already_registered = 0;
+            for (int i = 0; i < cc->num_structs; i++) {
+                if (cc->structs[i] == stype) {
+                    already_registered = 1;
+                    break;
+                }
+            }
+            if (!already_registered) {
+                register_struct(cc, stype);
+            }
+        }
     }
 
     expect(cc, TK_RBRACE);
@@ -920,7 +934,38 @@ Type *parse_type(Compiler *cc) {
 
 Node *parse_assign(Compiler *cc);
 
+static long long force_truncate(long long v, Type *type) {
+    if (!type) return v;
+    switch (type->kind) {
+        case TY_CHAR:      return (long long)(char)v;
+        case TY_UCHAR:     return (long long)(unsigned char)v;
+        case TY_SHORT:     return (long long)(short)v;
+        case TY_USHORT:    return (long long)(unsigned short)v;
+        case TY_INT:       return (long long)(int)v;
+        case TY_UINT:      return (long long)(unsigned int)v;
+        case TY_LONG:      return v;
+        case TY_ULONG:     return (long long)(unsigned long long)v;
+        case TY_LONGLONG:  return (long long)v;
+        case TY_ULONGLONG: return (long long)(unsigned long long)v;
+        default:           return v;
+    }
+}
+
+static long long eval_const_expr_raw(Node *n);
+
+static int is_unsigned_cmp(Node *n) {
+    if (!n) return 0;
+    return (n->lhs && n->lhs->type && is_unsigned_type(n->lhs->type)) ||
+           (n->rhs && n->rhs->type && is_unsigned_type(n->rhs->type));
+}
+
 static long long eval_const_expr(Node *n) {
+    if (!n) return 0;
+    long long val = eval_const_expr_raw(n);
+    return force_truncate(val, n->type);
+}
+
+static long long eval_const_expr_raw(Node *n) {
     if (!n) return 0;
     if (n->kind == ND_NUM) return n->int_val;
     if (n->kind == ND_ADD) return eval_const_expr(n->lhs) + eval_const_expr(n->rhs);
@@ -935,15 +980,147 @@ static long long eval_const_expr(Node *n) {
         return r ? eval_const_expr(n->lhs) % r : 0;
     }
     if (n->kind == ND_SHL) return eval_const_expr(n->lhs) << eval_const_expr(n->rhs);
-    if (n->kind == ND_SHR) return eval_const_expr(n->lhs) >> eval_const_expr(n->rhs);
+    if (n->kind == ND_SHR) {
+        /* CG-CFOLD-UNSIGNED-001: unsigned types must use logical (zero-filling)
+         * right shift, not arithmetic (sign-filling). Use unsigned long long.
+         * Matches the same kind set as node_type_unsigned() in part1.c. */
+        int lhs_kind = n->lhs && n->lhs->type ? n->lhs->type->kind : -1;
+        int is_unsigned = (lhs_kind == TY_UCHAR || lhs_kind == TY_USHORT ||
+                           lhs_kind == TY_UINT  || lhs_kind == TY_ULONG  ||
+                           lhs_kind == TY_ULONGLONG);
+        if (!is_unsigned && n->type) {
+            int tk = n->type->kind;
+            is_unsigned = (tk == TY_UCHAR || tk == TY_USHORT ||
+                           tk == TY_UINT  || tk == TY_ULONG  ||
+                           tk == TY_ULONGLONG);
+        }
+        if (is_unsigned)
+            return (long long)((unsigned long long)eval_const_expr(n->lhs) >>
+                               (unsigned long long)eval_const_expr(n->rhs));
+        return eval_const_expr(n->lhs) >> eval_const_expr(n->rhs);
+    }
     if (n->kind == ND_BAND) return eval_const_expr(n->lhs) & eval_const_expr(n->rhs);
     if (n->kind == ND_BOR) return eval_const_expr(n->lhs) | eval_const_expr(n->rhs);
     if (n->kind == ND_BXOR) return eval_const_expr(n->lhs) ^ eval_const_expr(n->rhs);
-    if (n->kind == ND_CAST) return eval_const_expr(n->lhs);
-    /* Unary operators — critical for negative switch cases like case (-15): */
-    if (n->kind == ND_NEG)  return -eval_const_expr(n->lhs);
-    if (n->kind == ND_BNOT) return ~eval_const_expr(n->lhs);
+    if (n->kind == ND_EQ) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) == (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) == eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_NE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) != (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) != eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LT) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) < (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) < eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) <= (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) <= eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_GT) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) > (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) > eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_GE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) >= (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) >= eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LAND) return eval_const_expr(n->lhs) && eval_const_expr(n->rhs);
+    if (n->kind == ND_LOR)  return eval_const_expr(n->lhs) || eval_const_expr(n->rhs);
+    if (n->kind == ND_CAST) {
+        /* CG-CFOLD-CAST-TRUNC-001: stripping ND_CAST without truncation bleeds
+         * 64-bit values through smaller-typed casts. Apply C-semantics truncation
+         * based on the target type so that, e.g., (unsigned int)(~462LL) correctly
+         * yields 4294966833, not 0xFFFFFFFFFFFFFE31. */
+        long long v = eval_const_expr(n->lhs);
+        if (!n->type) return v;
+        switch (n->type->kind) {
+            case TY_CHAR:      return (long long)(char)v;
+            case TY_UCHAR:     return (long long)(unsigned char)v;
+            case TY_SHORT:     return (long long)(short)v;
+            case TY_USHORT:    return (long long)(unsigned short)v;
+            case TY_INT:       return (long long)(int)v;
+            case TY_UINT:      return (long long)(unsigned int)v;
+            case TY_LONG:      return v;
+            case TY_ULONG:     return (long long)(unsigned long long)v;
+            case TY_LONGLONG:  return (long long)v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)v;
+            default:           return v;
+        }
+    }
+    /* Unary operators — critical for negative switch cases like case (-15):
+     * CG-CFOLD-NEG-BNOT-UNSIGNED-002: for unsigned operand types, the result
+     * must wrap at the operand's bit width (e.g., -(9200u) = 4294958096, not -9200).
+     * Check lhs type and apply C-width truncation before returning. */
+    if (n->kind == ND_NEG) {
+        long long v = -eval_const_expr(n->lhs);
+        if (n->lhs && n->lhs->type) switch (n->lhs->type->kind) {
+            case TY_UCHAR:     return (long long)(unsigned char)v;
+            case TY_USHORT:    return (long long)(unsigned short)v;
+            case TY_UINT:      return (long long)(unsigned int)v;
+            case TY_ULONG:     return (long long)(unsigned long long)v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)v;
+            default: break;
+        }
+        return v;
+    }
+    if (n->kind == ND_BNOT) {
+        long long v = ~eval_const_expr(n->lhs);
+        if (n->lhs && n->lhs->type) switch (n->lhs->type->kind) {
+            case TY_UCHAR:     return (long long)(unsigned char)v;
+            case TY_USHORT:    return (long long)(unsigned short)v;
+            case TY_UINT:      return (long long)(unsigned int)v;
+            case TY_ULONG:     return (long long)(unsigned long long)v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)v;
+            default: break;
+        }
+        return v;
+    }
     if (n->kind == ND_LNOT) return !eval_const_expr(n->lhs);
+    /* Relational and logical operators (commit 3cc64db6 — re-applied from history) */
+    if (n->kind == ND_EQ) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) == (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) == eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_NE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) != (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) != eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LT) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) < (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) < eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) <= (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) <= eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_GT) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) > (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) > eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_GE) {
+        if (is_unsigned_cmp(n))
+            return (unsigned long long)eval_const_expr(n->lhs) >= (unsigned long long)eval_const_expr(n->rhs);
+        return eval_const_expr(n->lhs) >= eval_const_expr(n->rhs);
+    }
+    if (n->kind == ND_LAND) return eval_const_expr(n->lhs) && eval_const_expr(n->rhs);
+    if (n->kind == ND_LOR)  return eval_const_expr(n->lhs) || eval_const_expr(n->rhs);
+    /* Ternary constant folding — enables (expr==0 ? 1 : expr) denominator patterns */
+    if (n->kind == ND_TERNARY && n->cond && n->then_body && n->else_body)
+        return eval_const_expr(n->cond) ? eval_const_expr(n->then_body)
+                                        : eval_const_expr(n->else_body);
     /* Enum constants (global only — local vars are NOT constants) */
     if (n->kind == ND_VAR && n->sym && n->sym->is_enum_const && !n->sym->is_local)
         return n->sym->enum_val;
@@ -1048,7 +1225,90 @@ static void parse_or_skip_gcc_attributes(Compiler *cc, Type *dtype) {
     }
 }
 
+static void recompute_struct_layout(Type *stype) {
+    if (!stype || (stype->kind != TY_STRUCT && stype->kind != TY_UNION) || !stype->is_complete) return;
+    
+    int is_union = (stype->kind == TY_UNION);
+    int offset = 0;
+    int max_size = 0;
+    int max_align = 1;
+    int bf_active = 0;
+    int bf_unit_size = 0;
+    int bf_current_bit = 0;
+    int bf_unit_offset = 0;
+    
+    StructField *field = stype->fields;
+    while (field) {
+        Type *ftype = field->type;
+        int falign = type_align(ftype);
+        if (stype->is_packed) falign = 1;
+        if (falign > max_align) max_align = falign;
+        
+        if (is_union) {
+            field->offset = 0;
+            if (type_size(ftype) > max_size) max_size = type_size(ftype);
+        } else {
+            if (field->is_bitfield) {
+                int bf_size = field->bit_size;
+                int fsize = type_size(ftype);
+                if (bf_active && fsize == bf_unit_size && bf_size > 0 && bf_current_bit + bf_size <= fsize * 8) {
+                    field->offset = bf_unit_offset;
+                    field->bit_offset = bf_current_bit;
+                    bf_current_bit += bf_size;
+                } else {
+                    bf_active = 1;
+                    bf_unit_size = fsize;
+                    bf_current_bit = 0;
+                    if (falign > 1) {
+                        offset = (offset + falign - 1) & ~(falign - 1);
+                    }
+                    bf_unit_offset = offset;
+                    if (bf_size > 0) {
+                        field->offset = bf_unit_offset;
+                        field->bit_offset = 0;
+                        bf_current_bit = bf_size;
+                        offset += fsize;
+                    } else {
+                        bf_active = 0;
+                        bf_unit_size = 0;
+                        bf_current_bit = 0;
+                    }
+                }
+            } else {
+                bf_active = 0;
+                if (falign > 1) {
+                    offset = (offset + falign - 1) & ~(falign - 1);
+                }
+                field->offset = offset;
+                offset = offset + type_size(ftype);
+            }
+        }
+        field = field->next;
+    }
+    
+    if (is_union) {
+        stype->size = max_size;
+    } else {
+        stype->size = offset;
+    }
+    
+    int final_align = max_align;
+    if (stype->explicit_align > 0) {
+        final_align = stype->explicit_align;
+    } else if (stype->is_packed) {
+        final_align = 1;
+    }
+    
+    if (final_align > 1) {
+        stype->size = (stype->size + final_align - 1) & ~(final_align - 1);
+    }
+    stype->align = final_align;
+}
+
 static void inject_attribute_parser(Compiler *cc, Type *dtype) {
+    int was_packed = dtype ? dtype->is_packed : 0;
+    int was_explicit = dtype ? dtype->explicit_align : 0;
+
     if (cc->pending_packed) {
         if (dtype) dtype->is_packed = 1;
         cc->pending_packed = 0;
@@ -1063,6 +1323,12 @@ static void inject_attribute_parser(Compiler *cc, Type *dtype) {
     if (cc->tk == TK_IDENT &&
         (strcmp(cc->tk_text, "__attribute__") == 0 || strcmp(cc->tk_text, "__attribute") == 0)) {
         parse_or_skip_gcc_attributes(cc, dtype);
+    }
+
+    if (dtype && dtype->is_complete) {
+        if (dtype->is_packed != was_packed || dtype->explicit_align != was_explicit) {
+            recompute_struct_layout(dtype);
+        }
     }
 }
 
@@ -1117,7 +1383,7 @@ Type *parse_declarator(Compiler *cc, Type *base, char *name_out) {
                     type = type_array(cc, type, arr_lens[arr_num]);
                 }
             }
-            if (cc->tk == TK_LPAREN) {
+            while (cc->tk == TK_LPAREN) {
                 Type *ftype;
                 next_token(cc);
                 ftype = type_func(cc, type);
@@ -1256,18 +1522,35 @@ Node *parse_primary(Compiler *cc) {
 
     if (cc->tk == TK_NUM) {
         n = node_num(cc, cc->tk_val, line);
-        if (cc->tk_text[0] == 'U') {
-             if (cc->tk_val <= 4294967295ULL) {
-                 n->type = cc->ty_uint;
-             } else {
-                 n->type = cc->ty_ulong;
-             }
-        }
+        int is_hex_or_oct = (cc->tk_text[2] == 'H');
         if (cc->tk_text[1] == 'L') {
              if (cc->tk_text[0] == 'U') {
                  n->type = cc->ty_ulong;
              } else {
                  n->type = cc->ty_long;
+             }
+        } else if (cc->tk_text[0] == 'U') {
+             if (cc->tk_val <= 4294967295ULL) {
+                 n->type = cc->ty_uint;
+             } else {
+                 n->type = cc->ty_ulong;
+             }
+        } else {
+             /* unsuffixed literal */
+             if (is_hex_or_oct) {
+                 if (cc->tk_val <= 2147483647LL) {
+                     n->type = cc->ty_int;
+                 } else if (cc->tk_val <= 4294967295ULL) {
+                     n->type = cc->ty_uint;
+                 } else {
+                     n->type = cc->ty_ulong;
+                 }
+             } else {
+                 if (cc->tk_val <= 2147483647LL) {
+                     n->type = cc->ty_int;
+                 } else {
+                     n->type = cc->ty_long;
+                 }
              }
         }
         next_token(cc);
@@ -1362,19 +1645,7 @@ Node *parse_primary(Compiler *cc) {
     if (cc->tk == TK_LPAREN) {
         next_token(cc);
 
-        /* check for cast expression */
-        if (is_type_token(cc)) {
-            Type *cast_type;
-            char dummy[MAX_IDENT];
-            cast_type = parse_type(cc);
-            cast_type = parse_declarator(cc, cast_type, dummy);
-            expect(cc, TK_RPAREN);
-            n = node_new(cc, ND_CAST, line);
-            n->cast_type = cast_type;
-            n->lhs = parse_unary(cc);
-            n->type = cast_type;
-            return n;
-        }
+
 
         n = parse_expr(cc);
         expect(cc, TK_RPAREN);
@@ -1882,14 +2153,23 @@ Node *parse_unary(Compiler *cc) {
     }
 
     if (cc->tk == TK_LPAREN) {
-        int pk = peek_token(cc);
-        int is_cast = 0;
-        if (pk == TK_INT || pk == TK_CHAR || pk == TK_VOID || pk == TK_STRUCT || pk == TK_UNION || pk == TK_ENUM || pk == TK_LONG || pk == TK_SHORT || pk == TK_UNSIGNED || pk == TK_SIGNED || pk == TK_FLOAT || pk == TK_DOUBLE) {
-            is_cast = 1;
-        } else if (pk == TK_IDENT) {
-            Symbol *sym = scope_find(cc, cc->peek_text);
-            if (sym && sym->is_typedef) is_cast = 1;
-        }
+        int pk;
+        int is_cast;
+        int curr_tk;
+        char curr_txt[MAX_IDENT];
+        
+        pk = peek_token(cc);
+        is_cast = 0;
+        curr_tk = cc->tk;
+        strncpy(curr_txt, cc->tk_text, MAX_IDENT - 1);
+        curr_txt[MAX_IDENT - 1] = 0;
+        cc->tk = pk;
+        strncpy(cc->tk_text, cc->peek_text, MAX_IDENT - 1);
+        cc->tk_text[MAX_IDENT - 1] = 0;
+        if (is_type_token(cc)) is_cast = 1;
+        cc->tk = curr_tk;
+        strncpy(cc->tk_text, curr_txt, MAX_IDENT - 1);
+        cc->tk_text[MAX_IDENT - 1] = 0;
         
         if (is_cast) {
             char dummy[MAX_IDENT];
@@ -2462,7 +2742,7 @@ Node *parse_assign(Compiler *cc) {
     return n;
 }
 
-Node *parse_expr(Compiler *cc) {
+Node *parse_expr_internal(Compiler *cc) {
     Node *n;
     n = parse_assign(cc);
     while (cc->tk == TK_COMMA) {
@@ -2476,6 +2756,16 @@ Node *parse_expr(Compiler *cc) {
         comma->type = comma->rhs->type;
         n = comma;
     }
+    return n;
+}
+
+Node *parse_expr(Compiler *cc) {
+    Node *n;
+    cc->telemetry_depth++;
+    telemetry_emit_node(AST_ENTER_NODE, "expr", cc->telemetry_depth);
+    n = parse_expr_internal(cc);
+    telemetry_emit_node(AST_EXIT_NODE, "expr", cc->telemetry_depth);
+    cc->telemetry_depth--;
     return n;
 }
 
@@ -2536,6 +2826,72 @@ static Node *parse_initializer_list(Compiler *cc, int *out_count) {
     }
     if (out_count) *out_count = list->num_args;
     return list;
+}
+
+int g_init_list_nodes = 0;
+int g_max_init_depth = 0;
+
+static int compute_initializer_depth(Node *init) {
+    if (!init || init->kind != ND_INIT_LIST) return 0;
+    int max_child_depth = 0;
+    for (int i = 0; i < init->num_args; i++) {
+        int d = compute_initializer_depth(init->args[i]);
+        if (d > max_child_depth) max_child_depth = d;
+    }
+    return 1 + max_child_depth;
+}
+
+static void validate_initializer_dimensions(Compiler *cc, Type *t, Node *init) {
+    if (!t || !init) return;
+    
+    if (init->kind == ND_INIT_LIST) {
+        g_init_list_nodes++;
+        
+        int depth = compute_initializer_depth(init);
+        if (depth > g_max_init_depth) {
+            g_max_init_depth = depth;
+        }
+        
+        if (t->kind == TY_ARRAY) {
+            int len = t->array_len;
+            if (len > 0 && init->num_args > len) {
+                error_at(cc, init->line, "excess elements in array initializer");
+            }
+            Type *elem_type = t->base;
+            for (int i = 0; i < init->num_args; i++) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, elem_type, item);
+                }
+            }
+        } else if (t->kind == TY_STRUCT || t->kind == TY_UNION) {
+            StructField *f = t->fields;
+            int field_count = 0;
+            while (f) { field_count++; f = f->next; }
+            
+            if (init->num_args > field_count && t->kind == TY_STRUCT) {
+                error_at(cc, init->line, "excess elements in struct initializer");
+            }
+            
+            f = t->fields;
+            for (int i = 0; i < init->num_args && f != NULL; i++, f = f->next) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, f->type, item);
+                }
+            }
+        } else {
+            if (init->num_args > 1) {
+                error_at(cc, init->line, "excess elements in scalar initializer");
+            }
+            for (int i = 0; i < init->num_args; i++) {
+                Node *item = init->args[i];
+                if (item->kind == ND_INIT_LIST) {
+                    validate_initializer_dimensions(cc, t, item);
+                }
+            }
+        }
+    }
 }
 
 static void emit_local_initializer(Compiler *cc, Node *block, int *cnt, int *cap, Node *base_var, Type *curr_type, Node *init_list, int offset) {
@@ -2627,7 +2983,7 @@ static void emit_local_initializer(Compiler *cc, Node *block, int *cnt, int *cap
     }
 }
 
-Node *parse_stmt(Compiler *cc) {
+Node *parse_stmt_internal(Compiler *cc) {
     int line;
     line = cc->tk_line;
 
@@ -3034,6 +3390,7 @@ Node *parse_stmt(Compiler *cc) {
                                 strncpy(var_node->name, vname, MAX_IDENT - 1);
                                 var_node->sym = sym;
                                 var_node->type = arr_type;
+                                validate_initializer_dimensions(cc, arr_type, init_list);
                                 emit_local_initializer(cc, block, &cnt, &cap, var_node, arr_type, init_list, 0);
                             }
                         } else {
@@ -3089,6 +3446,16 @@ Node *parse_stmt(Compiler *cc) {
     }
 }
 
+Node *parse_stmt(Compiler *cc) {
+    Node *n;
+    cc->telemetry_depth++;
+    telemetry_emit_node(AST_ENTER_NODE, "stmt", cc->telemetry_depth);
+    n = parse_stmt_internal(cc);
+    telemetry_emit_node(AST_EXIT_NODE, "stmt", cc->telemetry_depth);
+    cc->telemetry_depth--;
+    return n;
+}
+
 /* ================================================================ */
 /* TOP-LEVEL PARSING                                                 */
 /* ================================================================ */
@@ -3110,6 +3477,13 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
     expect(cc, TK_LPAREN);
     scope_push(cc);
     cc->local_offset = 0;
+    if (ret_type && (ret_type->kind == TY_STRUCT || ret_type->kind == TY_UNION)) {
+        abi_class_t eb[2];
+        classify_aggregate(ret_type, eb);
+        if (eb[0] == CLASS_MEMORY) {
+            cc->local_offset = -8;
+        }
+    }
 
     func->num_params = 0;
     if (cc->tk != TK_RPAREN) {
@@ -3166,6 +3540,20 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
     }
     expect(cc, TK_RPAREN);
 
+    if (cc->tk == TK_RPAREN) {
+        next_token(cc);
+    }
+
+    if (cc->tk == TK_LPAREN) {
+        next_token(cc);
+        int pdepth = 1;
+        while (pdepth > 0 && cc->tk != TK_EOF) {
+            if (cc->tk == TK_LPAREN) pdepth++;
+            else if (cc->tk == TK_RPAREN) pdepth--;
+            next_token(cc);
+        }
+    }
+
     /* Populate func->func_params from the inline capture arrays so
      * codegen_func (part4.c) can safely do func->func_params->types[i].
      * cc_alloc uses the arena so this is lifetime-safe. */
@@ -3201,14 +3589,15 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
         func->func_type = ftype;
 
         /* add to parent scope (global) */
-        fsym = scope_find(cc, name);
-        if (!fsym) {
-            /* temporarily pop to add to parent */
+        {
             Scope *cur;
             cur = cc->current_scope;
             cc->current_scope = cur->parent;
-            fsym = scope_add(cc, name, ftype);
-            fsym->is_global = 1;
+            fsym = scope_find(cc, name);
+            if (!fsym) {
+                fsym = scope_add(cc, name, ftype);
+                fsym->is_global = 1;
+            }
             cc->current_scope = cur;
         }
     }
@@ -3225,6 +3614,12 @@ static Node *parse_func_def(Compiler *cc, Type *ret_type, char *name, int is_sta
     func->body = parse_stmt(cc);
     func->stack_size = -cc->local_offset;
     scope_pop(cc);
+
+    if (func->body) {
+        if (cc->num_globals < MAX_GLOBALS) {
+            cc->globals[cc->num_globals++] = func;
+        }
+    }
 
     return func;
 }
@@ -3389,6 +3784,69 @@ Node *zcc_rust_shm_entry(Compiler *cc) {
     }
     error(cc, "[ZCC-RUST] SHM timeout waiting for Rust frontend data");
     return NULL;
+}
+
+typedef struct {
+    int pos;
+    int line;
+    int col;
+    int tk;
+    long long tk_val;
+    char tk_text[MAX_IDENT];
+    char tk_str[MAX_STR];
+    int tk_str_len;
+    int tk_line;
+    int tk_col;
+    int has_peek;
+    int peek_tk;
+    long long peek_val;
+    char peek_text[MAX_IDENT];
+    char peek_str[MAX_STR];
+    int peek_str_len;
+    int peek_line;
+    int peek_col;
+} TokenState;
+
+static void save_token_state(Compiler *cc, TokenState *ts) {
+    ts->pos = cc->pos;
+    ts->line = cc->line;
+    ts->col = cc->col;
+    ts->tk = cc->tk;
+    ts->tk_val = cc->tk_val;
+    memcpy(ts->tk_text, cc->tk_text, MAX_IDENT);
+    memcpy(ts->tk_str, cc->tk_str, MAX_STR);
+    ts->tk_str_len = cc->tk_str_len;
+    ts->tk_line = cc->tk_line;
+    ts->tk_col = cc->tk_col;
+    ts->has_peek = cc->has_peek;
+    ts->peek_tk = cc->peek_tk;
+    ts->peek_val = cc->peek_val;
+    memcpy(ts->peek_text, cc->peek_text, MAX_IDENT);
+    memcpy(ts->peek_str, cc->peek_str, MAX_STR);
+    ts->peek_str_len = cc->peek_str_len;
+    ts->peek_line = cc->peek_line;
+    ts->peek_col = cc->peek_col;
+}
+
+static void restore_token_state(Compiler *cc, TokenState *ts) {
+    cc->pos = ts->pos;
+    cc->line = ts->line;
+    cc->col = ts->col;
+    cc->tk = ts->tk;
+    cc->tk_val = ts->tk_val;
+    memcpy(cc->tk_text, ts->tk_text, MAX_IDENT);
+    memcpy(cc->tk_str, ts->tk_str, MAX_STR);
+    cc->tk_str_len = ts->tk_str_len;
+    cc->tk_line = ts->tk_line;
+    cc->tk_col = ts->tk_col;
+    cc->has_peek = ts->has_peek;
+    cc->peek_tk = ts->peek_tk;
+    cc->peek_val = ts->peek_val;
+    memcpy(cc->peek_text, ts->peek_text, MAX_IDENT);
+    memcpy(cc->peek_str, ts->peek_str, MAX_STR);
+    cc->peek_str_len = ts->peek_str_len;
+    cc->peek_line = ts->peek_line;
+    cc->peek_col = ts->peek_col;
 }
 
 Node *parse_program(Compiler *cc) {
@@ -3637,8 +4095,10 @@ Node *parse_program(Compiler *cc) {
                         next_token(cc);
                     }
                     int is_inner_func = 0;
+                    TokenState ts_before_params;
                     if (cc->tk == TK_LPAREN) {
                         is_inner_func = 1;
+                        save_token_state(cc, &ts_before_params);
                         next_token(cc);
                         int pcnt = 1;
                         while (pcnt > 0 && cc->tk != TK_EOF) {
@@ -3709,6 +4169,16 @@ Node *parse_program(Compiler *cc) {
                     while (arr_num > 0) {
                         arr_num--;
                         dtype = type_array(cc, dtype, arr_lens[arr_num]);
+                    }
+                    if (is_inner_func && (cc->tk == TK_LBRACE || cc->tk == TK_SEMI)) {
+                        restore_token_state(cc, &ts_before_params);
+                        Node *func = parse_func_def(cc, dtype, name, is_static);
+                        if (func->body) {
+                            func->next = 0;
+                            if (!head) { head = func; tail = func; }
+                            else { tail->next = func; tail = func; }
+                        }
+                        continue;
                     }
                     if (is_inner_func) {
                         dtype = type_func(cc, dtype);
@@ -3989,5 +4459,670 @@ Node* zcc_build_initializer(Compiler* cc, ZccInitNode* root, Type* target_type) 
     zcc_rust_free_init_tree(root);
     return final_node;
 }
-
 /* ZKAEDI FORCE RENDER CACHE INVALIDATION */
+
+typedef enum {
+    LATTICE_TOP,
+    LATTICE_CONST,
+    LATTICE_BOT
+} LatticeKind;
+
+typedef struct {
+    LatticeKind kind;
+    long long val;
+} LatticeVal;
+
+typedef struct {
+    Symbol *sym;
+    LatticeVal val;
+} SymLatticeEntry;
+
+#define LATTICE_HASH_SIZE 16384
+static SymLatticeEntry sym_lattice_hash[LATTICE_HASH_SIZE];
+
+static int hash_sym(Symbol *sym) {
+    unsigned long long addr = (unsigned long long)sym;
+    return (int)((addr ^ (addr >> 16)) % LATTICE_HASH_SIZE);
+}
+
+static LatticeVal get_sym_lattice(Symbol *sym) {
+    LatticeVal bot = {LATTICE_BOT, 0};
+    if (!sym) return bot;
+    int h = hash_sym(sym);
+    int i = h;
+    while (1) {
+        if (sym_lattice_hash[i].sym == sym) {
+            return sym_lattice_hash[i].val;
+        }
+        if (sym_lattice_hash[i].sym == NULL) {
+            LatticeVal top = {LATTICE_TOP, 0};
+            return top;
+        }
+        i = (i + 1) % LATTICE_HASH_SIZE;
+        if (i == h) return bot;
+    }
+}
+
+static void set_sym_lattice(Symbol *sym, LatticeVal val) {
+    if (!sym) return;
+    int h = hash_sym(sym);
+    int i = h;
+    while (1) {
+        if (sym_lattice_hash[i].sym == sym) {
+            sym_lattice_hash[i].val = val;
+            return;
+        }
+        if (sym_lattice_hash[i].sym == NULL) {
+            sym_lattice_hash[i].sym = sym;
+            sym_lattice_hash[i].val = val;
+            return;
+        }
+        i = (i + 1) % LATTICE_HASH_SIZE;
+        if (i == h) return;
+    }
+}
+
+static LatticeVal meet(LatticeVal a, LatticeVal b) {
+    if (a.kind == LATTICE_BOT || b.kind == LATTICE_BOT) {
+        LatticeVal r = {LATTICE_BOT, 0};
+        return r;
+    }
+    if (a.kind == LATTICE_TOP) return b;
+    if (b.kind == LATTICE_TOP) return a;
+    if (a.val == b.val) return a;
+    LatticeVal r = {LATTICE_BOT, 0};
+    return r;
+}
+
+typedef struct {
+    Symbol *sym;
+    int assign_count;
+    int addr_taken;
+} SymStats;
+
+#define STATS_HASH_SIZE 16384
+static SymStats sym_stats_hash[STATS_HASH_SIZE];
+
+static int hash_stats_sym(Symbol *sym) {
+    unsigned long long addr = (unsigned long long)sym;
+    return (int)((addr ^ (addr >> 16)) % STATS_HASH_SIZE);
+}
+
+static SymStats *get_sym_stats(Symbol *sym) {
+    if (!sym) return NULL;
+    int h = hash_stats_sym(sym);
+    int i = h;
+    while (1) {
+        if (sym_stats_hash[i].sym == sym) {
+            return &sym_stats_hash[i];
+        }
+        if (sym_stats_hash[i].sym == NULL) {
+            sym_stats_hash[i].sym = sym;
+            sym_stats_hash[i].assign_count = 0;
+            sym_stats_hash[i].addr_taken = 0;
+            return &sym_stats_hash[i];
+        }
+        i = (i + 1) % STATS_HASH_SIZE;
+        if (i == h) return NULL;
+    }
+}
+
+typedef struct {
+    Node *caller;
+    Node *callee;
+    Node *call_node;
+} CallSite;
+
+#define MAX_CALL_SITES 8192
+static CallSite call_sites[MAX_CALL_SITES];
+static int num_call_sites = 0;
+
+#define MAX_FUNCTIONS 2048
+static Node *functions[MAX_FUNCTIONS];
+static int num_functions = 0;
+
+static Symbol *func_param_syms[MAX_FUNCTIONS][MAX_PARAMS];
+static int func_param_syms_initialized = 0;
+
+static Node *find_function_def(const char *name) {
+    for (int i = 0; i < num_functions; i++) {
+        if (strcmp(functions[i]->func_def_name, name) == 0) {
+            return functions[i];
+        }
+    }
+    return NULL;
+}
+
+static Symbol *find_param_sym_in_node(Node *n, const char *name) {
+    if (!n) return NULL;
+    if (n->kind == ND_VAR && strcmp(n->name, name) == 0 && n->sym) {
+        return n->sym;
+    }
+    Symbol *s = find_param_sym_in_node(n->lhs, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->rhs, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->cond, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->then_body, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->else_body, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->init, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->inc, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->body, name);
+    if (s) return s;
+    s = find_param_sym_in_node(n->case_body, name);
+    if (s) return s;
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            s = find_param_sym_in_node(n->args[i], name);
+            if (s) return s;
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            s = find_param_sym_in_node(n->stmts[i], name);
+            if (s) return s;
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            s = find_param_sym_in_node(n->cases[i], name);
+            if (s) return s;
+        }
+        s = find_param_sym_in_node(n->default_case, name);
+        if (s) return s;
+    }
+    return NULL;
+}
+
+static void initialize_param_syms(void) {
+    if (func_param_syms_initialized) return;
+    memset(func_param_syms, 0, sizeof(func_param_syms));
+    for (int i = 0; i < num_functions; i++) {
+        Node *func = functions[i];
+        if (func->func_params) {
+            for (int k = 0; k < func->num_params && k < MAX_PARAMS; k++) {
+                func_param_syms[i][k] = find_param_sym_in_node(func->body, func->func_params->names[k]);
+            }
+        }
+    }
+    func_param_syms_initialized = 1;
+}
+
+static void icp_collect_calls(Node *n, Node *current_func) {
+    if (!n) return;
+    
+    if (n->kind == ND_CALL) {
+        Node *callee = find_function_def(n->func_name);
+        if (callee && num_call_sites < MAX_CALL_SITES) {
+            call_sites[num_call_sites].caller = current_func;
+            call_sites[num_call_sites].callee = callee;
+            call_sites[num_call_sites].call_node = n;
+            num_call_sites++;
+        }
+    }
+    
+    icp_collect_calls(n->lhs, current_func);
+    icp_collect_calls(n->rhs, current_func);
+    icp_collect_calls(n->cond, current_func);
+    icp_collect_calls(n->then_body, current_func);
+    icp_collect_calls(n->else_body, current_func);
+    icp_collect_calls(n->init, current_func);
+    icp_collect_calls(n->inc, current_func);
+    icp_collect_calls(n->body, current_func);
+    icp_collect_calls(n->case_body, current_func);
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            icp_collect_calls(n->args[i], current_func);
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            icp_collect_calls(n->stmts[i], current_func);
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            icp_collect_calls(n->cases[i], current_func);
+        }
+        icp_collect_calls(n->default_case, current_func);
+    }
+}
+
+static void scan_sym_stats(Node *n) {
+    if (!n) return;
+    
+    if (n->kind == ND_ASSIGN || n->kind == ND_COMPOUND_ASSIGN) {
+        Node *lhs = n->lhs;
+        while (lhs && lhs->kind == ND_CAST) lhs = lhs->lhs;
+        if (lhs && lhs->kind == ND_VAR && lhs->sym) {
+            SymStats *stats = get_sym_stats(lhs->sym);
+            if (stats) {
+                if (n->kind == ND_COMPOUND_ASSIGN) {
+                    stats->assign_count += 2;
+                } else {
+                    stats->assign_count++;
+                }
+            }
+        }
+    }
+    else if (n->kind == ND_PRE_INC || n->kind == ND_PRE_DEC ||
+             n->kind == ND_POST_INC || n->kind == ND_POST_DEC) {
+        Node *lhs = n->lhs;
+        while (lhs && lhs->kind == ND_CAST) lhs = lhs->lhs;
+        if (lhs && lhs->kind == ND_VAR && lhs->sym) {
+            SymStats *stats = get_sym_stats(lhs->sym);
+            if (stats) stats->assign_count += 2;
+        }
+    }
+    else if (n->kind == ND_ADDR) {
+        Node *lhs = n->lhs;
+        while (lhs && lhs->kind == ND_CAST) lhs = lhs->lhs;
+        if (lhs && lhs->kind == ND_VAR && lhs->sym) {
+            SymStats *stats = get_sym_stats(lhs->sym);
+            if (stats) stats->addr_taken = 1;
+        }
+    }
+    
+    scan_sym_stats(n->lhs);
+    scan_sym_stats(n->rhs);
+    scan_sym_stats(n->cond);
+    scan_sym_stats(n->then_body);
+    scan_sym_stats(n->else_body);
+    scan_sym_stats(n->init);
+    scan_sym_stats(n->inc);
+    scan_sym_stats(n->body);
+    scan_sym_stats(n->case_body);
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            scan_sym_stats(n->args[i]);
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            scan_sym_stats(n->stmts[i]);
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            scan_sym_stats(n->cases[i]);
+        }
+        scan_sym_stats(n->default_case);
+    }
+}
+
+static LatticeVal icp_eval_expr(Node *n) {
+    LatticeVal bot = {LATTICE_BOT, 0};
+    if (!n) return bot;
+    
+    if (n->kind == ND_NUM) {
+        LatticeVal r = {LATTICE_CONST, n->int_val};
+        return r;
+    }
+    
+    if (n->kind == ND_VAR && n->sym) {
+        return get_sym_lattice(n->sym);
+    }
+    
+    if (n->kind == ND_CAST) {
+        return icp_eval_expr(n->lhs);
+    }
+    
+    if (n->kind == ND_ADD || n->kind == ND_SUB || n->kind == ND_MUL ||
+        n->kind == ND_DIV || n->kind == ND_MOD || n->kind == ND_SHL ||
+        n->kind == ND_SHR || n->kind == ND_BAND || n->kind == ND_BOR ||
+        n->kind == ND_BXOR || n->kind == ND_EQ || n->kind == ND_NE ||
+        n->kind == ND_LT || n->kind == ND_LE || n->kind == ND_GT ||
+        n->kind == ND_GE || n->kind == ND_LAND || n->kind == ND_LOR) {
+        
+        LatticeVal lhs_val = icp_eval_expr(n->lhs);
+        LatticeVal rhs_val = icp_eval_expr(n->rhs);
+        
+        if (lhs_val.kind == LATTICE_BOT || rhs_val.kind == LATTICE_BOT) {
+            LatticeVal bot = {LATTICE_BOT, 0};
+            return bot;
+        }
+        if (lhs_val.kind == LATTICE_TOP || rhs_val.kind == LATTICE_TOP) {
+            LatticeVal top = {LATTICE_TOP, 0};
+            return top;
+        }
+        
+        long long v1 = lhs_val.val;
+        long long v2 = rhs_val.val;
+        long long res = 0;
+        switch (n->kind) {
+            case ND_ADD: res = v1 + v2; break;
+            case ND_SUB: res = v1 - v2; break;
+            case ND_MUL: res = v1 * v2; break;
+            case ND_DIV: res = (v2 != 0) ? (v1 / v2) : 0; break;
+            case ND_MOD: res = (v2 != 0) ? (v1 % v2) : 0; break;
+            case ND_SHL: res = v1 << v2; break;
+            case ND_SHR: res = v1 >> v2; break;
+            case ND_BAND: res = v1 & v2; break;
+            case ND_BOR: res = v1 | v2; break;
+            case ND_BXOR: res = v1 ^ v2; break;
+            case ND_EQ: res = v1 == v2; break;
+            case ND_NE: res = v1 != v2; break;
+            case ND_LT: res = v1 < v2; break;
+            case ND_LE: res = v1 <= v2; break;
+            case ND_GT: res = v1 > v2; break;
+            case ND_GE: res = v1 >= v2; break;
+            case ND_LAND: res = v1 && v2; break;
+            case ND_LOR: res = v1 || v2; break;
+        }
+        LatticeVal r = {LATTICE_CONST, res};
+        return r;
+    }
+    
+    return bot;
+}
+
+static Node *solver_worklist[MAX_FUNCTIONS];
+static int worklist_head = 0;
+static int worklist_tail = 0;
+static int in_worklist[MAX_FUNCTIONS];
+
+static void add_to_worklist(Node *func) {
+    int idx = -1;
+    for (int i = 0; i < num_functions; i++) {
+        if (functions[i] == func) { idx = i; break; }
+    }
+    if (idx == -1) return;
+    if (in_worklist[idx]) return;
+    solver_worklist[worklist_tail] = func;
+    worklist_tail = (worklist_tail + 1) % MAX_FUNCTIONS;
+    in_worklist[idx] = 1;
+}
+
+static Node *pop_worklist(void) {
+    if (worklist_head == worklist_tail) return NULL;
+    Node *func = solver_worklist[worklist_head];
+    worklist_head = (worklist_head + 1) % MAX_FUNCTIONS;
+    for (int i = 0; i < num_functions; i++) {
+        if (functions[i] == func) { in_worklist[i] = 0; break; }
+    }
+    return func;
+}
+
+static void init_local_lattices(Node *n) {
+    if (!n) return;
+    if (n->kind == ND_VAR && n->sym && n->sym->is_local) {
+        SymStats *stats = get_sym_stats(n->sym);
+        if (stats && (stats->assign_count > 1 || stats->addr_taken)) {
+            LatticeVal bot = {LATTICE_BOT, 0};
+            set_sym_lattice(n->sym, bot);
+        }
+    }
+    init_local_lattices(n->lhs);
+    init_local_lattices(n->rhs);
+    init_local_lattices(n->cond);
+    init_local_lattices(n->then_body);
+    init_local_lattices(n->else_body);
+    init_local_lattices(n->init);
+    init_local_lattices(n->inc);
+    init_local_lattices(n->body);
+    init_local_lattices(n->case_body);
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            init_local_lattices(n->args[i]);
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            init_local_lattices(n->stmts[i]);
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            init_local_lattices(n->cases[i]);
+        }
+        init_local_lattices(n->default_case);
+    }
+}
+
+static void propagate_local_assignments(Node *n, Node *current_func) {
+    if (!n) return;
+    
+    if (n->kind == ND_ASSIGN) {
+        Node *lhs = n->lhs;
+        while (lhs && lhs->kind == ND_CAST) lhs = lhs->lhs;
+        if (lhs && lhs->kind == ND_VAR && lhs->sym && lhs->sym->is_local) {
+            SymStats *stats = get_sym_stats(lhs->sym);
+            if (stats && stats->assign_count <= 1 && stats->addr_taken == 0) {
+                LatticeVal rhs_val = icp_eval_expr(n->rhs);
+                LatticeVal cur_val = get_sym_lattice(lhs->sym);
+                
+                LatticeVal new_val = meet(cur_val, rhs_val);
+                if (new_val.kind != cur_val.kind ||
+                    (new_val.kind == LATTICE_CONST && new_val.val != cur_val.val)) {
+                    set_sym_lattice(lhs->sym, new_val);
+                    add_to_worklist(current_func);
+                }
+            }
+        }
+    }
+    
+    propagate_local_assignments(n->lhs, current_func);
+    propagate_local_assignments(n->rhs, current_func);
+    propagate_local_assignments(n->cond, current_func);
+    propagate_local_assignments(n->then_body, current_func);
+    propagate_local_assignments(n->else_body, current_func);
+    propagate_local_assignments(n->init, current_func);
+    propagate_local_assignments(n->inc, current_func);
+    propagate_local_assignments(n->body, current_func);
+    propagate_local_assignments(n->case_body, current_func);
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            propagate_local_assignments(n->args[i], current_func);
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            propagate_local_assignments(n->stmts[i], current_func);
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            propagate_local_assignments(n->cases[i], current_func);
+        }
+        propagate_local_assignments(n->default_case, current_func);
+    }
+}
+
+static void rewrite_constant_vars_rec(Node *n, int is_lvalue) {
+    if (!n) return;
+    
+    if (n->kind == ND_VAR && n->sym && !is_lvalue) {
+        LatticeVal lv = get_sym_lattice(n->sym);
+        if (lv.kind == LATTICE_CONST) {
+            fprintf(stderr, "[ICP] Rewrote parameter/variable '%s' to constant %lld\n", n->name, lv.val);
+            n->kind = ND_NUM;
+            n->int_val = lv.val;
+            n->lhs = NULL;
+            n->rhs = NULL;
+            return;
+        }
+    }
+    
+    if (n->kind == ND_ASSIGN || n->kind == ND_COMPOUND_ASSIGN) {
+        rewrite_constant_vars_rec(n->lhs, 1);
+        rewrite_constant_vars_rec(n->rhs, 0);
+        return;
+    }
+    
+    if (n->kind == ND_PRE_INC || n->kind == ND_PRE_DEC ||
+        n->kind == ND_POST_INC || n->kind == ND_POST_DEC ||
+        n->kind == ND_ADDR) {
+        rewrite_constant_vars_rec(n->lhs, 1);
+        return;
+    }
+    
+    if (n->kind == ND_DEREF) {
+        rewrite_constant_vars_rec(n->lhs, 0);
+        return;
+    }
+    
+    if (n->kind == ND_MEMBER) {
+        rewrite_constant_vars_rec(n->lhs, is_lvalue);
+        return;
+    }
+    
+    rewrite_constant_vars_rec(n->lhs, is_lvalue);
+    rewrite_constant_vars_rec(n->rhs, is_lvalue);
+    rewrite_constant_vars_rec(n->cond, 0);
+    rewrite_constant_vars_rec(n->then_body, 0);
+    rewrite_constant_vars_rec(n->else_body, 0);
+    rewrite_constant_vars_rec(n->init, 0);
+    rewrite_constant_vars_rec(n->inc, 0);
+    rewrite_constant_vars_rec(n->body, 0);
+    rewrite_constant_vars_rec(n->case_body, 0);
+    
+    if (n->kind == ND_CALL && n->num_args > 0) {
+        for (int i = 0; i < n->num_args; i++) {
+            rewrite_constant_vars_rec(n->args[i], 0);
+        }
+    }
+    if (n->kind == ND_BLOCK && n->num_stmts > 0) {
+        for (int i = 0; i < n->num_stmts; i++) {
+            rewrite_constant_vars_rec(n->stmts[i], 0);
+        }
+    }
+    if (n->kind == ND_SWITCH && n->num_cases > 0) {
+        for (int i = 0; i < n->num_cases; i++) {
+            rewrite_constant_vars_rec(n->cases[i], 0);
+        }
+        rewrite_constant_vars_rec(n->default_case, 0);
+    }
+}
+
+static void rewrite_constant_vars(Node *n) {
+    rewrite_constant_vars_rec(n, 0);
+}
+
+void run_interprocedural_constant_propagation(Compiler *cc, Node *prog) {
+    // 1. Reset state
+    memset(sym_lattice_hash, 0, sizeof(sym_lattice_hash));
+    memset(sym_stats_hash, 0, sizeof(sym_stats_hash));
+    num_functions = 0;
+    num_call_sites = 0;
+    func_param_syms_initialized = 0;
+    worklist_head = 0;
+    worklist_tail = 0;
+    memset(in_worklist, 0, sizeof(in_worklist));
+    
+    // 2. Collect functions
+    Node *n = prog;
+    while (n) {
+        if (n->kind == ND_FUNC_DEF) {
+            if (num_functions < MAX_FUNCTIONS) {
+                functions[num_functions++] = n;
+            }
+        }
+        n = n->next;
+    }
+    
+    // 3. Initialize parameter symbols cache
+    initialize_param_syms();
+    
+    // 4. Collect calls, count symbol stats, and scan for modified variables/parameters
+    for (int i = 0; i < num_functions; i++) {
+        icp_collect_calls(functions[i]->body, functions[i]);
+        scan_sym_stats(functions[i]->body);
+    }
+    
+    // 5. Initialize lattices for function parameters
+    for (int i = 0; i < num_functions; i++) {
+        Node *func = functions[i];
+        int is_static = func->is_static;
+        int is_main = (strcmp(func->func_def_name, "main") == 0);
+        
+        for (int k = 0; k < func->num_params && k < MAX_PARAMS; k++) {
+            Symbol *s = func_param_syms[i][k];
+            if (!s) continue;
+            
+            SymStats *stats = get_sym_stats(s);
+            if (stats && (stats->assign_count > 0 || stats->addr_taken)) {
+                LatticeVal bot = {LATTICE_BOT, 0};
+                set_sym_lattice(s, bot);
+            } else if (is_main || !is_static) {
+                LatticeVal bot = {LATTICE_BOT, 0};
+                set_sym_lattice(s, bot);
+            } else {
+                LatticeVal top = {LATTICE_TOP, 0};
+                set_sym_lattice(s, top);
+            }
+        }
+        
+        // Initialize lattices of all other local variables in the function body
+        init_local_lattices(func->body);
+    }
+    
+    // 6. Push all functions to worklist
+    for (int i = 0; i < num_functions; i++) {
+        add_to_worklist(functions[i]);
+    }
+    
+    // 7. Solver Loop
+    int solver_iters = 0;
+    while (1) {
+        Node *func = pop_worklist();
+        if (!func) break;
+        
+        solver_iters++;
+        if (solver_iters > 30000) {
+            fprintf(stderr, "[ICP Warning] Iteration limit reached!\n");
+            break;
+        }
+        
+        // Propagate local assignments inside `func`
+        propagate_local_assignments(func->body, func);
+        
+        // Propagate argument constants across call sites
+        for (int i = 0; i < num_call_sites; i++) {
+            CallSite *cs = &call_sites[i];
+            if (cs->caller != func) continue;
+            
+            Node *call = cs->call_node;
+            Node *callee = cs->callee;
+            
+            int callee_idx = -1;
+            for (int f = 0; f < num_functions; f++) {
+                if (functions[f] == callee) { callee_idx = f; break; }
+            }
+            if (callee_idx == -1) continue;
+            
+            for (int k = 0; k < call->num_args && k < callee->num_params && k < MAX_PARAMS; k++) {
+                Symbol *param_sym = func_param_syms[callee_idx][k];
+                if (!param_sym) continue;
+                
+                LatticeVal current_param_val = get_sym_lattice(param_sym);
+                if (current_param_val.kind == LATTICE_BOT) continue;
+                
+                LatticeVal arg_val = icp_eval_expr(call->args[k]);
+                LatticeVal new_param_val = meet(current_param_val, arg_val);
+                
+                if (new_param_val.kind != current_param_val.kind ||
+                    (new_param_val.kind == LATTICE_CONST && new_param_val.val != current_param_val.val)) {
+                    set_sym_lattice(param_sym, new_param_val);
+                    add_to_worklist(callee);
+                }
+            }
+        }
+    }
+    
+    fprintf(stderr, "[ICP] Interprocedural & local constant propagation completed. Solver iterations: %d\n", solver_iters);
+    
+    // 8. Rewrite AST nodes using solved lattice values
+    for (int i = 0; i < num_functions; i++) {
+        rewrite_constant_vars(functions[i]->body);
+    }
+}

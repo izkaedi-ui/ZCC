@@ -32,6 +32,7 @@ tmp_zcc
 !README*.txt
 !gate_ir*_xfail.txt
 !BUILD.txt
+!requirements.txt
 !COMMANDS.md
 
 # Test binaries (no extension)
@@ -367,6 +368,8 @@ src/fake_csmith.h
 
 # IR target tmps (if in src/)
 src/ir_*.c
+# Exception: ir_serialization.c is source, not a tmp
+!src/ir_serialization.c
 src/ir_*.h
 src/ir_to_*.c
 
@@ -425,7 +428,6 @@ ret_tvalue_gate5
 /exp3
 /exp4
 /exp5
-
 # ─── Patch reject files & manual backups (added Apr 28 2026) ───
 # Conflict residue from `git apply` / `patch -p1` — never commit these.
 *.rej
@@ -476,6 +478,9 @@ evm_jit/
 # ZKAEDI Ephemeral Data
 scratch/
 captures/
+mesh_system/*.pb
+mesh_system/*.jsonl
+mesh_system/*.log
 2026-*/
 dist/
 *.bin
@@ -518,4 +523,77 @@ run_gates.sh
 gen_report.py
 task.md
 zcc_pp.c
+# Generated heavy artifacts
+*.glb
+*.ppm
+*.ir
+node_modules/
+*.gguf
+*.pt
+*.onnx
+*.onnx.data
+*.npy
+*.index
+oracle_batches/
+seamfuzz/
+.tmp_zcc_tests/
+.forge0/
 
+# Kernel build outputs
+kernel/*.elf
+kernel/*.o
+
+# Generated phase outputs
+phase*_gcc
+phase*_zcc
+interop_*
+zcc4
+
+# Runtime state
+dreams/dream_state.json
+
+# Governance / identity secrets
+governance/
+identity/
+*.pem
+
+# Whitelist fuzzing harness
+!zcc_fuzz_harness.py
+
+.tmp_test_dir/
+.wrangler/
+*.elf
+*.uf2
+cr_gcc
+cr_zcc
+zcc_backup
+out.ir.json
+out.json
+hello_ir.json
+pp_sqlite.c
+scratch_mode_t.c
+seed_*.c
+source.c
+ctimetest*.c
+check_*.sh
+export_graphics.sh
+Makefile.dbg
+.tmp_test_dir/
+.wrangler/
+*.elf
+*.uf2
+cr_gcc
+cr_zcc
+zcc_backup
+out.ir.json
+out.json
+hello_ir.json
+idx
+pp_sqlite.c
+scratch_mode_t.c
+seed_*.c
+source.c
+ctimetest*.c
+check_*.sh
+export_graphics.sh
+Makefile.dbg

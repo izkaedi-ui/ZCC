@@ -1,0 +1,52 @@
+{
+  "zxr_version": "1.0.0",
+  "deterministic_epoch": 1,
+  "compiler_version": "zcc_prime_1.1.0",
+  "source_identity": {
+    "filename": "part1.c",
+    "sha256": "4d0b9529fa52e37de0ec97ebde337252020962de28e63195c7ea2827c53fb9f3"
+  },
+  "fingerprint": {
+    "cfg_topology_hash": "0x8fa372eb001a",
+    "abi_lowering_hash": "0xd320be44ac81",
+    "stack_geometry_hash": "0x2849de748b0a",
+    "regalloc_sequence_hash": "0xefcc7a88998b",
+    "pass_pipeline_hash": "0x0db56e7f8fa3"
+  },
+  "pass_records": [
+    {
+      "event": "pass_begin",
+      "pass": "peephole"
+    },
+    {
+      "event": "transform",
+      "pass": "peephole",
+      "node_id": 250,
+      "details": "Replaced push %rax / pop %rdi with mov %rax, %rdi"
+    },
+    {
+      "event": "transform",
+      "pass": "peephole",
+      "node_id": 315,
+      "details": "Replaced push %rax / pop %rdi with mov %rax, %rdi"
+    },
+    {
+      "event": "transform",
+      "pass": "peephole",
+      "node_id": 380,
+      "details": "Replaced push %rax / pop %rdi with mov %rax, %rdi"
+    },
+    {
+      "event": "transform",
+      "pass": "peephole",
+      "node_id": 4688,
+      "details": "Replaced push %rax / pop %rdi with mov %rax, %rdi"
+    },
+    {
+      "event": "pass_end",
+      "pass": "peephole"
+    }
+  ],
+  "proofs": [
+  ]
+}

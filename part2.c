@@ -34,6 +34,10 @@ void *cc_alloc(Compiler *cc, int size) {
             if (size >= 16) {
                 *((unsigned long long *)((char *)p + 8)) = next_alloc_id++;
             }
+            {
+                extern void zcc_oracle_log_allocation(void *ptr, size_t size);
+                zcc_oracle_log_allocation(p, size);
+            }
             return p;
         }
         if (!a->next) {
@@ -582,7 +586,7 @@ static int read_escape(Compiler *cc) {
 }
 
 static void lex_number(Compiler *cc, int c) {
-        long val;
+        long long val;
         int start;
         int is_float = 0;
         int i_look = 0;
@@ -592,7 +596,18 @@ static void lex_number(Compiler *cc, int c) {
         
         if (c == '0' && cc->pos + 1 < cc->source_len && 
             (cc->source[cc->pos + 1] == 'x' || cc->source[cc->pos + 1] == 'X')) {
-            is_float = 0;
+            /* CG-HEXFLT-001: C99 hex float 0x[hex].[hex]p[+-][dec] */
+            int look = cc->pos + 2;
+            int hex_float = 0;
+            while (look < cc->source_len &&
+                   (hex_val(cc->source[look]) >= 0 || cc->source[look] == '.')) {
+                look++;
+            }
+            if (look < cc->source_len &&
+                (cc->source[look] == 'p' || cc->source[look] == 'P')) {
+                hex_float = 1;
+            }
+            is_float = hex_float;
         } else {
             while (cc->pos + i_look < cc->source_len) {
                 char ch = cc->source[cc->pos + i_look];
@@ -628,10 +643,12 @@ static void lex_number(Compiler *cc, int c) {
 
         val = 0;
         start = cc->pos;
+        int is_hex_or_oct = 0;
         if (c == '0') {
             read_char(cc);
             if (peek_char(cc) == 'x' || peek_char(cc) == 'X') {
                 read_char(cc);
+                is_hex_or_oct = 1;
                 while (hex_val(peek_char(cc)) >= 0) {
                     val = val * 16 + hex_val(peek_char(cc));
                     read_char(cc);
@@ -639,6 +656,7 @@ static void lex_number(Compiler *cc, int c) {
             } else if (peek_char(cc) >= '0') {
                 if (peek_char(cc) <= '7') {
                     /* octal */
+                    is_hex_or_oct = 1;
                     while (peek_char(cc) >= '0') {
                         if (peek_char(cc) <= '7') {
                             val = val * 8 + (peek_char(cc) - '0');
@@ -668,6 +686,7 @@ static void lex_number(Compiler *cc, int c) {
         cc->tk_val = val;
         cc->tk_text[0] = is_uns ? 'U' : 0;
         cc->tk_text[1] = is_lng ? 'L' : 0;
+        cc->tk_text[2] = is_hex_or_oct ? 'H' : 0;
 }
 
 static void lex_char(Compiler *cc) {
@@ -1220,7 +1239,7 @@ void expect(Compiler *cc, int tk) {
 
 int peek_token(Compiler *cc) {
     int s_tk;
-    long s_val;
+    long long s_val;
     char s_text[MAX_IDENT];
     char s_str[MAX_STR];
     int s_slen;

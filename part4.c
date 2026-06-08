@@ -10,6 +10,9 @@
 #include "ir_emit_dispatch.h"
 #include "ir_bridge.h"
 
+/* Forward declaration — defined ~4200 lines below, used in ND_DIV const-fold guard */
+static long long eval_const_expr_p4(Node *elem, int *ok);
+
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdangling-else"
 #pragma clang diagnostic ignored "-Wmisleading-indentation"
@@ -1584,6 +1587,33 @@ void codegen_expr(Compiler *cc, Node *node) {
       return;
     }
 
+    /* CG-SIGFPE-001: constant-fold both operands before emitting idiv.
+       INT_MIN / -1 is signed integer overflow — emitting idiv causes SIGFPE
+       on x86. GCC folds this at compile time; ZCC must too when both sides
+       are compile-time constants (e.g. Csmith seed498).
+       NOTE: float path has already returned above, so this is integers only. */
+    if (!backend_ops) {
+      int lhs_ok = 1, rhs_ok = 1;
+      long long lhs_cv = eval_const_expr_p4(node->lhs, &lhs_ok);
+      long long rhs_cv = eval_const_expr_p4(node->rhs, &rhs_ok);
+      if (lhs_ok && rhs_ok) {
+        long long result = 0;
+        if (rhs_cv != 0) {
+          /* CG-CFOLD-UNSIGNED-001: use unsigned arithmetic for unsigned types. */
+          int is_unsigned_div = node_type_unsigned(node);
+          if (is_unsigned_div)
+              result = (long long)((unsigned long long)lhs_cv / (unsigned long long)rhs_cv);
+          else
+              result = lhs_cv / rhs_cv;
+        } else {
+          /* CG-SIGFPE-002: fold division by zero to 0 to avoid runtime SIGFPE */
+          result = 0;
+        }
+        fprintf(cc->out, "    movq $%lld, %%rax\n", result);
+        ir_emit_binary_op(ND_DIV, node->type, "$const_lhs", "$const_rhs", node->line);
+        return;
+      }
+    }
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lhs_ir);
     push_reg(cc, "rax");
@@ -1612,6 +1642,28 @@ void codegen_expr(Compiler *cc, Node *node) {
   case ND_MOD: {
     char lhs_ir[32];
     char rhs_ir[32];
+
+    if (!backend_ops) {
+      int lhs_ok = 1, rhs_ok = 1;
+      long long lhs_cv = eval_const_expr_p4(node->lhs, &lhs_ok);
+      long long rhs_cv = eval_const_expr_p4(node->rhs, &rhs_ok);
+      if (lhs_ok && rhs_ok) {
+        long long result = 0;
+        if (rhs_cv != 0) {
+          int is_unsigned_mod = node_type_unsigned(node);
+          if (is_unsigned_mod)
+              result = (long long)((unsigned long long)lhs_cv % (unsigned long long)rhs_cv);
+          else
+              result = lhs_cv % rhs_cv;
+        } else {
+          /* CG-SIGFPE-002: fold modulo by zero to 0 to avoid runtime SIGFPE */
+          result = 0;
+        }
+        fprintf(cc->out, "    movq $%lld, %%rax\n", result);
+        ir_emit_binary_op(ND_MOD, node->type, "$const_lhs", "$const_rhs", node->line);
+        return;
+      }
+    }
 
     if (node->rhs && node->rhs->kind == ND_NUM &&
         is_power_of_2_val(node->rhs->int_val)) {
@@ -1749,6 +1801,7 @@ void codegen_expr(Compiler *cc, Node *node) {
   }
 
   case ND_SHR: {
+    printf("ZCC:AST ND_SHR line=%d, lhs_kind=%d, type_size=%d, lhs_type_size=%d\n", node->line, node->lhs ? node->lhs->kind : -1, node->type ? node->type->size : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char lhs_ir[32];
     char rhs_ir[32];
     codegen_expr_checked(cc, node->lhs);
@@ -1921,28 +1974,35 @@ void codegen_expr(Compiler *cc, Node *node) {
         fprintf(cc->out, "    setne %%al\n    setp %%r11b\n    orb %%r11b, %%al\n");
         break;
       case ND_LT:
-        fprintf(cc->out, "    setb %%al\n");
+        /* CG-FLOAT-013: NaN unordered — PF set means unordered, result must be 0 */
+        fprintf(cc->out, "    setb %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
         break;
       case ND_LE:
-        fprintf(cc->out, "    setbe %%al\n");
+        fprintf(cc->out, "    setbe %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
         break;
       case ND_GT:
-        fprintf(cc->out, "    seta %%al\n");
+        fprintf(cc->out, "    seta %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
         break;
       case ND_GE:
-        fprintf(cc->out, "    setae %%al\n");
+        fprintf(cc->out, "    setae %%al\n    setnp %%r11b\n    andb %%r11b, %%al\n");
         break;
       }
       fprintf(cc->out, "    movzbl %%al, %%eax\n");
-      ir_emit_binary_op(node->kind, node->type, "f_lhs", "f_rhs", node->line);
+      ir_emit_binary_op(node->kind, is_f32 ? cc->ty_float : cc->ty_double, "f_lhs", "f_rhs", node->line);
       return;
     }
 
+    /* CG-MISMATCH-1003697: C99 §6.4.4.1 Table 5 — unsuffixed hex literals that
+       exceed INT_MAX (e.g. 0xA6D0CABD) have type 'unsigned int', not 'int'.
+       ZCC stores them as ty_long (signed) for codegen width purposes, so
+       is_unsigned_type() returns 0. Detect this case via ND_NUM int_val and
+       force unsigned comparison instructions (setb/seta vs setl/setg). */
     uns = (node->lhs && node->lhs->type && is_unsigned_type(node->lhs->type)) ||
           (node->rhs && node->rhs->type && is_unsigned_type(node->rhs->type));
     use32 = node->lhs && node->lhs->type && node->rhs &&
             node->rhs->type && type_size(node->lhs->type) == 4 &&
             type_size(node->rhs->type) == 4;
+
     codegen_expr_checked(cc, node->lhs);
     ir_save_result(lhs_ir);
     push_reg(cc, "rax");
@@ -2040,7 +2100,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
         fprintf(cc->out, "    movzbl %%al, %%eax\n");
     }
-    ir_emit_binary_op(node->kind, node->type, lhs_ir, rhs_ir, node->line);
+    Type *comp_type = uns ? (use32 ? cc->ty_uint : cc->ty_ulong) : (use32 ? cc->ty_int : cc->ty_long);
+    ir_emit_binary_op(node->kind, comp_type, lhs_ir, rhs_ir, node->line);
     return;
   }
 
@@ -2331,6 +2392,7 @@ void codegen_expr(Compiler *cc, Node *node) {
     return;
 
   case ND_CAST: {
+    printf("ZCC:AST ND_CAST line=%d, target_size=%d, lhs_kind=%d, lhs_type_size=%d\n", node->line, node->cast_type ? node->cast_type->size : -1, node->lhs ? node->lhs->kind : -1, node->lhs && node->lhs->type ? node->lhs->type->size : -1);
     char src_ir[32];
     if (!node->lhs) {
       error_at(cc, node->line, "codegen_expr: ND_CAST null lhs");
@@ -2891,6 +2953,9 @@ void codegen_expr(Compiler *cc, Node *node) {
     int cleanup_bytes;
     char args_ir_1d[2048];
     int arg_is_stack[64];
+    char callee_ir[32];
+
+    callee_ir[0] = '\0';
 
     /* System V AMD64 (Linux): 6 register args: RDI, RSI, RDX, RCX, R8, R9; 7th+
      * on stack */
@@ -2918,6 +2983,7 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     int has_sret = 0;
     int sret_size = 0;
+    int sret_stack_depth = cc->stack_depth;
     if (node->type && (node->type->kind == TY_STRUCT || node->type->kind == TY_UNION)) {
         abi_class_t eb[2];
         classify_aggregate(node->type, eb);
@@ -2996,9 +3062,29 @@ void codegen_expr(Compiler *cc, Node *node) {
       cc->stack_depth++;
     }
 
+    if (args_on_stack > 0) {
+      fprintf(cc->out, "    subq $%d, %%rsp\n", args_on_stack * 8);
+      cc->stack_depth += args_on_stack;
+    }
+
+    int arg_stack_offset[64];
+    {
+      int current_stack_slot = 0;
+      for (i = 0; i < nargs; i++) {
+        if (arg_is_stack[i]) {
+          arg_stack_offset[i] = current_stack_slot * 8;
+          Type *at = node->args[i]->type;
+          current_stack_slot += (at ? (type_size(at) + 7) / 8 : 1);
+        }
+      }
+    }
+
+    int stack_depth_at_reservation = cc->stack_depth;
+
     /* for indirect calls, evaluate callee first and save on stack */
     if (node->func_name[0] == 0 && node->lhs) {
       codegen_expr_checked(cc, node->lhs);
+      ir_save_result(callee_ir);
       push_reg(cc, "rax");
     }
 
@@ -3010,17 +3096,18 @@ void codegen_expr(Compiler *cc, Node *node) {
       }
       codegen_expr_checked(cc, node->args[i]);
       Type *atype = node->args[i]->type;
+      int current_pushed_bytes = (cc->stack_depth - stack_depth_at_reservation) * 8;
       if (arg_is_stack[i]) {
           if (atype && (atype->kind == TY_STRUCT || atype->kind == TY_UNION)) {
-              /* Move aggregate data to stack in 8-byte chunks */
+              /* Copy aggregate to reserved stack slots */
               int j, n_slots = (type_size(atype) + 7) / 8;
               fprintf(cc->out, "    movq %%rax, %%r10\n");
-              for (j = n_slots - 1; j >= 0; j--) {
-                  fprintf(cc->out, "    pushq %d(%%r10)\n", j * 8);
-                  cc->stack_depth++;
+              for (j = 0; j < n_slots; j++) {
+                  fprintf(cc->out, "    movq %d(%%r10), %%rax\n", j * 8);
+                  fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i] + j * 8);
               }
           } else {
-              push_reg(cc, "rax");
+              fprintf(cc->out, "    movq %%rax, %d(%%rsp)\n", current_pushed_bytes + arg_stack_offset[i]);
           }
           ir_save_result(&args_ir_1d[i * 32]);
           continue;
@@ -3145,7 +3232,8 @@ void codegen_expr(Compiler *cc, Node *node) {
         }
       }
       if (has_sret) {
-          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", args_on_stack * 8 + alignment_pad);
+          int sret_offset = (cc->stack_depth - sret_stack_depth) * 8 - sret_size;
+          fprintf(cc->out, "    leaq %d(%%rsp), %%rdi\n", sret_offset);
       }
 
       if (!backend_ops) {
@@ -3249,7 +3337,8 @@ void codegen_expr(Compiler *cc, Node *node) {
 
     {
       char *dst = ir_bridge_fresh_tmp();
-      ZCC_EMIT_CALL(ir_map_type(node->type), dst, node->func_name, node->line);
+      char *target = node->func_name[0] ? node->func_name : callee_ir;
+      ZCC_EMIT_CALL(ir_map_type(node->type), dst, target, node->line);
     }
 
     /* cleanup arguments left on stack AND the alignment pad */
@@ -3878,7 +3967,16 @@ static int allocate_registers(Node *func) {
 
   for (i = 0; i < num_ra_locals; i++) {
     Symbol *sym = ra_locals[i];
-    if (sym->stack_offset >= param_limit && sym->stack_offset < 0) {
+    int is_param = 0;
+    if (func->func_params) {
+      for (int p = 0; p < func->num_params; p++) {
+        if (sym->name && strcmp(sym->name, func->func_params->names[p]) == 0) {
+          is_param = 1;
+          break;
+        }
+      }
+    }
+    if (is_param || (sym->stack_offset >= param_limit && sym->stack_offset < 0)) {
       sym->live_start = -1; /* never alloc parameters for safety */
     }
     if (sym->live_start != -1 && sym->type && sym->type->kind != TY_ARRAY &&
@@ -4009,7 +4107,8 @@ static int ir_whitelisted(const char *name) {
       "validate_token_bounds", "validate_node", "validate_type", "bad_node_cutoff",
       "test_struct_tbaa", "test_cast_fallback", "gvn_test", "forward_test", "slf_sink", "slf_call_barrier", "loop_sum",
       /* Split Lexer Core (fortified and hardened) */
-      /* "lex_char", "lex_operator", "next_token", "read_char", "read_escape", "node_name", */
+      "read_char", "read_escape", "node_name", "lex_char", "lex_operator",
+      /* "next_token", */
       NULL
   };
   int i;
@@ -4345,22 +4444,111 @@ void codegen_func(Compiler *cc, Node *func) {
 /* Bug fix: .p2align 3 before every label (x86-64 ABI alignment)    */
 /* ================================================================ */
 
+static long long eval_const_expr_p4_raw(Node *elem, int *ok);
+
 static long long eval_const_expr_p4(Node *elem, int *ok) {
     if (!elem) { *ok = 0; return 0; }
-    if (elem->kind == ND_CAST) return eval_const_expr_p4(elem->lhs, ok);
+    long long val = eval_const_expr_p4_raw(elem, ok);
+    return force_truncate(val, elem->type);
+}
+
+static long long eval_const_expr_p4_raw(Node *elem, int *ok) {
+    if (!elem) { *ok = 0; return 0; }
+    if (elem->kind == ND_CAST) {
+        /* CG-CFOLD-CAST-TRUNC-001: apply C-semantics truncation on the inner value. */
+        long long v = eval_const_expr_p4(elem->lhs, ok);
+        if (!elem->type) return v;
+        switch (elem->type->kind) {
+            case TY_CHAR:      return (long long)(char)v;
+            case TY_UCHAR:     return (long long)(unsigned char)v;
+            case TY_SHORT:     return (long long)(short)v;
+            case TY_USHORT:    return (long long)(unsigned short)v;
+            case TY_INT:       return (long long)(int)v;
+            case TY_UINT:      return (long long)(unsigned int)v;
+            case TY_LONG:      return v;
+            case TY_ULONG:     return (long long)(unsigned long long)v;
+            case TY_LONGLONG:  return (long long)v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)v;
+            default:           return v;
+        }
+    }
     if (elem->kind == ND_NUM) return elem->int_val;
-    if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_SUB) return eval_const_expr_p4(elem->lhs, ok) - eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_MUL) return eval_const_expr_p4(elem->lhs, ok) * eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_DIV) { long long r = eval_const_expr_p4(elem->rhs, ok); if(r) return eval_const_expr_p4(elem->lhs, ok) / r; return 0; }
+    if (elem->kind == ND_ADD || elem->kind == ND_SUB ||
+        elem->kind == ND_MUL || elem->kind == ND_DIV) {
+        /* CG-GINIT-FLOAT-002: float/double arithmetic in static initializers
+           must use actual FP ops, not integer ops on raw bits.
+           Also fixes silent div/0 return 0 without *ok=0. */
+        int is_fp = (elem->type && (elem->type->kind == TY_FLOAT ||
+                                     elem->type->kind == TY_DOUBLE)) ||
+                    (elem->lhs && elem->lhs->type &&
+                     (elem->lhs->type->kind == TY_FLOAT ||
+                      elem->lhs->type->kind == TY_DOUBLE)) ||
+                    (elem->rhs && elem->rhs->type &&
+                     (elem->rhs->type->kind == TY_FLOAT ||
+                      elem->rhs->type->kind == TY_DOUBLE));
+        if (is_fp) {
+            int lok = 1, rok = 1;
+            long long lbits = eval_const_expr_p4(elem->lhs, &lok);
+            long long rbits = eval_const_expr_p4(elem->rhs, &rok);
+            if (!lok || !rok) { *ok = 0; return 0; }
+            double lv, rv;
+            if (elem->lhs->type && elem->lhs->type->kind == TY_FLOAT) {
+                unsigned int fb = (unsigned int)lbits;
+                float ftmp; memcpy(&ftmp, &fb, sizeof(float)); lv = (double)ftmp;
+            } else { memcpy(&lv, &lbits, sizeof(double)); }
+            if (elem->rhs->type && elem->rhs->type->kind == TY_FLOAT) {
+                unsigned int fb = (unsigned int)rbits;
+                float ftmp; memcpy(&ftmp, &fb, sizeof(float)); rv = (double)ftmp;
+            } else { memcpy(&rv, &rbits, sizeof(double)); }
+            double result;
+            if      (elem->kind == ND_ADD) result = lv + rv;
+            else if (elem->kind == ND_SUB) result = lv - rv;
+            else if (elem->kind == ND_MUL) result = lv * rv;
+            else                           result = lv / rv; /* div/0 -> inf, valid */
+            if (elem->type && elem->type->kind == TY_FLOAT) {
+                float fv = (float)result;
+                unsigned int fbits;
+                memcpy(&fbits, &fv, sizeof(float));
+                return (long long)fbits;
+            } else {
+                unsigned long long bits;
+                memcpy(&bits, &result, sizeof(double));
+                return (long long)bits;
+            }
+        }
+        /* Integer path */
+        if (elem->kind == ND_ADD) return eval_const_expr_p4(elem->lhs, ok) + eval_const_expr_p4(elem->rhs, ok);
+        if (elem->kind == ND_SUB) return eval_const_expr_p4(elem->lhs, ok) - eval_const_expr_p4(elem->rhs, ok);
+        if (elem->kind == ND_MUL) return eval_const_expr_p4(elem->lhs, ok) * eval_const_expr_p4(elem->rhs, ok);
+        { long long r = eval_const_expr_p4(elem->rhs, ok); if (r) return eval_const_expr_p4(elem->lhs, ok) / r; *ok = 0; return 0; }
+    }
     if (elem->kind == ND_BOR) return eval_const_expr_p4(elem->lhs, ok) | eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_BAND) return eval_const_expr_p4(elem->lhs, ok) & eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_BXOR) return eval_const_expr_p4(elem->lhs, ok) ^ eval_const_expr_p4(elem->rhs, ok);
     if (elem->kind == ND_SHL) return eval_const_expr_p4(elem->lhs, ok) << eval_const_expr_p4(elem->rhs, ok);
-    if (elem->kind == ND_SHR) return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_SHR) {
+        /* CG-CFOLD-UNSIGNED-001: unsigned types need logical right shift. */
+        int lhs_kind = elem->lhs && elem->lhs->type ? elem->lhs->type->kind : -1;
+        int is_unsigned = (lhs_kind == TY_UCHAR || lhs_kind == TY_USHORT ||
+                           lhs_kind == TY_UINT  || lhs_kind == TY_ULONG  ||
+                           lhs_kind == TY_ULONGLONG);
+        if (!is_unsigned && elem->type) {
+            int tk = elem->type->kind;
+            is_unsigned = (tk == TY_UCHAR || tk == TY_USHORT ||
+                           tk == TY_UINT  || tk == TY_ULONG  ||
+                           tk == TY_ULONGLONG);
+        }
+        if (is_unsigned)
+            return (long long)((unsigned long long)eval_const_expr_p4(elem->lhs, ok) >>
+                               (unsigned long long)eval_const_expr_p4(elem->rhs, ok));
+        return eval_const_expr_p4(elem->lhs, ok) >> eval_const_expr_p4(elem->rhs, ok);
+    }
     if (elem->kind == ND_NEG) {
-        /* CG-GINIT-FLOAT-001: float negation must negate the float value,
-           not the bit-pattern. Check if child is ND_FLIT. */
+        /* CG-GINIT-FLOAT-001/002: float negation — handle both direct
+           ND_FLIT child and float-typed subexpressions (e.g. -(1.0f/0.0f)). */
+        int child_is_fp = (elem->lhs && elem->lhs->type &&
+                           (elem->lhs->type->kind == TY_FLOAT ||
+                            elem->lhs->type->kind == TY_DOUBLE));
         if (elem->lhs && elem->lhs->kind == ND_FLIT) {
             double negval = -(elem->lhs->f_val);
             if (elem->lhs->type && elem->lhs->type->kind == TY_FLOAT) {
@@ -4373,11 +4561,87 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
                 memcpy(&bits, &negval, sizeof(double));
                 return (long long)bits;
             }
+        } else if (child_is_fp) {
+            int cok = 1;
+            long long cbits = eval_const_expr_p4(elem->lhs, &cok);
+            if (!cok) { *ok = 0; return 0; }
+            if (elem->lhs->type->kind == TY_FLOAT) {
+                unsigned int fb = (unsigned int)cbits;
+                float ftmp; memcpy(&ftmp, &fb, sizeof(float));
+                ftmp = -ftmp;
+                unsigned int rbits;
+                memcpy(&rbits, &ftmp, sizeof(float));
+                return (long long)rbits;
+            } else {
+                double dv; memcpy(&dv, &cbits, sizeof(double));
+                dv = -dv;
+                unsigned long long rbits;
+                memcpy(&rbits, &dv, sizeof(double));
+                return (long long)rbits;
+            }
         }
-        return -eval_const_expr_p4(elem->lhs, ok);
+        /* CG-CFOLD-NEG-BNOT-UNSIGNED-002: integer negation — wrap for unsigned types. */
+        long long neg_v = -eval_const_expr_p4(elem->lhs, ok);
+        if (elem->lhs && elem->lhs->type) switch (elem->lhs->type->kind) {
+            case TY_UCHAR:     return (long long)(unsigned char)neg_v;
+            case TY_USHORT:    return (long long)(unsigned short)neg_v;
+            case TY_UINT:      return (long long)(unsigned int)neg_v;
+            case TY_ULONG:     return (long long)(unsigned long long)neg_v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)neg_v;
+            default: break;
+        }
+        return neg_v;
     }
-    if (elem->kind == ND_BNOT) return ~eval_const_expr_p4(elem->lhs, ok);
+    if (elem->kind == ND_BNOT) {
+        long long bnot_v = ~eval_const_expr_p4(elem->lhs, ok);
+        if (elem->lhs && elem->lhs->type) switch (elem->lhs->type->kind) {
+            case TY_UCHAR:     return (long long)(unsigned char)bnot_v;
+            case TY_USHORT:    return (long long)(unsigned short)bnot_v;
+            case TY_UINT:      return (long long)(unsigned int)bnot_v;
+            case TY_ULONG:     return (long long)(unsigned long long)bnot_v;
+            case TY_ULONGLONG: return (long long)(unsigned long long)bnot_v;
+            default: break;
+        }
+        return bnot_v;
+    }
     if (elem->kind == ND_LNOT) return !eval_const_expr_p4(elem->lhs, ok);
+    /* Relational + logical ops — needed for ternary denominator patterns */
+    if (elem->kind == ND_EQ) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) == (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) == eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_NE) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) != (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) != eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_LT) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) < (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) < eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_LE) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) <= (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) <= eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_GT) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) > (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) > eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_GE) {
+        if (is_unsigned_cmp(elem))
+            return (unsigned long long)eval_const_expr_p4(elem->lhs, ok) >= (unsigned long long)eval_const_expr_p4(elem->rhs, ok);
+        return eval_const_expr_p4(elem->lhs, ok) >= eval_const_expr_p4(elem->rhs, ok);
+    }
+    if (elem->kind == ND_LAND) return eval_const_expr_p4(elem->lhs, ok) && eval_const_expr_p4(elem->rhs, ok);
+    if (elem->kind == ND_LOR)  return eval_const_expr_p4(elem->lhs, ok) || eval_const_expr_p4(elem->rhs, ok);
+    /* Ternary constant folding — closes seed498: INT_MIN / (cond==0 ? 1 : cond) */
+    if (elem->kind == ND_TERNARY && elem->cond && elem->then_body && elem->else_body)
+        return eval_const_expr_p4(elem->cond, ok) ? eval_const_expr_p4(elem->then_body, ok)
+                                                   : eval_const_expr_p4(elem->else_body, ok);
     /* CG-GINIT-FLOAT-001: float/double literals in aggregate initializers */
     if (elem->kind == ND_FLIT) {
         if (elem->type && elem->type->kind == TY_FLOAT) {
@@ -4392,6 +4656,75 @@ static long long eval_const_expr_p4(Node *elem, int *ok) {
         }
     }
     *ok = 0;
+    return 0;
+}
+
+static int resolve_global_addr(Node *node, char **out_name, long long *out_offset) {
+    if (!node) return 0;
+    while (node && node->kind == ND_CAST) {
+        node = node->lhs;
+    }
+    if (!node) return 0;
+
+    if (node->kind == ND_VAR) {
+        if (node->sym && node->sym->is_global) {
+            *out_name = node->name;
+            *out_offset = 0;
+            return 1;
+        }
+        if (node->sym && !node->sym->is_local) {
+            *out_name = node->name;
+            *out_offset = 0;
+            return 1;
+        }
+        return 0;
+    }
+    if (node->kind == ND_ADDR) {
+        return resolve_global_addr(node->lhs, out_name, out_offset);
+    }
+    if (node->kind == ND_DEREF) {
+        return resolve_global_addr(node->lhs, out_name, out_offset);
+    }
+    if (node->kind == ND_MEMBER) {
+        if (resolve_global_addr(node->lhs, out_name, out_offset)) {
+            *out_offset += node->member_offset;
+            return 1;
+        }
+        return 0;
+    }
+    if (node->kind == ND_ADD) {
+        int const_ok = 1;
+        long long val = 0;
+        Node *base = NULL;
+        if (node->rhs && node->rhs->kind == ND_NUM) {
+            val = node->rhs->int_val;
+            base = node->lhs;
+        } else if (node->lhs && node->lhs->kind == ND_NUM) {
+            val = node->lhs->int_val;
+            base = node->rhs;
+        } else {
+            val = eval_const_expr_p4(node->rhs, &const_ok);
+            if (const_ok) {
+                base = node->lhs;
+            } else {
+                val = eval_const_expr_p4(node->lhs, &const_ok);
+                if (const_ok) {
+                    base = node->rhs;
+                }
+            }
+        }
+        if (base && resolve_global_addr(base, out_name, out_offset)) {
+            int scale = 1;
+            if (base->type && base->type->kind == TY_PTR && base->type->base) {
+                scale = type_size(base->type->base);
+            } else if (base->type && base->type->kind == TY_ARRAY && base->type->base) {
+                scale = type_size(base->type->base);
+            }
+            *out_offset += val * scale;
+            return 1;
+        }
+        return 0;
+    }
     return 0;
 }
 
@@ -4432,24 +4765,20 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
                     } else if (elem->kind == ND_ADDR_LABEL) {
                         if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
                         else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
-                    } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                        else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                    } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                        long long offset = elem->lhs->lhs->rhs->int_val;
-                        if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                        else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                        long long offset = elem->rhs->int_val;
-                        if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                        else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                    } else if (elem->kind == ND_VAR) {
-                        if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                        else fprintf(cc->out, "    .quad %s\n", elem->name);
                     } else {
-                        fprintf(cc->out, "    .zero %d\n", elem_size);
+                        char *g_name = NULL;
+                        long long g_off = 0;
+                        if (resolve_global_addr(elem, &g_name, &g_off)) {
+                            if (g_off == 0) {
+                                if (elem_size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+                                else fprintf(cc->out, "    .quad %s\n", g_name);
+                            } else {
+                                if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+                                else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+                            }
+                        } else {
+                            fprintf(cc->out, "    .zero %d\n", elem_size);
+                        }
                     }
                     *emitted += elem_size;
                 }
@@ -4494,24 +4823,20 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
                 } else if (elem->kind == ND_ADDR_LABEL) {
                     if (elem_size == 4) fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, elem->label_name);
                     else fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, elem->label_name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->lhs->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->lhs->name);
-                } else if (elem->kind == ND_ADDR && elem->lhs && elem->lhs->kind == ND_DEREF && elem->lhs->lhs && elem->lhs->lhs->kind == ND_ADD && elem->lhs->lhs->lhs && elem->lhs->lhs->lhs->kind == ND_VAR && elem->lhs->lhs->rhs && elem->lhs->lhs->rhs->kind == ND_NUM) {
-                    long long offset = elem->lhs->lhs->rhs->int_val;
-                    if (elem->lhs->lhs->lhs->type && elem->lhs->lhs->lhs->type->base) offset *= type_size(elem->lhs->lhs->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->lhs->lhs->name, offset);
-                } else if (elem->kind == ND_ADD && elem->lhs && elem->lhs->kind == ND_VAR && elem->rhs && elem->rhs->kind == ND_NUM) {
-                    long long offset = elem->rhs->int_val;
-                    if (elem->lhs->type && elem->lhs->type->base) offset *= type_size(elem->lhs->type->base);
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", elem->lhs->name, offset);
-                    else fprintf(cc->out, "    .quad %s + %lld\n", elem->lhs->name, offset);
-                } else if (elem->kind == ND_VAR) {
-                    if (elem_size == 4) fprintf(cc->out, "    .long %s\n", elem->name);
-                    else fprintf(cc->out, "    .quad %s\n", elem->name);
                 } else {
-                    fprintf(cc->out, "    .zero %d\n", elem_size);
+                    char *g_name = NULL;
+                    long long g_off = 0;
+                    if (resolve_global_addr(elem, &g_name, &g_off)) {
+                        if (g_off == 0) {
+                            if (elem_size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+                            else fprintf(cc->out, "    .quad %s\n", g_name);
+                        } else {
+                            if (elem_size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+                            else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+                        }
+                    } else {
+                        fprintf(cc->out, "    .zero %d\n", elem_size);
+                    }
                 }
                 *emitted += elem_size;
             }
@@ -4526,6 +4851,9 @@ static void emit_global_init_list(Compiler *cc, Type *type, Node *init_list, int
 
 static void emit_global_var(Compiler *cc, Node *gvar) {
   int size;
+
+  if (gvar->kind != ND_GLOBAL_VAR)
+    return;
 
   if (gvar->is_extern)
     return; /* no emission for extern */
@@ -4609,26 +4937,20 @@ static void emit_global_var(Compiler *cc, Node *gvar) {
         fprintf(cc->out, "    .long .Luser_%s_%s\n", cc->current_func, init->label_name);
       else
         fprintf(cc->out, "    .quad .Luser_%s_%s\n", cc->current_func, init->label_name);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_VAR) {
-      if (size == 4)
-        fprintf(cc->out, "    .long %s\n", init->lhs->name);
-      else
-        fprintf(cc->out, "    .quad %s\n", init->lhs->name);
-    } else if (init->kind == ND_ADDR && init->lhs && init->lhs->kind == ND_DEREF && init->lhs->lhs && init->lhs->lhs->kind == ND_ADD && init->lhs->lhs->lhs && init->lhs->lhs->lhs->kind == ND_VAR && init->lhs->lhs->rhs && init->lhs->lhs->rhs->kind == ND_NUM) {
-      long long offset = init->lhs->lhs->rhs->int_val;
-      if (init->lhs->lhs->lhs->type && init->lhs->lhs->lhs->type->base) offset *= type_size(init->lhs->lhs->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->lhs->lhs->name, offset);
-    } else if (init->kind == ND_ADD && init->lhs && init->lhs->kind == ND_VAR && init->rhs && init->rhs->kind == ND_NUM) {
-      long long offset = init->rhs->int_val;
-      if (init->lhs->type && init->lhs->type->base) offset *= type_size(init->lhs->type->base);
-      if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", init->lhs->name, offset);
-      else fprintf(cc->out, "    .quad %s + %lld\n", init->lhs->name, offset);
-    } else if (init->kind == ND_VAR) {
-      if (size == 4)
-        fprintf(cc->out, "    .long %s\n", init->name);
-      else
-        fprintf(cc->out, "    .quad %s\n", init->name);
+    } else if (init->kind == ND_ADDR || init->kind == ND_DEREF || init->kind == ND_ADD || init->kind == ND_VAR || init->kind == ND_MEMBER) {
+      char *g_name = NULL;
+      long long g_off = 0;
+      if (resolve_global_addr(init, &g_name, &g_off)) {
+        if (g_off == 0) {
+          if (size == 4) fprintf(cc->out, "    .long %s\n", g_name);
+          else fprintf(cc->out, "    .quad %s\n", g_name);
+        } else {
+          if (size == 4) fprintf(cc->out, "    .long %s + %lld\n", g_name, g_off);
+          else fprintf(cc->out, "    .quad %s + %lld\n", g_name, g_off);
+        }
+      } else {
+        fprintf(cc->out, "    .zero %d\n", size);
+      }
     } else if (init->kind == ND_STR) {
       if (gvar->type && gvar->type->kind == TY_ARRAY) {
           int j;
@@ -4926,6 +5248,8 @@ static void fold_constants(Compiler *cc, Node *node) {
   }
 }
 
+extern void run_interprocedural_constant_propagation(Compiler *cc, Node *prog);
+
 void codegen_program(Compiler *cc, Node *prog) {
   Node *n;
   int i;
@@ -4936,7 +5260,10 @@ void codegen_program(Compiler *cc, Node *prog) {
   if (!prog)
     return;
 
+  run_interprocedural_constant_propagation(cc, prog);
+
   /* Linux: avoid "missing .note.GNU-stack" linker warning */
+
   if (!backend_ops) fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
   if (cc->filename) {
     fprintf(cc->out, "    .file 1 \"%s\"\n", cc->filename);
@@ -5024,7 +5351,7 @@ int node_ptr_elem_size(struct Node *n) {
 void codegen_emit_globals_and_strings(Compiler *cc) {
   int i;
   for (i = 0; i < cc->num_globals; i++) {
-    if (cc->globals[i]) {
+    if (cc->globals[i] && cc->globals[i]->kind == ND_GLOBAL_VAR) {
       fold_constants(cc, cc->globals[i]->initializer);
       emit_global_var(cc, cc->globals[i]);
     }

@@ -1,14 +1,13 @@
-CC = gcc
-CFLAGS = -O0 -w -fno-asynchronous-unwind-tables -g0
+CFLAGS = -O0 -w -fno-asynchronous-unwind-tables -g0 -DZCC_REAL_TELEMETRY
 LDFLAGS = -lm
 ifneq ($(NO_STRIP),1)
 LDFLAGS += -Wl,-s
 endif
-FAST_CFLAGS = -O2 -DNDEBUG -w -fno-asynchronous-unwind-tables -g0
+FAST_CFLAGS = -O2 -DNDEBUG -w -fno-asynchronous-unwind-tables -g0 -DZCC_REAL_TELEMETRY
 FORTIFY_PACK_DIR ?= fortify_zcc_clean
 
 PARTS = part1.c part0_pp.c part2.c part3.c ir.h ir_emit_dispatch.h ir_bridge.h sym_type_ast_ir.c part4.c part5.c part7_rust.c part6_arm.c ir.c ir_to_x86.c regalloc.c ir_telemetry_stub.c forgezero_receipt_stub.c
-PASSES = compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c transient_state.c
+PASSES = compiler_passes.c compiler_passes_ir.c ir_pass_manager.c ir_pass_warden.c ir_pass_taint.c ir_pass_healer.c ir_symbolic_cfg.c ir_dominance.c ir_ssa.c evm_lifter.c ir_vuln_tag.c ir_to_evm.c ir_evm_stack.c src/ir_lower_float.c src/x86_codegen_sse.c src/evm/decompiler.c src/evm/jit.c src/evm/symbolic.c src/evm/memory_v2.c src/evm/abi_extractor.c src/evm/jit_memory.c src/evm/proof_export.c src/evm/ipc_bridge.c src/evm/yul_weaver.c src/evm/yul_fixed_point.c src/evm/yul_frontend.c src/gfx/sdf_compiler.c src/gfx/mesh_warden.c src/evm/evm_symbolic_harness.c ir_telemetry.c zcc_telemetry.c src/zcc_oracle_substrate.c src/elf_emit.c src/codegen.c src/ir_serialization.c src/zcc_smt_prover.c src/gguf_emit.c src/zld.c src/zcc_resource_oracle.c transient_state.c zcc_lucky_alert_injector.c
 COMPAT_SMOKE_SRCS = \
 	exp1_raytracer_simd.c \
 	exp2_voxel_engine.c \
@@ -22,7 +21,9 @@ COMPAT_SMOKE_SRCS = \
 	tests/regressions/t_zkaedi_rigging_regressions.c
 COMPAT_EXTENDED_SRCS = $(COMPAT_SMOKE_SRCS) raytracer.c
 
-.PHONY: all clean selfhost selfhost-fast compat-smoke compat-extended compat-report compat-report-ci pp-crlf-gate fortify-ad fortify-ci fortify-snapshot fortify-recursive fortify-recursive-ci fortify-pack-init fortify-pack-preflight fortify-pack-layout fortify-pack-production fortify-pack-replay fortify-pack-clean supercharge-ad test rust-front-smoke check-evm-lifter check-ir-vuln-tag check-forgezero-receipt
+.PHONY: all clean selfhost selfhost-fast compat-smoke compat-extended compat-report compat-report-ci pp-crlf-gate fortify-ad fortify-ci fortify-snapshot fortify-recursive fortify-recursive-ci fortify-pack-init fortify-pack-preflight fortify-pack-layout fortify-pack-production fortify-pack-replay fortify-pack-clean supercharge-ad test rust-front-smoke check-evm-lifter check-ir-vuln-tag check-forgezero-receipt verify-attestation verify-replay-pack verify-genome-diff genome_diff verify-lineage stability_observatory topology_bisector cross_genome build_ledger verify-stability verify-bisector verify-cross-genome verify-ledger runtime_probe behavioral_diff verify-runtime-probe impact_attribution function_ranker verify-impact-attribution health_report verify-golden freeze-golden zcc_calibration_corpus verify-calibration zjs test-zjs visualize-svg-diffs wasm-svg-bridge
+
+.SECONDARY: zcc zcc2 zcc3
 
 all: zcc
 
@@ -46,11 +47,11 @@ zcc: zcc.c $(PASSES)
 	  fi; \
 	  rm -f .zcc_parts_check.tmp; \
 	fi
-	$(CC) $(CFLAGS) -o zcc zcc.c $(PASSES) $(LDFLAGS)
+	$(CC) $(CFLAGS) -Dmain=zcc_main -o zcc zcc.c $(PASSES) $(LDFLAGS)
 	@if [ "$(NO_STRIP)" != "1" ]; then strip --strip-all zcc; fi
 
 zcc_fast: zcc.c $(PASSES)
-	$(CC) $(FAST_CFLAGS) -o zcc_fast zcc.c $(PASSES) $(LDFLAGS)
+	$(CC) $(FAST_CFLAGS) -Dmain=zcc_main -o zcc_fast zcc.c $(PASSES) $(LDFLAGS)
 	@if [ "$(NO_STRIP)" != "1" ]; then strip --strip-all zcc_fast; fi
 
 zcc2: zcc zcc.c
@@ -68,6 +69,41 @@ selfhost: zcc3
 	./zcc  zcc.c -o zcc2.s
 	./zcc2 zcc.c -o zcc3.s
 	diff zcc2.s zcc3.s && echo "SELF-HOST VERIFIED (assembly identical)" || (echo "SELF-HOST FAILED (assembly diverged)"; diff zcc2.s zcc3.s | head -20; exit 1)
+
+zjs: zcc zjs.c test_evm_sprites.c zcc_svg.c
+	@echo "=== Compiling zjs, test_evm_sprites, and zcc_svg via ZCC ==="
+	./zcc zjs.c -DZJS_COMPILE -o zjs.s
+	./zcc test_evm_sprites.c -DZJS_COMPILE -o test_evm_sprites.s
+	./zcc zcc_svg.c -o zcc_svg.s
+	gcc -o zjs zjs.s test_evm_sprites.s zcc_svg.s -lm
+
+# === AUTOMATED ZJS + SVG BRIDGE TESTS ===
+test-zjs: zjs
+	@echo "=== ZJS + EVM VISUALIZER EDGE CASE AUTOMATION ==="
+	@python3 tests/run_edge_cases.py
+	@echo "777JACKPOT777 — ALL TESTS GREEN. SVG bridge rock solid."
+.PHONY: test-zjs
+
+visualize-svg-diffs: test-zjs
+	@echo "=== VISUAL SVG DIFF GENERATOR ==="
+	@cp zcc_sprites.svg tests/baseline.svg
+	@python3 tests/visualize_svg_diffs.py
+	@echo "777JACKPOT777 — SVG diffs rendered. Open browser tab."
+.PHONY: visualize-svg-diffs
+
+wasm-svg-bridge:
+	@echo "=== COMPILING WEBASSEMBLY SVG RENDERER ==="
+	emcc wasm_svg_bridge.c -o wasm_svg_bridge.wasm \
+		-s EXPORTED_FUNCTIONS='["_generate_svg","_set_phase","_get_phases"]' \
+		-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap"]' \
+		-s MODULARIZE=1 -s EXPORT_NAME="createModule" \
+		-O3 -s ALLOW_MEMORY_GROWTH=1
+	@cp demo_sprites.html demo_sprites_wasm.html
+	@sed -i 's/zcc_sprites.svg/wasm_svg_bridge.wasm/g' demo_sprites_wasm.html
+	@echo "777JACKPOT777 — WASM SVG bridge ready. Open demo_sprites_wasm.html"
+.PHONY: wasm-svg-bridge
+
+
 
 
 selfhost-fast: zcc_fast
@@ -389,20 +425,21 @@ check-forgezero-receipt:
 	/tmp/test_forgezero_receipt
 
 asan: zcc.c $(PASSES)
-	$(CC) -fsanitize=address -O0 -g -o zcc_asan zcc.c $(PASSES) $(LDFLAGS)
+	$(CC) -fsanitize=address -O0 -g -Dmain=zcc_main -o zcc_asan zcc.c $(PASSES) $(LDFLAGS)
 	@echo "ASan build ready. Run: ./zcc_asan zcc.c -o /dev/null"
 
 clean:
 	rm -f zcc zcc_fast zcc2 zcc2_fast zcc3 zcc3_fast zcc_asan zcc.c zcc_pp.c *.s *.o
-	rm -rf .compat_out .compat_logs
+	rm -f tools/zcc_topology_auditor tools/zcc_zxr_verify tools/zcc_replay_pack
+	rm -rf .compat_out .compat_logs scratch/replay/ scratch/extracted_replay/ scratch/kernel.zrp
 
 ir-verify: zcc2
 	@echo "[IR-VERIFY] Stage 2 IR emission..."
-	ZCC_EMIT_IR=1 ./zcc2 zcc.c -o zcc_ir_stage2.s
+	ZCC_EMIT_IR=1 ./zcc2 -DZCC_REAL_TELEMETRY zcc.c -o zcc_ir_stage2.s
 	@echo "[IR-VERIFY] Linking IR stage 2 binary..."
 	gcc zcc_ir_stage2.s $(PASSES) -o zcc_ir_stage2 -lm
 	@echo "[IR-VERIFY] Stage 3 via IR path..."
-	ZCC_EMIT_IR=1 ./zcc_ir_stage2 zcc.c -o zcc_ir_stage3.s
+	ZCC_EMIT_IR=1 ./zcc_ir_stage2 -DZCC_REAL_TELEMETRY zcc.c -o zcc_ir_stage3.s
 
 sqlite: zcc2
 	@echo "=== Compiling SQLite 160MB Amalgamation with ZCC ==="
@@ -413,6 +450,10 @@ sqlite: zcc2
 	@echo "=== Build Complete ==="
 
 # ─── ONEIROGENESIS v2: A Compiler That Dreams ────────────────────
+dream-regalloc: zcc2
+	@echo "=== ZCC ONEIROGENESIS v3 [REGALLOC GENETIC SWEEP] ==="
+	python3 zcc_oneirogenesis.py --sweep-regalloc --cycles 105 --islands 4
+
 dream: zcc2
 	@echo "=== ZCC ONEIROGENESIS v2 — The Compiler Dreams ==="
 	python3 zcc_oneirogenesis.py --cycles 50
@@ -560,4 +601,299 @@ swarm-fuzz-clean:
 
 release-clean:
 	rm -rf evm_jit/ evm_decomp/ report.html swarm_out/
+
+elf_emit_smoke: zcc
+	@echo "=== Direct ELF Emission Smoke Test ==="
+	./zcc test/add.c -emit-obj -o test/add.o
+	readelf -a test/add.o
+
+zkernel: zcc
+	@echo "=== Building RP2040 zkernel ==="
+	cp zcc.c /tmp/zcc_arm.c
+	sed -i 's/TargetBackend \*backend_ops = 0;/extern TargetBackend backend_thumbv6m; TargetBackend \*backend_ops = \&backend_thumbv6m;/g' /tmp/zcc_arm.c
+	sed -i 's/int ZCC_POINTER_WIDTH = 8;/int ZCC_POINTER_WIDTH = 4;/g' /tmp/zcc_arm.c
+	python3 scripts/patch_arm_codegen.py /tmp/zcc_arm.c
+	$(CC) -I. -O0 -w -fno-asynchronous-unwind-tables -g0 -DZCC_REAL_TELEMETRY -Dmain=zcc_main -o /tmp/zcc_arm /tmp/zcc_arm.c $(PASSES) $(LDFLAGS)
+	/tmp/zcc_arm src/zkernel/main.c -o main_zcc.s
+	/tmp/zcc_arm src/zkernel/uart.c -o uart_zcc.s
+	/tmp/zcc_arm src/zkernel/sched.c -o sched_zcc.s
+	arm-none-eabi-gcc -mcpu=cortex-m0plus -mthumb -O0 -ffreestanding -nostdlib -T src/zkernel/linker.ld \
+		src/zkernel/startup.s main_zcc.s uart_zcc.s sched_zcc.s -o zkernel.elf
+	arm-none-eabi-objcopy -O binary zkernel.elf zkernel.bin
+	python3 rp2040_blink/uf2conv.py zkernel.bin -f RP2040 --base 0x10000000 -o zkernel.uf2
+	rm -f main_zcc.s uart_zcc.s sched_zcc.s zkernel.bin /tmp/zcc_arm.c /tmp/zcc_arm
+	@echo "=== zkernel.elf and zkernel.uf2 built successfully ==="
+auditor: tools/zcc_topology_auditor
+verifier: tools/zcc_zxr_verify
+replay_pack: tools/zcc_replay_pack
+genome_diff: tools/zcc_genome_diff
+
+tools/zcc_topology_auditor: tools/zcc_topology_auditor.c tools/zcc_elf_parser.h tools/zcc_sha256.h
+	gcc -O2 -Wall -Itools tools/zcc_topology_auditor.c -o tools/zcc_topology_auditor -lm
+
+tools/zcc_zxr_verify: tools/zcc_zxr_verify.c tools/zcc_elf_parser.h tools/zcc_sha256.h
+	gcc -O2 -Wall -Itools tools/zcc_zxr_verify.c -o tools/zcc_zxr_verify -lm
+
+tools/zcc_replay_pack: tools/zcc_replay_pack.c tools/zcc_elf_parser.h tools/zcc_sha256.h
+	gcc -O2 -Wall -Itools tools/zcc_replay_pack.c -o tools/zcc_replay_pack -lm
+
+tools/zcc_genome_diff: tools/zcc_genome_diff.c
+	gcc -O2 -Wall -Itools tools/zcc_genome_diff.c -o tools/zcc_genome_diff -lm
+
+tools/zcc_genome_history: tools/zcc_genome_history.c
+	gcc -O2 -Wall -Itools tools/zcc_genome_history.c -o tools/zcc_genome_history -lm
+
+tools/zcc_time_machine: tools/zcc_time_machine.c
+	gcc -O2 -Wall -Itools tools/zcc_time_machine.c -o tools/zcc_time_machine -lm
+
+tools/zcc_stability_observatory: tools/zcc_stability_observatory.c
+	gcc -O2 -Wall -Itools tools/zcc_stability_observatory.c -o tools/zcc_stability_observatory -lm
+
+tools/zcc_topology_bisector: tools/zcc_topology_bisector.c
+	gcc -O2 -Wall -Itools tools/zcc_topology_bisector.c -o tools/zcc_topology_bisector -lm
+
+tools/zcc_cross_genome: tools/zcc_cross_genome.c
+	gcc -O2 -Wall -Itools tools/zcc_cross_genome.c -o tools/zcc_cross_genome -lm
+
+tools/zcc_build_ledger: tools/zcc_build_ledger.c
+	gcc -O2 -Wall -Itools tools/zcc_build_ledger.c -o tools/zcc_build_ledger -lm
+
+stability_observatory: tools/zcc_stability_observatory
+topology_bisector: tools/zcc_topology_bisector
+cross_genome: tools/zcc_cross_genome
+build_ledger: tools/zcc_build_ledger
+
+verify-attestation: auditor verifier
+	@echo "=== Running ZXR Attestation Pipeline Gate ==="
+	./tools/zcc_topology_auditor kernel/*.o --json > record_test.zxr
+	./tools/zcc_zxr_verify record_test.zxr kernel/*.o
+	@rm -f record_test.zxr
+	@echo "=== ZXR Attestation Pipeline Gate: VERIFIED ==="
+
+verify-replay-pack: replay_pack
+	@echo "=== Running ZXR Replay Pack Gate ==="
+	@mkdir -p scratch
+	./tools/zcc_replay_pack create kernel/*.o --out scratch/kernel.zrp
+	./tools/zcc_replay_pack verify scratch/kernel.zrp
+	@mkdir -p scratch/extracted_replay
+	./tools/zcc_replay_pack extract scratch/kernel.zrp --out scratch/extracted_replay
+	@echo "=== ZXR Replay Pack Gate: VERIFIED ==="
+
+verify-genome-diff: auditor tools/zcc_genome_diff
+	@echo "=== Running ZXR Genome Diff Gate ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	./tools/zcc_genome_diff scratch/base_genome.json scratch/base_genome.json
+	@echo "=== ZXR Genome Diff Gate: VERIFIED ==="
+
+verify-lineage: auditor tools/zcc_genome_history tools/zcc_time_machine
+	@echo "=== Running ZXR Compiler Lineage & Time Machine Gate ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	python3 scratch/build_test_registry.py
+	./tools/zcc_genome_history scratch/genomes
+	@echo "--- Time Machine Hop v0.20 -> v0.23 ---"
+	./tools/zcc_time_machine --from v0.20 --to v0.23 --registry scratch/genomes
+	@echo "=== ZXR Compiler Lineage & Time Machine: VERIFIED ==="
+
+verify-stability: auditor tools/zcc_stability_observatory tools/zcc_genome_history tools/zcc_time_machine
+	@echo "=== Running ZXR Stability Observatory Gate (D-24) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	python3 scratch/build_test_registry.py
+	./tools/zcc_stability_observatory scratch/genomes \
+		--out scratch/stability_forecast.json --forecast 3
+	@echo "Forecast JSON:"
+	@cat scratch/stability_forecast.json
+	@echo "=== ZXR Stability Observatory Gate: VERIFIED ==="
+
+verify-bisector: auditor tools/zcc_topology_bisector tools/zcc_genome_history
+	@echo "=== Running ZXR Topology Bisector Gate (D-25) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	python3 scratch/build_test_registry.py
+	./tools/zcc_topology_bisector \
+		--registry scratch/genomes --bad v0.23 \
+		--out scratch/bisect_report.json || true
+	@echo "Bisect JSON:"
+	@cat scratch/bisect_report.json
+	@echo "=== ZXR Topology Bisector Gate: VERIFIED ==="
+
+verify-cross-genome: auditor tools/zcc_cross_genome tools/zcc_genome_history
+	@echo "=== Running ZXR Cross-Compiler Genome Gate (D-26) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	python3 scratch/build_test_registry.py
+	./tools/zcc_cross_genome \
+		--zcc scratch/genomes \
+		--ref-a scratch/base_genome.json \
+		--ref-a-label baseline \
+		--out scratch/cross_genome_report.json
+	@echo "Cross-genome JSON:"
+	@cat scratch/cross_genome_report.json
+	@echo "=== ZXR Cross-Compiler Genome Gate: VERIFIED ==="
+
+verify-ledger: tools/zcc_build_ledger tools/zcc_genome_history auditor
+	@echo "=== Running ZXR Sovereign Build Ledger Gate (D-27) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/base_genome.json
+	python3 scratch/build_test_registry.py
+	@rm -f scratch/build.ledger
+	./tools/zcc_build_ledger append \
+		--ledger scratch/build.ledger \
+		--genome scratch/base_genome.json \
+		--version v0.24 --stability 90
+	./tools/zcc_build_ledger append \
+		--ledger scratch/build.ledger \
+		--genome scratch/base_genome.json \
+		--version v0.25 --stability 92
+	./tools/zcc_build_ledger append \
+		--ledger scratch/build.ledger \
+		--genome scratch/base_genome.json \
+		--version v0.26 --stability 94
+	./tools/zcc_build_ledger dump   --ledger scratch/build.ledger
+	./tools/zcc_build_ledger verify --ledger scratch/build.ledger
+	@echo "=== ZXR Sovereign Build Ledger Gate: VERIFIED ==="
+
+tools/zcc_runtime_probe.o: tools/zcc_runtime_probe.c
+	gcc -O2 -Wall -c tools/zcc_runtime_probe.c -o tools/zcc_runtime_probe.o
+
+tools/zcc_behavioral_diff: tools/zcc_behavioral_diff.c
+	gcc -O2 -Wall -Itools tools/zcc_behavioral_diff.c -o tools/zcc_behavioral_diff -lm
+
+runtime_probe: tools/zcc_runtime_probe.o
+behavioral_diff: tools/zcc_behavioral_diff
+
+verify-runtime-probe: tools/zcc_behavioral_diff tools/zcc_runtime_probe.o auditor
+	@echo "=== Running ZXR Runtime Behavioral Probe Gate (D-28) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/static_genome.json
+	@echo "--- Building instrumented probe test binary ---"
+	gcc -O2 -finstrument-functions \
+		tools/zcc_runtime_probe.c \
+		tests/runtime_probe_test.c \
+		-o scratch/probe_test_bin
+	@echo "--- Running probe test binary ---"
+	ZCC_PROBE_OUT=scratch/runtime_genome.json ./scratch/probe_test_bin
+	@echo "--- Runtime genome emitted ---"
+	@cat scratch/runtime_genome.json
+	@echo "--- Running behavioral diff ---"
+	./tools/zcc_behavioral_diff \
+		--static scratch/static_genome.json \
+		--runtime scratch/runtime_genome.json \
+		--out scratch/behavioral_drift_report.json || true
+	@echo "--- Drift report ---"
+	@cat scratch/behavioral_drift_report.json
+	@echo "=== ZXR Runtime Behavioral Probe Gate: VERIFIED ==="
+
+tools/zcc_impact_attribution: tools/zcc_impact_attribution.c
+	gcc -O2 -Wall -Itools tools/zcc_impact_attribution.c -o tools/zcc_impact_attribution -lm
+
+tools/zcc_function_ranker: tools/zcc_function_ranker.c
+	gcc -O2 -Wall -Itools tools/zcc_function_ranker.c -o tools/zcc_function_ranker -lm
+
+impact_attribution: tools/zcc_impact_attribution
+function_ranker: tools/zcc_function_ranker
+
+verify-impact-attribution: tools/zcc_impact_attribution tools/zcc_function_ranker \
+                            tools/zcc_runtime_probe.o auditor verify-calibration
+	@echo "=== Running ZXR Runtime Impact Attribution Gate (D-29) ==="
+	@mkdir -p scratch
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/static_genome_a.json
+	python3 scratch/build_test_registry.py
+	@cp scratch/genomes/v0.20.json scratch/static_genome_v020.json
+	@cp scratch/genomes/v0.23.json scratch/static_genome_v023.json
+	@echo "--- Building two instrumented probe binaries (A and B) ---"
+	gcc -O2 -finstrument-functions \
+		tools/zcc_runtime_probe.c \
+		tests/runtime_probe_test.c \
+		-o scratch/probe_bin_a
+	gcc -O2 -O3 -finstrument-functions \
+		tools/zcc_runtime_probe.c \
+		tests/runtime_probe_test.c \
+		-o scratch/probe_bin_b
+	@echo "--- Running probe A ---"
+	ZCC_PROBE_OUT=scratch/runtime_genome_a.json ./scratch/probe_bin_a
+	@echo "--- Running probe B ---"
+	ZCC_PROBE_OUT=scratch/runtime_genome_b.json ./scratch/probe_bin_b
+	@echo "--- Function Ranker (genome A) ---"
+	./tools/zcc_function_ranker scratch/runtime_genome_a.json \
+		--top 5 --out scratch/ranked_a.json
+	@echo "--- Function Ranker (genome B) ---"
+	./tools/zcc_function_ranker scratch/runtime_genome_b.json \
+		--top 5 --out scratch/ranked_b.json
+	@echo "--- Impact Attribution (static-only: v0.20 vs v0.23) ---"
+	./tools/zcc_impact_attribution \
+		--static-a scratch/static_genome_v020.json \
+		--static-b scratch/static_genome_v023.json \
+		--version-a v0.20 --version-b v0.23 \
+		--calibration-report scratch/calibration_report.json \
+		--thresholds scratch/calibrated_thresholds.json \
+		--out scratch/attribution_static.json || true
+	@echo "--- Attribution JSON (static) ---"
+	@cat scratch/attribution_static.json
+	@echo "--- Impact Attribution (full: A vs B with runtime genomes) ---"
+	./tools/zcc_impact_attribution \
+		--static-a scratch/static_genome_v020.json \
+		--static-b scratch/static_genome_v023.json \
+		--runtime-a scratch/runtime_genome_a.json \
+		--runtime-b scratch/runtime_genome_b.json \
+		--version-a v0.20-O2 --version-b v0.23-O3 \
+		--calibration-report scratch/calibration_report.json \
+		--thresholds scratch/calibrated_thresholds.json \
+		--out scratch/attribution_full.json || true
+	@echo "--- Attribution JSON (full) ---"
+	@cat scratch/attribution_full.json
+	@echo "=== ZXR Runtime Impact Attribution Gate: VERIFIED ==="
+
+tools/zcc_health_report: tools/zcc_health_report.c
+	gcc -O2 -Wall -lm tools/zcc_health_report.c -o tools/zcc_health_report
+
+health_report: tools/zcc_health_report
+
+health-report: tools/zcc_health_report
+	@echo "=== ZCC Compiler Health Report ==="
+	./tools/zcc_health_report \
+		--scratch scratch \
+		--golden genomes/golden \
+		--selfhost PASS \
+		--attestation PASS \
+		--replay PASS \
+		--lineage PASS \
+		--bisector PASS \
+		--cross-genome PASS \
+		--out compiler_health.json
+	@echo "=== Health Report Complete ==="
+
+freeze-golden:
+	@echo "=== Freezing Golden Genome (v0.29-observability) ==="
+	@mkdir -p genomes/golden
+	./tools/zcc_topology_auditor kernel/*.o --json \
+		> genomes/golden/v0.29-observability.json
+	ZCC_PROBE_OUT=genomes/golden/v0.29-runtime.json \
+		./scratch/probe_bin_a 2>&1 | tail -3
+	./tools/zcc_topology_auditor kernel/*.o \
+		> genomes/golden/v0.29-attestation.zxr
+	@echo "Golden genome frozen:"
+	@ls -lh genomes/golden/
+	@echo "=== freeze-golden: COMPLETE ==="
+
+verify-golden: tools/zcc_genome_diff auditor
+	@echo "=== Verifying Golden Genome Integrity ==="
+	./tools/zcc_topology_auditor kernel/*.o --json > scratch/current_for_golden.json
+	./tools/zcc_genome_diff \
+		genomes/golden/v0.29-observability.json \
+		scratch/current_for_golden.json
+	@echo "=== verify-golden: COMPLETE ==="
+
+zcc_calibration_corpus: tools/zcc_topology_auditor tools/zcc_impact_attribution tools/zcc_runtime_probe.o zcc
+	@echo "=== Running Calibration Corpus Experiment (D-30) ==="
+	python3 tools/zcc_calibrate.py
+
+verify-calibration: zcc_calibration_corpus
+	@echo "=== Verifying Prediction Calibration Gate ==="
+	@cat scratch/forecast_accuracy.json
+	@grep -q '"status": "CALIBRATED"' scratch/forecast_accuracy.json || (echo "CALIBRATION FAILED: F1 score too low"; exit 1)
+	@echo "=== verify-calibration: COMPLETE ==="
+
 

@@ -39,6 +39,10 @@ static int get_or_create_var(const char *name) {
     int i;
     if (!name || name[0] == '\0' || name[0] == '-') return 0;
     
+    if (strncmp(name, "%stack_", 7) == 0) {
+        return atoi(name + 7);
+    }
+    
     for (i = 0; i < num_vars; i++) {
         if (strcmp(vars[i].name, name) == 0) return vars[i].offset;
     }
@@ -193,6 +197,20 @@ static void load_address_ra(FILE *out, const char *src, const char *reg,
     load_address(out, src, reg);
 }
 
+/* Callee-save register tables — match get_callee_reg() order in part4.c
+ * r12=0, r13=1, r14=2, r15=3, rbx=4 */
+static const char *callee_regs[5] = {"%r12", "%r13", "%r14", "%r15", "%rbx"};
+static const int   callee_flag[5] = {PREG_R12, PREG_R13, PREG_R14, PREG_R15, PREG_RBX};
+
+static int is_unsigned_comparison(ir_func_t *fn, ir_node_t *n) {
+    if (ir_type_unsigned(n->type)) return 1;
+    ir_node_t *def1 = ir_find_def(fn, n, n->src1);
+    ir_node_t *def2 = ir_find_def(fn, n, n->src2);
+    if (def1 && ir_type_unsigned(def1->type)) return 1;
+    if (def2 && ir_type_unsigned(def2->type)) return 1;
+    return 0;
+}
+
 /* ── Main lowering entry point ───────────────────────────────────────── */
 
 void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
@@ -209,7 +227,30 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
         int call_padding = 0;
 
         num_vars = 0;
-        next_offset_from_rbp = -8;
+        {
+            int min_stack_off = -8 * fn->num_params;
+            ir_node_t *scan = fn->head;
+            while (scan) {
+                if (scan->flags & IRF_DEAD) {
+                    scan = scan->next;
+                    continue;
+                }
+                if (strncmp(scan->dst, "%stack_", 7) == 0) {
+                    int off = atoi(scan->dst + 7);
+                    if (off < min_stack_off) min_stack_off = off;
+                }
+                if (strncmp(scan->src1, "%stack_", 7) == 0) {
+                    int off = atoi(scan->src1 + 7);
+                    if (off < min_stack_off) min_stack_off = off;
+                }
+                if (strncmp(scan->src2, "%stack_", 7) == 0) {
+                    int off = atoi(scan->src2 + 7);
+                    if (off < min_stack_off) min_stack_off = off;
+                }
+                scan = scan->next;
+            }
+            next_offset_from_rbp = min_stack_off - 8;
+        }
 
         /* ── Pass 0: Run linear scan register allocator ── */
         RegAllocator *ra = ra_create();
@@ -221,6 +262,10 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
          * remains as a spill target if needed by loads/stores.         */
         n = fn->head;
         while (n) {
+            if (n->flags & IRF_DEAD) {
+                n = n->next;
+                continue;
+            }
             if (n->dst[0]  != '\0' && n->dst[0]  != '-') get_or_create_var(n->dst);
             if (n->src1[0] != '\0' && n->src1[0] != '-') get_or_create_var(n->src1);
             if (n->src2[0] != '\0' && n->src2[0] != '-') get_or_create_var(n->src2);
@@ -230,19 +275,16 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
             n = n->next;
         }
         
-        stack_size = -next_offset_from_rbp + 40;
-        stack_size = (stack_size + 15) & ~15;
+        /* ── Task 1: Unified stack frame sizing (matches AST codegen_func) ── */
+        /* raw slot bytes consumed so far (next_offset_from_rbp started at -8) */
+        int stack_raw = -next_offset_from_rbp - 8; /* bytes for locals/temps */
+        stack_size = stack_raw + 40 + 16; /* +40: 5 push slots, +16: ABI scratch CG-IR-019 */
+        /* NOTE: variadic +176 is NOT applied here — ir_func_t has no is_variadic
+         * field and the IR lowering path never handles variadic functions directly.
+         * Variadic call-site setup is handled at the call instruction level. */
+        if (stack_size < 256) stack_size = 256; /* minimum frame size */
+        stack_size = (stack_size + 15) & ~15;   /* 16-byte align */
 
-        int num_pushes = 0;
-        if (ra->used[PREG_RBX])  num_pushes++;
-        if (ra->used[PREG_R12])  num_pushes++;
-        if (ra->used[PREG_R13])  num_pushes++;
-        if (ra->used[PREG_R14])  num_pushes++;
-        if (ra->used[PREG_R15])  num_pushes++;
-        if (num_pushes % 2 != 0) {
-            stack_size += 8;
-        }
-        
         /* ── Prologue ── */
         fprintf(out, "    .globl %s\n", fn->name);
         fprintf(out, "%s:\n", fn->name);
@@ -250,12 +292,15 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
         fprintf(out, "    movq %%rsp, %%rbp\n");
         fprintf(out, "    subq $%d, %%rsp\n", stack_size);
 
-        /* Push callee-saved registers used by the allocator */
-        if (ra->used[PREG_RBX])  fprintf(out, "    pushq %%rbx\n");
-        if (ra->used[PREG_R12])  fprintf(out, "    pushq %%r12\n");
-        if (ra->used[PREG_R13])  fprintf(out, "    pushq %%r13\n");
-        if (ra->used[PREG_R14])  fprintf(out, "    pushq %%r14\n");
-        if (ra->used[PREG_R15])  fprintf(out, "    pushq %%r15\n");
+        /* ── Task 2: Callee-saves via movq at %rbp-relative offsets ──
+         * Mirrors: movq %r12, -(stack_raw + 8*(i+1))(%rbp)
+         * (matching get_callee_reg() + codegen_func() in part4.c) */
+        for (int ci = 0; ci < 5; ci++) {
+            if (ra->used[callee_flag[ci]]) {
+                int save_off = -(stack_raw + 8 * (ci + 1));
+                fprintf(out, "    movq %s, %d(%%rbp)\n", callee_regs[ci], save_off);
+            }
+        }
         
         /* Store incoming parameters into their stack slots */
         for (int pnum = 0; pnum < fn->num_params; pnum++) {
@@ -268,14 +313,18 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
         }
 
         arg_idx = 0;
+        int has_ret = 0; /* tracks whether an explicit IR_RET was emitted */
 
         /* ── Pass 2: Emit assembly ── */
         n = fn->head;
         while (n) {
+            /* CG-IR-OPT-001: skip dead nodes */
+            if (n->flags & IRF_DEAD) { n = n->next; continue; }
             fprintf(out, "    # %s\n", ir_op_name(n->op));
             switch (n->op) {
                 case IR_CONST: {
-                    fprintf(out, "    movabsq $%ld, %%rax\n", n->imm);
+                    /* Task 3: use movq (not movabsq) to match AST codegen */
+                    fprintf(out, "    movq $%ld, %%rax\n", n->imm);
                     store_result(out, n->dst, "%rax", ra);
                     break;
                 }
@@ -340,12 +389,13 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
                             int off2 = get_or_create_var(n->src2);
                             fprintf(out, "    cmpq %d(%%rbp), %%rax\n", off2);
                         }
+                        int is_uns = is_unsigned_comparison(fn, n);
                         if      (n->op == IR_EQ) fprintf(out, "    sete %%al\n");
                         else if (n->op == IR_NE) fprintf(out, "    setne %%al\n");
-                        else if (n->op == IR_LT) fprintf(out, "    setl %%al\n");
-                        else if (n->op == IR_LE) fprintf(out, "    setle %%al\n");
-                        else if (n->op == IR_GT) fprintf(out, "    setg %%al\n");
-                        else if (n->op == IR_GE) fprintf(out, "    setge %%al\n");
+                        else if (n->op == IR_LT) fprintf(out, is_uns ? "    setb %%al\n" : "    setl %%al\n");
+                        else if (n->op == IR_LE) fprintf(out, is_uns ? "    setbe %%al\n" : "    setle %%al\n");
+                        else if (n->op == IR_GT) fprintf(out, is_uns ? "    seta %%al\n" : "    setg %%al\n");
+                        else if (n->op == IR_GE) fprintf(out, is_uns ? "    setae %%al\n" : "    setge %%al\n");
                         fprintf(out, "    movzbq %%al, %%rax\n");
                     }
                     store_result(out, n->dst, "%rax", ra);
@@ -523,7 +573,12 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
                 }
                 case IR_CALL: {
                     fprintf(out, "    movb $0, %%al\n");
-                    fprintf(out, "    callq %s\n", n->label);
+                    if (n->label[0] == '%') {
+                        load_operand(out, n->label, "%r10", ra);
+                        fprintf(out, "    call *%%r10\n"); /* Task 3: call not callq */
+                    } else {
+                        fprintf(out, "    call %s\n", n->label); /* Task 3: call not callq */
+                    }
                     if (arg_idx > 6 || call_padding > 0) {
                         int cleanup_size = (arg_idx > 6 ? (arg_idx - 6) * 8 : 0) + call_padding;
                         fprintf(out, "    addq $%d, %%rsp\n", cleanup_size);
@@ -536,24 +591,18 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
                     break;
                 }
                 case IR_RET: {
-                    if (n->src1[0] != '\0' && n->src1[0] != '-') {
+                    /* CG-IR-OPT-001: IRF_RET_IMM — direct constant return, bypass regalloc */
+                    if (n->flags & IRF_RET_IMM) {
+                        fprintf(out, "    movq $%ld, %%rax\n", n->imm);
+                    } else if (n->src1[0] != '\0' && n->src1[0] != '-') {
                         load_operand(out, n->src1, "%rax", ra);
                         if (n->type == IR_TY_I8) fprintf(out, "    movsbl %%al, %%eax\n    movsbq %%al, %%rax\n");
                         else if (n->type == IR_TY_U8) fprintf(out, "    movzbl %%al, %%eax\n");
                         else if (n->type == IR_TY_I16) fprintf(out, "    movswl %%ax, %%eax\n    movswq %%ax, %%rax\n");
                         else if (n->type == IR_TY_U16) fprintf(out, "    movzwl %%ax, %%eax\n");
-                        else if (n->type == IR_TY_I32) fprintf(out, "    movslq %%eax, %%rax\n");
-                        else if (n->type == IR_TY_U32) fprintf(out, "    movl %%eax, %%eax\n");
                     }
-                    /* Restore callee-saved registers (reverse order) */
-                    if (ra->used[PREG_R15]) fprintf(out, "    popq %%r15\n");
-                    if (ra->used[PREG_R14]) fprintf(out, "    popq %%r14\n");
-                    if (ra->used[PREG_R13]) fprintf(out, "    popq %%r13\n");
-                    if (ra->used[PREG_R12]) fprintf(out, "    popq %%r12\n");
-                    if (ra->used[PREG_RBX]) fprintf(out, "    popq %%rbx\n");
-                    fprintf(out, "    movq %%rbp, %%rsp\n");
-                    fprintf(out, "    popq %%rbp\n");
-                    fprintf(out, "    ret\n");
+                    fprintf(out, "    jmp %s\n", fn->end_label);
+                    has_ret = 1;
                     break;
                 }
                 case IR_FCONST: {
@@ -603,15 +652,18 @@ void ir_module_lower_x86(const ir_module_t *mod, FILE *out) {
             n = n->next;
         }
         
-        /* Fallback epilogue in case missing explicit RET */
-        if (ra->used[PREG_R15]) fprintf(out, "    popq %%r15\n");
-        if (ra->used[PREG_R14]) fprintf(out, "    popq %%r14\n");
-        if (ra->used[PREG_R13]) fprintf(out, "    popq %%r13\n");
-        if (ra->used[PREG_R12]) fprintf(out, "    popq %%r12\n");
-        if (ra->used[PREG_RBX]) fprintf(out, "    popq %%rbx\n");
+        /* Convergence epilogue — all IR_RET paths jmp here */
+        fprintf(out, "%s:\n", fn->end_label);
+        for (int ci = 4; ci >= 0; ci--) {
+            if (ra->used[callee_flag[ci]]) {
+                int save_off = -(stack_raw + 8 * (ci + 1));
+                fprintf(out, "    movq %d(%%rbp), %s\n", save_off, callee_regs[ci]);
+            }
+        }
         fprintf(out, "    movq %%rbp, %%rsp\n");
         fprintf(out, "    popq %%rbp\n");
         fprintf(out, "    ret\n");
+
 
         ra_free(ra);
     }
