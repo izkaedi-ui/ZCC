@@ -5121,6 +5121,8 @@ static void fold_constants(Compiler *cc, Node *node) {
   }
 }
 
+extern void run_interprocedural_constant_propagation(Compiler *cc, Node *prog);
+
 void codegen_program(Compiler *cc, Node *prog) {
   Node *n;
   int i;
@@ -5131,7 +5133,10 @@ void codegen_program(Compiler *cc, Node *prog) {
   if (!prog)
     return;
 
+  run_interprocedural_constant_propagation(cc, prog);
+
   /* Linux: avoid "missing .note.GNU-stack" linker warning */
+
   if (!backend_ops) fprintf(cc->out, "    .section .note.GNU-stack,\"\",@progbits\n");
   if (cc->filename) {
     fprintf(cc->out, "    .file 1 \"%s\"\n", cc->filename);
