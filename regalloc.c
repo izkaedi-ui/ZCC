@@ -13,6 +13,7 @@
  */
 
 #include "regalloc.h"
+#include "ir_dominance.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -71,6 +72,10 @@ static LiveInterval *get_or_create(RegAllocator *ra, const char *name, int pos) 
     iv->end      = pos;
     iv->assigned = PREG_NONE;
     iv->is_float = 0;
+    iv->ref_count = 0;
+    iv->loop_depth_weight = 0;
+    iv->pressure_score = 0;
+    iv->is_move = 0;
     return iv;
 }
 
@@ -98,28 +103,106 @@ static int iv_cmp_start(const void *a, const void *b) {
     return strcmp(ia->name, ib->name);
 }
 
-/* ── Phase 1: Build live intervals ──────────────────────────────────── */
+static void add_ref(RegAllocator *ra, const char *name, int pos, int weight, int is_def, ir_type_t ty) {
+    LiveInterval *iv = get_or_create(ra, name, pos);
+    if (is_def && (ty == IR_TY_F32 || ty == IR_TY_F64)) {
+        iv->is_float = 1;
+    }
+    if (pos > iv->end) iv->end = pos;
+    iv->ref_count++;
+    iv->loop_depth_weight += weight;
+}
 
 static void build_intervals(RegAllocator *ra, const ir_func_t *fn) {
     const ir_node_t *n;
     int pos = 0;
 
+    /* Build CFG for loop depth calculations */
+    dom_cfg_t cfg;
+    int has_cfg = 0;
+    int loop_depth[DOM_MAX_BLOCKS];
+    memset(loop_depth, 0, sizeof(loop_depth));
+
+    if (dom_build_cfg(&cfg, (ir_func_t *)fn) >= 0) {
+        dom_compute_idom(&cfg);
+        has_cfg = 1;
+
+        /* Calculate loop depth for each block */
+        for (int h = 0; h < cfg.block_count; h++) {
+            int has_back_edge = 0;
+            for (int pi = 0; pi < cfg.blocks[h].pred_count; pi++) {
+                int pred = cfg.blocks[h].pred[pi];
+                if (dom_dominates(&cfg, h, pred)) {
+                    has_back_edge = 1;
+                    break;
+                }
+            }
+            if (!has_back_edge) continue;
+
+            char in_loop[DOM_MAX_BLOCKS];
+            memset(in_loop, 0, sizeof(in_loop));
+            in_loop[h] = 1;
+
+            int queue[DOM_MAX_BLOCKS];
+            int qhead = 0, qtail = 0;
+
+            for (int pi = 0; pi < cfg.blocks[h].pred_count; pi++) {
+                int pred = cfg.blocks[h].pred[pi];
+                if (dom_dominates(&cfg, h, pred)) {
+                    if (!in_loop[pred]) {
+                        in_loop[pred] = 1;
+                        queue[qtail++] = pred;
+                    }
+                }
+            }
+
+            while (qhead < qtail) {
+                int curr = queue[qhead++];
+                for (int pi = 0; pi < cfg.blocks[curr].pred_count; pi++) {
+                    int pred = cfg.blocks[curr].pred[pi];
+                    if (!in_loop[pred]) {
+                        in_loop[pred] = 1;
+                        queue[qtail++] = pred;
+                    }
+                }
+            }
+
+            for (int b = 0; b < cfg.block_count; b++) {
+                if (in_loop[b]) {
+                    loop_depth[b]++;
+                }
+            }
+        }
+    }
+
     for (n = fn->head; n; n = n->next, pos++) {
+        int bid = -1;
+        if (has_cfg) {
+            bid = dom_find_block_for_node(&cfg, n);
+        }
+        int depth = (bid >= 0 && bid < cfg.block_count) ? loop_depth[bid] : 0;
+        int weight = 1;
+        if (depth > 6) depth = 6;
+        for (int d = 0; d < depth; d++) {
+            weight *= 10;
+        }
+
         /* Process destination (definition) */
         if (is_temp(n->dst)) {
-            LiveInterval *iv = get_or_create(ra, n->dst, pos);
-            if (n->type == IR_TY_F32 || n->type == IR_TY_F64) iv->is_float = 1;
-            /* definitions extend end too (covers single-use temps) */
-            if (pos > iv->end) iv->end = pos;
+            add_ref(ra, n->dst, pos, weight, 1, n->type);
         }
         /* Process source operands (uses) */
         if (is_temp(n->src1)) {
-            LiveInterval *iv = get_or_create(ra, n->src1, pos);
-            if (pos > iv->end) iv->end = pos;
+            add_ref(ra, n->src1, pos, weight, 0, n->type);
         }
         if (is_temp(n->src2)) {
-            LiveInterval *iv = get_or_create(ra, n->src2, pos);
-            if (pos > iv->end) iv->end = pos;
+            add_ref(ra, n->src2, pos, weight, 0, n->type);
+        }
+        
+        /* If it is a copy move/phi-related, mark it */
+        if (n->op == IR_COPY && is_temp(n->dst)) {
+            LiveInterval *iv = find_interval(ra, n->dst);
+            if (iv) iv->is_move = 1;
         }
     }
 
@@ -179,17 +262,30 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
                 while(alias[u] != u) u = alias[u];
                 while(alias[v] != v) v = alias[v];
                 if (u != v && ra->intervals[u].is_float == ra->intervals[v].is_float && !adj[u*N + v]) {
-                    /* Merge v into u */
-                    alias[v] = u;
-                    for (i = 0; i < N; i++) {
-                        if (adj[v*N + i] && !adj[u*N + i] && u != i) {
-                            adj[u*N + i] = 1;
-                            adj[i*N + u] = 1;
-                            degree[u]++;
-                            degree[i]++;
+                    /* Briggs conservative coalescing check */
+                    int K = ra->intervals[u].is_float ? 8 : 7;
+                    int significant_neighbors = 0;
+                    for (int k = 0; k < N; k++) {
+                        if (k == u || k == v) continue;
+                        if (adj[u*N + k] || adj[v*N + k]) {
+                            if (degree[k] >= K) {
+                                significant_neighbors++;
+                            }
                         }
                     }
-                    removed[v] = 1;
+                    if (significant_neighbors < K) {
+                        /* Merge v into u */
+                        alias[v] = u;
+                        for (i = 0; i < N; i++) {
+                            if (adj[v*N + i] && !adj[u*N + i] && u != i) {
+                                adj[u*N + i] = 1;
+                                adj[i*N + u] = 1;
+                                degree[u]++;
+                                degree[i]++;
+                            }
+                        }
+                        removed[v] = 1;
+                    }
                 }
             }
         }
@@ -212,13 +308,15 @@ static void chaitin_briggs(RegAllocator *ra, const ir_func_t *fn) {
         }
 
         if (target == -1) {
-            /* Spill: pick node with highest degree / lowest cost */
+            /* Spill: pick node with highest degree / lowest cost (cost = loop_depth_weight + ref_count) */
             int max_num = -1;
             int max_den = 1;
             for (i = 0; i < N; i++) {
                 if (!removed[i]) {
                     int num = degree[i];
-                    int den = ra->intervals[i].end - ra->intervals[i].start + 1;
+                    int den = ra->intervals[i].loop_depth_weight;
+                    if (den <= 0) den = ra->intervals[i].ref_count;
+                    if (den <= 0) den = 1;
                     if (max_num == -1 || num * max_den > max_num * den) {
                         max_num = num;
                         max_den = den;
