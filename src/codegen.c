@@ -2926,6 +2926,7 @@ int main(int argc, char **argv) {
 
     int has_trace_abi = 0;
     int has_emit_gguf = 0;
+    int has_frontend_dump = 0;
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--trace-abi") == 0) {
             has_trace_abi = 1;
@@ -2933,9 +2934,12 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--emit-gguf") == 0) {
             has_emit_gguf = 1;
         }
+        if (strcmp(argv[i], "--pp-only") == 0 || strcmp(argv[i], "--dump-ast-json") == 0) {
+            has_frontend_dump = 1;
+        }
     }
 
-    if ((is_zcc_c && !native_elf) || is_out_s || has_trace_abi || has_emit_gguf) {
+    if ((is_zcc_c && !native_elf) || is_out_s || has_trace_abi || has_emit_gguf || has_frontend_dump) {
         return zcc_main(argc, argv);
     }
 
