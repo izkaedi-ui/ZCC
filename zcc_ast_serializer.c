@@ -73,7 +73,8 @@ static void zcc_ast_json_node(FILE *out, Compiler *cc, Node *n, int depth);
 static int zcc_ast_node_has_children(Node *n) {
   return n && (n->lhs || n->rhs || n->cond || n->then_body || n->else_body ||
                n->init || n->inc || n->body || n->case_body || n->initializer ||
-               n->default_case || n->num_args || n->num_stmts || n->num_cases);
+               n->default_case || (n->args && n->num_args) ||
+               (n->stmts && n->num_stmts) || (n->cases && n->num_cases));
 }
 
 static void zcc_ast_json_array(FILE *out, Compiler *cc, Node **items, int count, int depth) {
@@ -122,9 +123,9 @@ static void zcc_ast_json_node(FILE *out, Compiler *cc, Node *n, int depth) {
     if (n->case_body) { zcc_json_field(out, &i, "case_body"); zcc_ast_json_node(out, cc, n->case_body, depth + 1); }
     if (n->initializer) { zcc_json_field(out, &i, "initializer"); zcc_ast_json_node(out, cc, n->initializer, depth + 1); }
     if (n->default_case) { zcc_json_field(out, &i, "default"); zcc_ast_json_node(out, cc, n->default_case, depth + 1); }
-    if (n->num_args) { zcc_json_field(out, &i, "args"); zcc_ast_json_array(out, cc, n->args, n->num_args, depth + 1); }
-    if (n->num_stmts) { zcc_json_field(out, &i, "stmts"); zcc_ast_json_array(out, cc, n->stmts, n->num_stmts, depth + 1); }
-    if (n->num_cases) { zcc_json_field(out, &i, "cases"); zcc_ast_json_array(out, cc, n->cases, n->num_cases, depth + 1); }
+    if (n->args && n->num_args) { zcc_json_field(out, &i, "args"); zcc_ast_json_array(out, cc, n->args, n->num_args, depth + 1); }
+    if (n->stmts && n->num_stmts) { zcc_json_field(out, &i, "stmts"); zcc_ast_json_array(out, cc, n->stmts, n->num_stmts, depth + 1); }
+    if (n->cases && n->num_cases) { zcc_json_field(out, &i, "cases"); zcc_ast_json_array(out, cc, n->cases, n->num_cases, depth + 1); }
     fputc('}', out);
   }
   fputc('}', out);

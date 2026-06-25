@@ -2858,6 +2858,9 @@ int main(int argc, char **argv) {
     char *ld_script = NULL;
     const char *obj_files[2048];
     int obj_count = 0;
+    int has_trace_abi = 0;
+    int has_emit_gguf = 0;
+    int has_frontend_dump = 0;
 
     /* Parse arguments */
     for (i = 1; i < argc; i++) {
@@ -2865,6 +2868,12 @@ int main(int argc, char **argv) {
             use_system_as = 1;
         } else if (strcmp(argv[i], "--native-elf") == 0) {
             native_elf = 1;
+        } else if (strcmp(argv[i], "--trace-abi") == 0) {
+            has_trace_abi = 1;
+        } else if (strcmp(argv[i], "--emit-gguf") == 0) {
+            has_emit_gguf = 1;
+        } else if (strcmp(argv[i], "--pp-only") == 0 || strcmp(argv[i], "--dump-ast-json") == 0) {
+            has_frontend_dump = 1;
         } else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "-emit-obj") == 0) {
             compile_only = 1;
         } else if (strcmp(argv[i], "-o") == 0) {
@@ -2921,21 +2930,6 @@ int main(int argc, char **argv) {
         int len = strlen(out_filename);
         if (len > 2 && strcmp(out_filename + len - 2, ".s") == 0) {
             is_out_s = 1;
-        }
-    }
-
-    int has_trace_abi = 0;
-    int has_emit_gguf = 0;
-    int has_frontend_dump = 0;
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--trace-abi") == 0) {
-            has_trace_abi = 1;
-        }
-        if (strcmp(argv[i], "--emit-gguf") == 0) {
-            has_emit_gguf = 1;
-        }
-        if (strcmp(argv[i], "--pp-only") == 0 || strcmp(argv[i], "--dump-ast-json") == 0) {
-            has_frontend_dump = 1;
         }
     }
 
