@@ -87,7 +87,10 @@ static void zcc_ast_json_node(FILE *out, Compiler *cc, Node *n, int depth) {
   if (n->label_name[0]) { zcc_json_field(out, &first, "label"); zcc_json_str(out, n->label_name); }
   if (n->kind == ND_NUM || n->kind == ND_CHAR_LIT) { zcc_json_field(out, &first, "int_val"); fprintf(out, "%lld", n->int_val); }
   if (n->kind == ND_FLIT) { zcc_json_field(out, &first, "float_val"); fprintf(out, "%.17g", n->f_val); }
-  if (n->kind == ND_STR && cc && n->str_id >= 0 && n->str_id < cc->num_strings) { zcc_json_field(out, &first, "string"); zcc_json_strn(out, cc->strings[n->str_id].data, cc->strings[n->str_id].len); }
+  if (n->kind == ND_STR && cc && n->str_id >= 0 && n->str_id < cc->num_strings) {
+    zcc_json_field(out, &first, "string");
+    zcc_json_strn(out, cc->strings[n->str_id].data, cc->strings[n->str_id].len);
+  }
   if (n->kind == ND_CASE) { zcc_json_field(out, &first, "case_val"); fprintf(out, "%lld", n->case_val); }
   if (n->kind == ND_COMPOUND_ASSIGN) { zcc_json_field(out, &first, "compound_op"); zcc_json_str(out, zcc_ast_kind_name(n->compound_op)); }
   if (n->func_params && n->num_params > 0) {

@@ -2018,7 +2018,11 @@ int zcc_main(int argc, char **argv) {
 
   /* open output */
   if (dump_ast_json) {
+#ifdef _WIN32
+    cc->out = fopen("nul", "w");
+#else
     cc->out = fopen("/dev/null", "w");
+#endif
   } else if (g_use_in_mem_asm) {
     cc->out = open_memstream(&g_in_mem_asm_buf, &g_in_mem_asm_size);
   } else {
