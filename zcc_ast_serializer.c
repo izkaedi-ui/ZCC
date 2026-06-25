@@ -2,6 +2,9 @@
 /* C AST JSON SERIALIZER                                             */
 /* ================================================================ */
 
+enum { ZCC_AST_JSON_MAX_DEPTH = 256 };
+
+/* Map Node kind enum values to stable JSON strings. */
 static const char *zcc_ast_kind_name(int kind) {
   switch (kind) {
     case ND_NUM: return "ND_NUM"; case ND_STR: return "ND_STR"; case ND_CHAR_LIT: return "ND_CHAR_LIT"; case ND_FLIT: return "ND_FLIT";
@@ -25,6 +28,7 @@ static const char *zcc_ast_kind_name(int kind) {
   return "ND_UNKNOWN";
 }
 
+/* Map Type kind enum values to stable JSON strings. */
 static const char *zcc_type_kind_name(int kind) {
   switch (kind) {
     case TY_VOID: return "TY_VOID"; case TY_CHAR: return "TY_CHAR"; case TY_UCHAR: return "TY_UCHAR"; case TY_SHORT: return "TY_SHORT";
@@ -36,6 +40,7 @@ static const char *zcc_type_kind_name(int kind) {
   return "TY_UNKNOWN";
 }
 
+/* Write a JSON-escaped string slice, including quote/backslash/control escapes. */
 static void zcc_json_strn(FILE *out, const char *s, int len) {
   int i; unsigned char c;
   fputc('"', out);
@@ -75,7 +80,7 @@ static void zcc_ast_json_array(FILE *out, Compiler *cc, Node **items, int count,
 static void zcc_ast_json_node(FILE *out, Compiler *cc, Node *n, int depth) {
   int first; int i;
   if (!n) { fputs("null", out); return; }
-  if (depth > 256) { fputs("{\"kind\":\"DEPTH_LIMIT\"}", out); return; }
+  if (depth > ZCC_AST_JSON_MAX_DEPTH) { fputs("{\"kind\":\"DEPTH_LIMIT\"}", out); return; }
   first = 1; fputc('{', out);
   zcc_json_field(out, &first, "kind"); zcc_json_str(out, zcc_ast_kind_name(n->kind));
   zcc_json_field(out, &first, "line"); fprintf(out, "%d", n->line);

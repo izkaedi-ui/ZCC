@@ -1951,7 +1951,11 @@ int zcc_main(int argc, char **argv) {
     }
   } else {
     if (pp_only || dump_ast_json) {
-      printf("zcc: %s is only valid for C sources\n", pp_only ? "--pp-only" : "--dump-ast-json");
+      if (pp_only && dump_ast_json) {
+        printf("zcc: --pp-only and --dump-ast-json are only valid for C sources\n");
+      } else {
+        printf("zcc: %s is only valid for C sources\n", pp_only ? "--pp-only" : "--dump-ast-json");
+      }
       free(source);
       return 1;
     }
@@ -2029,7 +2033,10 @@ int zcc_main(int argc, char **argv) {
     cc->out = fopen(asm_file, "w");
   }
   if (!cc->out) {
-    if (!enable_telemetry_stdout) printf("zcc: cannot write '%s'\n", asm_file);
+    if (!enable_telemetry_stdout) {
+      if (dump_ast_json) printf("zcc: cannot open null output sink for AST JSON\n");
+      else printf("zcc: cannot write '%s'\n", asm_file);
+    }
     free(source);
     free(cc);
     ir_telem_shutdown();
