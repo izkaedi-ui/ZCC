@@ -1273,8 +1273,7 @@ int zcc_main(int argc, char **argv) {
 
   int pp_only = 0;
   int dump_ast_json = 0;
-  const char *invalid_frontend_dump_flags = 0;
-  const char *ast_json_sink = 0;
+  const char *frontend_dump_flag_name = 0;
 
   int zcc_verbose_flag = 0;
 
@@ -1953,10 +1952,10 @@ int zcc_main(int argc, char **argv) {
     }
   } else {
     if (pp_only || dump_ast_json) {
-      if (pp_only && dump_ast_json) invalid_frontend_dump_flags = "--pp-only and --dump-ast-json";
-      else if (pp_only) invalid_frontend_dump_flags = "--pp-only";
-      else invalid_frontend_dump_flags = "--dump-ast-json";
-      printf("zcc: %s %s only valid for C sources\n", invalid_frontend_dump_flags, (pp_only && dump_ast_json) ? "are" : "is");
+      if (pp_only && dump_ast_json) frontend_dump_flag_name = "--pp-only and --dump-ast-json";
+      else if (pp_only) frontend_dump_flag_name = "--pp-only";
+      else frontend_dump_flag_name = "--dump-ast-json";
+      printf("zcc: %s can only be used with C sources\n", frontend_dump_flag_name);
       free(source);
       return 1;
     }
@@ -2006,43 +2005,35 @@ int zcc_main(int argc, char **argv) {
   if (getenv("ZCC_ERROR_UNSUPPORTED_ASM")) cc->error_unsupported_asm = 1;
   if (getenv("ZCC_ASM_REPORT"))           cc->asm_report = 1;
 
-  /* generate asm file name */
-  strncpy(asm_file, output_file, 250);
-  al = 0;
-  while (asm_file[al])
-    al++;
-
   stop_at_asm = 0;
-  if (al >= 2 && asm_file[al - 2] == '.' && asm_file[al - 1] == 's') {
-    stop_at_asm = 1;
-  } else {
-    asm_file[al] = '.';
-    asm_file[al + 1] = 's';
-    asm_file[al + 2] = 0;
-  }
+  if (!dump_ast_json) {
+    /* generate asm file name */
+    strncpy(asm_file, output_file, 250);
+    al = 0;
+    while (asm_file[al])
+      al++;
 
-  /* open output */
-  if (dump_ast_json) {
-#ifdef _WIN32
-    ast_json_sink = "nul";
-#else
-    ast_json_sink = "/dev/null";
-#endif
-    cc->out = fopen(ast_json_sink, "w");
-  } else if (g_use_in_mem_asm) {
-    cc->out = open_memstream(&g_in_mem_asm_buf, &g_in_mem_asm_size);
-  } else {
-    cc->out = fopen(asm_file, "w");
-  }
-  if (!cc->out) {
-    if (!enable_telemetry_stdout) {
-      if (dump_ast_json) printf("zcc: failed to initialize AST JSON output\n");
-      else printf("zcc: cannot write '%s'\n", asm_file);
+    if (al >= 2 && asm_file[al - 2] == '.' && asm_file[al - 1] == 's') {
+      stop_at_asm = 1;
+    } else {
+      asm_file[al] = '.';
+      asm_file[al + 1] = 's';
+      asm_file[al + 2] = 0;
     }
-    free(source);
-    free(cc);
-    ir_telem_shutdown();
-    return 1;
+
+    /* open output */
+    if (g_use_in_mem_asm) {
+      cc->out = open_memstream(&g_in_mem_asm_buf, &g_in_mem_asm_size);
+    } else {
+      cc->out = fopen(asm_file, "w");
+    }
+    if (!cc->out) {
+      if (!enable_telemetry_stdout) printf("zcc: cannot write '%s'\n", asm_file);
+      free(source);
+      free(cc);
+      ir_telem_shutdown();
+      return 1;
+    }
   }
 
   /* lex first token */
@@ -2073,7 +2064,7 @@ int zcc_main(int argc, char **argv) {
   if (cc->errors > 0) {
     if (!enable_telemetry_stdout && !trace_abi_mode && !dump_ast_json) printf("\033[0;31mFAILED\033[0m\n");
     if (!enable_telemetry_stdout && !trace_abi_mode && !dump_ast_json) printf("zcc: %d error(s)\n", cc->errors);
-    fclose(cc->out);
+    if (cc->out) fclose(cc->out);
     free(source);
     free(cc);
     ir_telem_shutdown();
@@ -2084,7 +2075,6 @@ int zcc_main(int argc, char **argv) {
 
   if (dump_ast_json) {
     zcc_serialize_ast_json(stdout, cc, prog);
-    fclose(cc->out);
     free(source);
     free(cc);
     ir_telem_shutdown();
