@@ -1953,7 +1953,9 @@ int zcc_main(int argc, char **argv) {
     }
   } else {
     if (pp_only || dump_ast_json) {
-      invalid_frontend_dump_flags = pp_only ? (dump_ast_json ? "--pp-only and --dump-ast-json" : "--pp-only") : "--dump-ast-json";
+      if (pp_only && dump_ast_json) invalid_frontend_dump_flags = "--pp-only and --dump-ast-json";
+      else if (pp_only) invalid_frontend_dump_flags = "--pp-only";
+      else invalid_frontend_dump_flags = "--dump-ast-json";
       printf("zcc: %s %s only valid for C sources\n", invalid_frontend_dump_flags, (pp_only && dump_ast_json) ? "are" : "is");
       free(source);
       return 1;
@@ -2034,7 +2036,7 @@ int zcc_main(int argc, char **argv) {
   }
   if (!cc->out) {
     if (!enable_telemetry_stdout) {
-      if (dump_ast_json) printf("zcc: failed to open AST JSON output stream '%s'\n", ast_json_sink ? ast_json_sink : "<null>");
+      if (dump_ast_json) printf("zcc: failed to initialize AST JSON output\n");
       else printf("zcc: cannot write '%s'\n", asm_file);
     }
     free(source);

@@ -61,7 +61,7 @@ static void zcc_json_field(FILE *out, int *first, const char *name) { if (!*firs
 
 static void zcc_ast_json_type(FILE *out, Type *t) {
   if (!t) { fputs("null", out); return; }
-  fprintf(out, "{\"kind\":"); zcc_json_str(out, zcc_type_kind_name(t->kind));
+  fputc('{', out); fputs("\"kind\":", out); zcc_json_str(out, zcc_type_kind_name(t->kind));
   fprintf(out, ",\"size\":%d,\"align\":%d", t->size, t->align);
   if (t->base) { fprintf(out, ",\"base\":"); zcc_json_str(out, zcc_type_kind_name(t->base->kind)); }
   if (t->array_len) fprintf(out, ",\"array_len\":%d", t->array_len);
