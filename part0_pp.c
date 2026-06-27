@@ -158,6 +158,7 @@ static const char *zcc_stddef_text =
     "typedef long ptrdiff_t;\n"
     "typedef long intptr_t;\n"
     "typedef unsigned long uintptr_t;\n"
+    "typedef struct { long fds_bits[16]; } fd_set;\n"
     "/* PP-STUB-024: signal.h / setjmp.h / stdint primitives for Lua internals "
     "*/\n"
     "typedef int sig_atomic_t;\n"
@@ -594,6 +595,7 @@ static void pp_read_line(PPState *state, char *buf, int max) {
 static void pp_read_macro_body(PPState *state, PPMacro *m, int max_limit) {
   int i = 0;
   int in_comment = 0;
+  int in_string = 0;
   if (!m->body) {
     m->body_cap = 256;
     m->body = (char *)calloc(1, m->body_cap);
@@ -611,7 +613,7 @@ static void pp_read_macro_body(PPState *state, PPMacro *m, int max_limit) {
       exit(1);
     }
     char c = pp_peek(state);
-    if ((c == '\n' || c == '\r') && !in_comment)
+    if ((c == '\n' || c == '\r') && !in_comment && !in_string)
       break;
     if (pp_is_line_continuation(state)) {
       pp_next(state);
@@ -619,12 +621,27 @@ static void pp_read_macro_body(PPState *state, PPMacro *m, int max_limit) {
         pp_next(state);
       continue;
     }
-    if (!in_comment && c == '/' && state->src[state->pos + 1] == '/') {
+    if (!in_comment) {
+      if (in_string) {
+        if (c == '\\') {
+          m->body[i++] = pp_next(state);
+          if (pp_peek(state) != 0) {
+            m->body[i++] = pp_next(state);
+          }
+          continue;
+        } else if (c == in_string) {
+          in_string = 0;
+        }
+      } else if (c == '"' || c == '\'') {
+        in_string = c;
+      }
+    }
+    if (!in_comment && !in_string && c == '/' && state->src[state->pos + 1] == '/') {
       while (pp_peek(state) != '\n' && pp_peek(state) != 0)
         pp_next(state);
       break;
     }
-    if (!in_comment && c == '/' && state->src[state->pos + 1] == '*') {
+    if (!in_comment && !in_string && c == '/' && state->src[state->pos + 1] == '*') {
       in_comment = 1;
       pp_next(state);
       pp_next(state);
