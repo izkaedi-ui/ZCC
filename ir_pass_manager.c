@@ -1066,8 +1066,8 @@ static void ir_snapshot_state(ir_func_t *fn, const char *pass_name) {
 #define CCP_CYCLE_GUARD  64
 
 typedef struct {
-    char from[32];
-    char to[32];
+    char from[IR_NAME_MAX];
+    char to[IR_NAME_MAX];
 } ccp_copy_entry_t;
 
 static ccp_copy_entry_t s_copy_map[CCP_COPY_MAP_MAX];
@@ -1081,16 +1081,16 @@ static void copy_map_add(const char *from, const char *to) {
     int i;
     for (i = 0; i < s_copy_map_count; i++) {
         if (strcmp(s_copy_map[i].from, from) == 0) {
-            strncpy(s_copy_map[i].to, to, 31);
-            s_copy_map[i].to[31] = '\0';
+            strncpy(s_copy_map[i].to, to, IR_NAME_MAX - 1);
+            s_copy_map[i].to[IR_NAME_MAX - 1] = '\0';
             return;
         }
     }
     if (s_copy_map_count >= CCP_COPY_MAP_MAX) return;
-    strncpy(s_copy_map[s_copy_map_count].from, from, 31);
-    s_copy_map[s_copy_map_count].from[31] = '\0';
-    strncpy(s_copy_map[s_copy_map_count].to, to, 31);
-    s_copy_map[s_copy_map_count].to[31] = '\0';
+    strncpy(s_copy_map[s_copy_map_count].from, from, IR_NAME_MAX - 1);
+    s_copy_map[s_copy_map_count].from[IR_NAME_MAX - 1] = '\0';
+    strncpy(s_copy_map[s_copy_map_count].to, to, IR_NAME_MAX - 1);
+    s_copy_map[s_copy_map_count].to[IR_NAME_MAX - 1] = '\0';
     s_copy_map_count++;
 }
 
