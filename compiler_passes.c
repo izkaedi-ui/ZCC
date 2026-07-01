@@ -7059,6 +7059,8 @@ void run_all_passes(Function *fn, PassResult *result, const char *profile_path,
 #define N_PHYS_REGS 7
 static const char *const phys_reg_name[N_PHYS_REGS] = {
     "rbx", "r10", "r11", "r12", "r13", "r14", "r15"};
+static const char *const phys_reg_name32[N_PHYS_REGS] = {
+    "ebx", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d"};
 #define PHYS_CALLEE_SAVED_MASK                                                 \
   ((1 << 0) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6)) /* rbx, r12-r15 */
 static const int callee_saved_push_order[5] = {0, 3, 4, 5,
@@ -7447,7 +7449,10 @@ static void ir_asm_load_to_rcx_typed(IRAsmCtx *ctx, RegID r, IRType t) {
   int slot;
   int p = ir_asm_vreg_location(ctx, r, &slot);
   if (p >= 0) {
-    fprintf(f, "    movq %%%s, %%rcx\n", phys_reg_name[p]);
+    if (t == IR_TY_I32 || t == IR_TY_U32)
+      fprintf(f, "    movl %%%s, %%ecx\n", phys_reg_name32[p]);
+    else
+      fprintf(f, "    movq %%%s, %%rcx\n", phys_reg_name[p]);
   } else if (t == IR_TY_I32 || t == IR_TY_U32) {
     fprintf(f, "    movl %d(%%rbp), %%ecx\n", slot);
   } else {
