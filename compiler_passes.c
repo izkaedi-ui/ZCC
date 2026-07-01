@@ -7059,6 +7059,7 @@ void run_all_passes(Function *fn, PassResult *result, const char *profile_path,
 #define N_PHYS_REGS 7
 static const char *const phys_reg_name[N_PHYS_REGS] = {
     "rbx", "r10", "r11", "r12", "r13", "r14", "r15"};
+/* Keep in sync with phys_reg_name above. */
 static const char *const phys_reg_name32[N_PHYS_REGS] = {
     "ebx", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d"};
 #define PHYS_CALLEE_SAVED_MASK                                                 \

@@ -218,7 +218,7 @@ static void emit_ir_const_result(Type *type, long long value, int line) {
 
 static void emit_zero_result(Compiler *cc, Type *type, int line) {
   if (backend_ops)
-    fprintf(cc->out, "    movs r0, #0\n");
+    fprintf(cc->out, "    mov r0, #0\n");
   else
     fprintf(cc->out, "    movq $0, %%rax\n");
   emit_ir_const_result(type, 0, line);
