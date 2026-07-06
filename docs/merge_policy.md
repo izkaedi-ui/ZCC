@@ -20,10 +20,13 @@ Applies to: `main` and protected release branches
 Promotion rule: monitored checks become required after 14 consecutive days stable and threshold-compliant.
 
 ## Pull request requirements
+- Direct pushes to `main` are strictly prohibited. All changes must be merged via pull requests.
+- Required check `validate` and all active QEC checks must pass prior to merge.
 - At least 1 approval (2 recommended for high-risk changes).
 - Branch up to date with base before merge.
 - Stale approvals dismissed on new commits.
 - Force-push and branch deletion disabled on protected branches.
+- Bypassing branch protections is treated as a governance incident requiring incident sync logging.
 
 ## Determinism policy
 Any required determinism failure blocks merge until:
